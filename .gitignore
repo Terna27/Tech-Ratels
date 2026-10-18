@@ -47,3 +47,7 @@ node_modules/
 # OS
 .DS_Store
 Thumbs.db
+
+# Include frontend source libraries
+!apps/web/src/lib/
+!apps/web/src/lib/**
