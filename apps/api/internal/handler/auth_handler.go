@@ -98,6 +98,10 @@ func (h *AuthHandler) Login(w http.ResponseWriter, r *http.Request) {
 	csrfToken := security.GenerateUUID()
 	isSecure := r.TLS != nil || r.Header.Get("X-Forwarded-Proto") == "https" || strings.ToLower(h.cfg.Environment) == "production"
 	maxAge := h.cfg.JWTExpiryHours * 3600
+	sameSite := http.SameSiteLaxMode
+	if isSecure {
+		sameSite = http.SameSiteNoneMode
+	}
 
 	// Set HttpOnly browser session cookie
 	http.SetCookie(w, &http.Cookie{
@@ -106,7 +110,7 @@ func (h *AuthHandler) Login(w http.ResponseWriter, r *http.Request) {
 		Path:     "/",
 		HttpOnly: true,
 		Secure:   isSecure,
-		SameSite: http.SameSiteLaxMode,
+		SameSite: sameSite,
 		MaxAge:   maxAge,
 		Expires:  time.Now().Add(time.Duration(h.cfg.JWTExpiryHours) * time.Hour),
 	})
@@ -118,7 +122,7 @@ func (h *AuthHandler) Login(w http.ResponseWriter, r *http.Request) {
 		Path:     "/",
 		HttpOnly: false,
 		Secure:   isSecure,
-		SameSite: http.SameSiteLaxMode,
+		SameSite: sameSite,
 		MaxAge:   maxAge,
 		Expires:  time.Now().Add(time.Duration(h.cfg.JWTExpiryHours) * time.Hour),
 	})
@@ -136,6 +140,10 @@ func (h *AuthHandler) Logout(w http.ResponseWriter, r *http.Request) {
 	}
 
 	isSecure := r.TLS != nil || r.Header.Get("X-Forwarded-Proto") == "https" || strings.ToLower(h.cfg.Environment) == "production"
+	sameSite := http.SameSiteLaxMode
+	if isSecure {
+		sameSite = http.SameSiteNoneMode
+	}
 
 	// Invalidate session cookie
 	http.SetCookie(w, &http.Cookie{
@@ -144,7 +152,7 @@ func (h *AuthHandler) Logout(w http.ResponseWriter, r *http.Request) {
 		Path:     "/",
 		HttpOnly: true,
 		Secure:   isSecure,
-		SameSite: http.SameSiteLaxMode,
+		SameSite: sameSite,
 		MaxAge:   -1,
 		Expires:  time.Unix(0, 0),
 	})
@@ -156,7 +164,7 @@ func (h *AuthHandler) Logout(w http.ResponseWriter, r *http.Request) {
 		Path:     "/",
 		HttpOnly: false,
 		Secure:   isSecure,
-		SameSite: http.SameSiteLaxMode,
+		SameSite: sameSite,
 		MaxAge:   -1,
 		Expires:  time.Unix(0, 0),
 	})

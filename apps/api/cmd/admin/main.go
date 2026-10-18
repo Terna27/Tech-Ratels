@@ -60,12 +60,16 @@ func main() {
 	dbURL := cfg.DatabaseURL
 	if *dbURLFlag != "" {
 		dbURL = *dbURLFlag
+		cfg.DatabaseURL = dbURL
+	}
+	if err := cfg.Validate(); err != nil {
+		log.Fatalf("Fatal configuration error: %v\n", err)
 	}
 
 	ctx := context.Background()
 	pool, err := pgxpool.New(ctx, dbURL)
 	if err != nil {
-		log.Fatalf("Database connection failed: %v\n", err)
+		log.Fatalf("Database connection failed: %v\n", security.RedactError(err, dbURL))
 	}
 	defer pool.Close()
 

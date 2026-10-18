@@ -19,8 +19,9 @@ if ! pg_isready -h 127.0.0.1 -p 5432 -q; then
     fi
 fi
 
-# Ensure test database exists and is migrated
-createdb -h 127.0.0.1 -p 5432 -U postgres ratels_test 2>/dev/null || true
+# Ensure test database exists and is migrated cleanly
+dropdb -h 127.0.0.1 -p 5432 -U postgres ratels_test 2>/dev/null || true
+createdb -h 127.0.0.1 -p 5432 -U postgres ratels_test
 goose -dir "${ROOT_DIR}/apps/api/migrations" postgres "postgres://postgres@127.0.0.1:5432/ratels_test?sslmode=disable" up
 
 # Run seeds on test DB

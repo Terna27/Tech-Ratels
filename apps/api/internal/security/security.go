@@ -42,12 +42,12 @@ func GenerateJTI() string {
 }
 
 func GenerateMembershipReference() string {
-	val, err := rand.Int(rand.Reader, big.NewInt(900000))
-	num := 100000
+	val, err := rand.Int(rand.Reader, big.NewInt(90000000))
+	num := int64(10000000)
 	if err == nil {
-		num = int(val.Int64()) + 100000
+		num = val.Int64() + 10000000
 	}
-	return fmt.Sprintf("RATEL-%d-%06d", time.Now().Year(), num)
+	return fmt.Sprintf("RATEL-%d-%08d", time.Now().Year(), num)
 }
 
 func GenerateVerificationCode() string {

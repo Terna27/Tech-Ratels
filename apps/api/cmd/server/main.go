@@ -16,18 +16,23 @@ import (
 	"ratels-api/internal/delivery"
 	"ratels-api/internal/handler"
 	"ratels-api/internal/repository"
+	"ratels-api/internal/security"
 	"ratels-api/internal/service"
 )
 
 func main() {
 	cfg := config.Load()
+	if err := cfg.Validate(); err != nil {
+		log.Fatalf("Fatal configuration error: %v\n", err)
+	}
+
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 
-	log.Printf("Connecting to PostgreSQL at: %s ...\n", cfg.DatabaseURL)
+	log.Println("Connecting to PostgreSQL...")
 	poolConfig, err := pgxpool.ParseConfig(cfg.DatabaseURL)
 	if err != nil {
-		log.Fatalf("Invalid DATABASE_URL: %v\n", err)
+		log.Fatalf("Invalid database connection configuration: %v\n", security.RedactError(err, cfg.DatabaseURL))
 	}
 	poolConfig.MaxConns = 25
 	poolConfig.MinConns = 5
@@ -36,12 +41,12 @@ func main() {
 
 	pool, err := pgxpool.NewWithConfig(ctx, poolConfig)
 	if err != nil {
-		log.Fatalf("Unable to connect to database: %v\n", err)
+		log.Fatalf("Unable to connect to database: %v\n", security.RedactError(err, cfg.DatabaseURL))
 	}
 	defer pool.Close()
 
 	if err := pool.Ping(ctx); err != nil {
-		log.Fatalf("Database ping failed: %v\n", err)
+		log.Fatalf("Database ping failed: %v\n", security.RedactError(err, cfg.DatabaseURL))
 	}
 	log.Println("PostgreSQL connection established successfully.")
 

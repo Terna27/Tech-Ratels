@@ -100,40 +100,51 @@ body {
     border: none !important;
   }
 
-  /* Table print optimization: repeated headers, prevent page breaks inside rows */
+  /* Table print optimization: repeated headers, unclipped columns, prevent page breaks inside rows */
   table {
     width: 100% !important;
+    max-width: 100% !important;
     border-collapse: collapse !important;
     page-break-inside: auto;
+    break-inside: auto;
+    table-layout: auto !important;
   }
 
   thead {
-    display: table-header-group; /* Repeat headers across printed pages */
+    display: table-header-group !important; /* Repeat headers across printed pages */
   }
 
   tr {
-    page-break-inside: avoid;
+    page-break-inside: avoid !important;
+    break-inside: avoid !important;
     page-break-after: auto;
+    break-after: auto;
   }
 
   th, td {
     border: 1px solid #d1d5db !important;
-    padding: 5pt 7pt !important;
+    padding: 4pt 6pt !important;
     color: #111827 !important;
-    font-size: 9.5pt !important;
+    font-size: 8.5pt !important;
+    white-space: normal !important;
+    word-break: break-word !important;
+    overflow-wrap: break-word !important;
   }
 
   /* Print header display */
   .print-only {
     display: block !important;
+    page-break-inside: avoid !important;
+    break-inside: avoid !important;
   }
 
   /* Ensure card borders look clean and unshadowed in print */
   .card, .print-card {
     border: 1px solid #e5e7eb !important;
     box-shadow: none !important;
-    page-break-inside: avoid;
-    margin-bottom: 12pt !important;
+    page-break-inside: avoid !important;
+    break-inside: avoid !important;
+    margin-bottom: 10pt !important;
   }
 }
 

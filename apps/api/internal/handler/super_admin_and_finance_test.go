@@ -421,6 +421,212 @@ func TestFinancialStatement_ReconciliationAndCSV(t *testing.T) {
 	}
 }
 
+func TestSuperAdminFinancialDocumentation_AuthorityAndUnauthorizedBoundaries(t *testing.T) {
+	h := setupTestHarness(t)
+	defer h.Cleanup()
+
+	_, superAdminToken := createTestUserWithRole(t, h, "doc_sa", "Super Admin", "super_admin")
+	_, natAdminToken := createTestUserWithRole(t, h, "doc_nat", "National Admin", "national_admin")
+	staffID, staffToken := createTestUserWithRole(t, h, "doc_staff", "Finance Staff", "member")
+	_, memberToken := createTestUserWithRole(t, h, "doc_mem", "Ordinary Member", "member")
+
+	// Super Admin authorizes staff member with 'submitter' access
+	authPayload := map[string]interface{}{
+		"user_id":      staffID,
+		"access_level": "submitter",
+		"notes":        "Authorized financial submitter",
+	}
+	authBytes, _ := json.Marshal(authPayload)
+	req, _ := http.NewRequest("POST", "/api/v1/finance/authorizations", bytes.NewBuffer(authBytes))
+	req.Header.Set("Authorization", "Bearer "+superAdminToken)
+	req.Header.Set("Content-Type", "application/json")
+	rr := httptest.NewRecorder()
+	h.Router.ServeHTTP(rr, req)
+	if rr.Code != http.StatusCreated {
+		t.Fatalf("Failed to authorize staff: %d", rr.Code)
+	}
+
+	// 1. Create a pending transaction
+	txPayload := map[string]interface{}{
+		"idempotency_key":     fmt.Sprintf("doc-auth-tx-%d", time.Now().UnixNano()),
+		"transaction_type":    "confirmed_donation",
+		"amount":              5000000,
+		"currency":            "NGN",
+		"destination_fund_id": "foundation_donation_fund",
+		"notes":               "Test pending donation for approval authorization boundaries",
+		"auto_post":           false,
+	}
+	txBytes, _ := json.Marshal(txPayload)
+	req, _ = http.NewRequest("POST", "/api/v1/finance/transactions", bytes.NewBuffer(txBytes))
+	req.Header.Set("Authorization", "Bearer "+superAdminToken)
+	req.Header.Set("Content-Type", "application/json")
+	rr = httptest.NewRecorder()
+	h.Router.ServeHTTP(rr, req)
+	if rr.Code != http.StatusCreated {
+		t.Fatalf("Failed to create pending transaction: %d: %s", rr.Code, rr.Body.String())
+	}
+	var createdTx map[string]interface{}
+	_ = json.Unmarshal(rr.Body.Bytes(), &createdTx)
+	txID := createdTx["id"].(string)
+
+	// --- SECTION A: APPROVAL BOUNDARIES (Only Super Admin can approve/finalize) ---
+	// A1. Member attempts to approve transaction -> 403 Forbidden
+	req, _ = http.NewRequest("POST", fmt.Sprintf("/api/v1/finance/transactions/%s/approve", txID), nil)
+	req.Header.Set("Authorization", "Bearer "+memberToken)
+	rr = httptest.NewRecorder()
+	h.Router.ServeHTTP(rr, req)
+	if rr.Code != http.StatusForbidden {
+		t.Errorf("Expected 403 Forbidden for Member approving transaction, got %d", rr.Code)
+	}
+
+	// A2. National Admin attempts to approve transaction -> 403 Forbidden
+	req, _ = http.NewRequest("POST", fmt.Sprintf("/api/v1/finance/transactions/%s/approve", txID), nil)
+	req.Header.Set("Authorization", "Bearer "+natAdminToken)
+	rr = httptest.NewRecorder()
+	h.Router.ServeHTTP(rr, req)
+	if rr.Code != http.StatusForbidden {
+		t.Errorf("Expected 403 Forbidden for National Admin approving transaction, got %d", rr.Code)
+	}
+
+	// A3. Submitter/Staff member attempts to approve transaction -> 403 Forbidden
+	req, _ = http.NewRequest("POST", fmt.Sprintf("/api/v1/finance/transactions/%s/approve", txID), nil)
+	req.Header.Set("Authorization", "Bearer "+staffToken)
+	rr = httptest.NewRecorder()
+	h.Router.ServeHTTP(rr, req)
+	if rr.Code != http.StatusForbidden {
+		t.Errorf("Expected 403 Forbidden for Finance Staff approving transaction, got %d", rr.Code)
+	}
+
+	// A4. Super Admin approves transaction -> 200 OK
+	req, _ = http.NewRequest("POST", fmt.Sprintf("/api/v1/finance/transactions/%s/approve", txID), nil)
+	req.Header.Set("Authorization", "Bearer "+superAdminToken)
+	rr = httptest.NewRecorder()
+	h.Router.ServeHTTP(rr, req)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("Expected 200 OK for Super Admin approving transaction, got %d: %s", rr.Code, rr.Body.String())
+	}
+
+	// --- SECTION B: REVERSAL / CORRECTION BOUNDARIES (Only Super Admin can reverse) ---
+	// B1. Member attempts to reverse transaction -> 403 Forbidden
+	revBody := bytes.NewBufferString(`{"reason":"Unauthorized reversal attempt"}`)
+	req, _ = http.NewRequest("POST", fmt.Sprintf("/api/v1/finance/transactions/%s/reverse", txID), revBody)
+	req.Header.Set("Authorization", "Bearer "+memberToken)
+	req.Header.Set("Content-Type", "application/json")
+	rr = httptest.NewRecorder()
+	h.Router.ServeHTTP(rr, req)
+	if rr.Code != http.StatusForbidden {
+		t.Errorf("Expected 403 Forbidden for Member reversing transaction, got %d", rr.Code)
+	}
+
+	// B2. National Admin attempts to reverse transaction -> 403 Forbidden
+	revBody = bytes.NewBufferString(`{"reason":"National admin reversal attempt"}`)
+	req, _ = http.NewRequest("POST", fmt.Sprintf("/api/v1/finance/transactions/%s/reverse", txID), revBody)
+	req.Header.Set("Authorization", "Bearer "+natAdminToken)
+	req.Header.Set("Content-Type", "application/json")
+	rr = httptest.NewRecorder()
+	h.Router.ServeHTTP(rr, req)
+	if rr.Code != http.StatusForbidden {
+		t.Errorf("Expected 403 Forbidden for National Admin reversing transaction, got %d", rr.Code)
+	}
+
+	// B3. Finance Staff attempts to reverse transaction -> 403 Forbidden
+	revBody = bytes.NewBufferString(`{"reason":"Staff reversal attempt"}`)
+	req, _ = http.NewRequest("POST", fmt.Sprintf("/api/v1/finance/transactions/%s/reverse", txID), revBody)
+	req.Header.Set("Authorization", "Bearer "+staffToken)
+	req.Header.Set("Content-Type", "application/json")
+	rr = httptest.NewRecorder()
+	h.Router.ServeHTTP(rr, req)
+	if rr.Code != http.StatusForbidden {
+		t.Errorf("Expected 403 Forbidden for Finance Staff reversing transaction, got %d", rr.Code)
+	}
+
+	// B4. Super Admin reverses transaction -> 200 OK
+	revBody = bytes.NewBufferString(`{"reason":"Legitimate corrective reversal by Super Admin"}`)
+	req, _ = http.NewRequest("POST", fmt.Sprintf("/api/v1/finance/transactions/%s/reverse", txID), revBody)
+	req.Header.Set("Authorization", "Bearer "+superAdminToken)
+	req.Header.Set("Content-Type", "application/json")
+	rr = httptest.NewRecorder()
+	h.Router.ServeHTTP(rr, req)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("Expected 200 OK for Super Admin reversing transaction, got %d: %s", rr.Code, rr.Body.String())
+	}
+
+	// --- SECTION C: UNAUTHORIZED FINANCIAL RECORD, STATEMENT & EXPORT ACCESS ---
+	// C1. Member attempts to access statement -> 403 Forbidden
+	req, _ = http.NewRequest("GET", "/api/v1/finance/statement", nil)
+	req.Header.Set("Authorization", "Bearer "+memberToken)
+	rr = httptest.NewRecorder()
+	h.Router.ServeHTTP(rr, req)
+	if rr.Code != http.StatusForbidden {
+		t.Errorf("Expected 403 Forbidden for Member accessing statement, got %d", rr.Code)
+	}
+
+	// C2. Un-cleared National Admin attempts to access statement -> 403 Forbidden
+	req, _ = http.NewRequest("GET", "/api/v1/finance/statement", nil)
+	req.Header.Set("Authorization", "Bearer "+natAdminToken)
+	rr = httptest.NewRecorder()
+	h.Router.ServeHTTP(rr, req)
+	if rr.Code != http.StatusForbidden {
+		t.Errorf("Expected 403 Forbidden for un-cleared National Admin accessing statement, got %d", rr.Code)
+	}
+
+	// C3. Member attempts CSV export -> 403 Forbidden
+	req, _ = http.NewRequest("GET", "/api/v1/finance/export", nil)
+	req.Header.Set("Authorization", "Bearer "+memberToken)
+	rr = httptest.NewRecorder()
+	h.Router.ServeHTTP(rr, req)
+	if rr.Code != http.StatusForbidden {
+		t.Errorf("Expected 403 Forbidden for Member accessing export, got %d", rr.Code)
+	}
+
+	// C4. Member attempts CSV export path /export/csv -> 403 Forbidden
+	req, _ = http.NewRequest("GET", "/api/v1/finance/export/csv", nil)
+	req.Header.Set("Authorization", "Bearer "+memberToken)
+	rr = httptest.NewRecorder()
+	h.Router.ServeHTTP(rr, req)
+	if rr.Code != http.StatusForbidden {
+		t.Errorf("Expected 403 Forbidden for Member accessing export/csv, got %d", rr.Code)
+	}
+
+	// C5. Un-cleared National Admin attempts CSV export -> 403 Forbidden
+	req, _ = http.NewRequest("GET", "/api/v1/finance/export", nil)
+	req.Header.Set("Authorization", "Bearer "+natAdminToken)
+	rr = httptest.NewRecorder()
+	h.Router.ServeHTTP(rr, req)
+	if rr.Code != http.StatusForbidden {
+		t.Errorf("Expected 403 Forbidden for un-cleared National Admin accessing export, got %d", rr.Code)
+	}
+
+	// C6. Member attempts to access transaction voucher detail -> 403 Forbidden
+	req, _ = http.NewRequest("GET", fmt.Sprintf("/api/v1/finance/transactions/%s", txID), nil)
+	req.Header.Set("Authorization", "Bearer "+memberToken)
+	rr = httptest.NewRecorder()
+	h.Router.ServeHTTP(rr, req)
+	if rr.Code != http.StatusForbidden {
+		t.Errorf("Expected 403 Forbidden for Member accessing transaction detail, got %d", rr.Code)
+	}
+
+	// C7. Un-cleared National Admin attempts to access transaction voucher detail -> 403 Forbidden
+	req, _ = http.NewRequest("GET", fmt.Sprintf("/api/v1/finance/transactions/%s", txID), nil)
+	req.Header.Set("Authorization", "Bearer "+natAdminToken)
+	rr = httptest.NewRecorder()
+	h.Router.ServeHTTP(rr, req)
+	if rr.Code != http.StatusForbidden {
+		t.Errorf("Expected 403 Forbidden for un-cleared National Admin accessing transaction detail, got %d", rr.Code)
+	}
+
+	// --- SECTION D: UNAUTHORIZED STAFF CLEARANCE GRANTS ---
+	// D1. National Admin attempts to grant financial authorization -> 403 Forbidden
+	req, _ = http.NewRequest("POST", "/api/v1/finance/authorizations", bytes.NewBuffer(authBytes))
+	req.Header.Set("Authorization", "Bearer "+natAdminToken)
+	req.Header.Set("Content-Type", "application/json")
+	rr = httptest.NewRecorder()
+	h.Router.ServeHTTP(rr, req)
+	if rr.Code != http.StatusForbidden {
+		t.Errorf("Expected 403 Forbidden for National Admin granting financial authorizations, got %d", rr.Code)
+	}
+}
+
 func min(a, b int) int {
 	if a < b {
 		return a

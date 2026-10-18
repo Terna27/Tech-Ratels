@@ -22,7 +22,7 @@ import {
   Building,
 } from "lucide-react";
 import { useAuth } from "@/lib/auth-context";
-import { apiRequest } from "@/lib/api";
+import { apiRequest, API_BASE } from "@/lib/api";
 import {
   FinancialFund,
   FinancialTransaction,
@@ -241,9 +241,8 @@ export default function AdminFinancePage() {
     if (startDate) params.append("start_date", new Date(startDate).toISOString());
     if (endDate) params.append("end_date", new Date(endDate).toISOString());
 
-    const apiBase = process.env.NEXT_PUBLIC_API_URL || "http://127.0.0.1:8000/api/v1";
     const token = sessionStorage.getItem("ratels_auth_token");
-    const downloadUrl = `${apiBase}/finance/export?${params.toString()}`;
+    const downloadUrl = `${API_BASE}/finance/export?${params.toString()}`;
 
     // Direct authenticated fetch and download
     fetch(downloadUrl, {

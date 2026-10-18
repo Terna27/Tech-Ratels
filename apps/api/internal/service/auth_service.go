@@ -130,61 +130,69 @@ func (s *AuthService) Register(ctx context.Context, req RegisterRequest) (*Regis
 	}
 
 	userID := security.GenerateUUID()
-	memRef := security.GenerateMembershipReference()
-
 	var createdUser db.User
-	err = s.repo.WithTx(ctx, func(q *db.Queries) error {
-		u, err := q.CreateUser(ctx, db.CreateUserParams{
-			ID:                  userID,
-			Email:               TextFromString(email),
-			Phone:               TextFromString(phone),
-			PasswordHash:        pwHash,
-			DisplayName:         req.DisplayName,
-			MembershipReference: memRef,
-			Status:              "pending_verification",
-			PrimaryRole:         "member", // Strictly forced to member
-			IsVerified:          false,
+	for attempt := 0; attempt < 5; attempt++ {
+		memRef := security.GenerateMembershipReference()
+		err = s.repo.WithTx(ctx, func(q *db.Queries) error {
+			u, err := q.CreateUser(ctx, db.CreateUserParams{
+				ID:                  userID,
+				Email:               TextFromString(email),
+				Phone:               TextFromString(phone),
+				PasswordHash:        pwHash,
+				DisplayName:         req.DisplayName,
+				MembershipReference: memRef,
+				Status:              "pending_verification",
+				PrimaryRole:         "member", // Strictly forced to member
+				IsVerified:          false,
+			})
+			if err != nil {
+				return err
+			}
+			createdUser = u
+
+			// Create default profile
+			_, err = q.CreateMemberProfile(ctx, db.CreateMemberProfileParams{
+				ID:             security.GenerateUUID(),
+				UserID:         userID,
+				HomeStateID:    Text(req.HomeStateID),
+				HomeLgaID:      Text(req.HomeLGAID),
+				IsPublicBadges: true,
+			})
+			if err != nil {
+				return err
+			}
+
+			// Generate 6-digit OTP
+			otpCode := security.GenerateVerificationCode()
+			identifier := email
+			if identifier == "" {
+				identifier = phone
+			}
+
+			_, err = q.CreateContactVerification(ctx, db.CreateContactVerificationParams{
+				ID:         security.GenerateUUID(),
+				UserID:     userID,
+				Identifier: identifier,
+				Code:       otpCode,
+				ExpiresAt:  TimestamptzFromTime(time.Now().Add(15 * time.Minute)),
+				IsUsed:     false,
+			})
+			if err != nil {
+				return err
+			}
+
+			// Dispatch via safe adapter
+			_ = s.delivery.SendVerificationCode(identifier, otpCode)
+			return nil
 		})
-		if err != nil {
-			return err
-		}
-		createdUser = u
 
-		// Create default profile
-		_, err = q.CreateMemberProfile(ctx, db.CreateMemberProfileParams{
-			ID:             security.GenerateUUID(),
-			UserID:         userID,
-			HomeStateID:    Text(req.HomeStateID),
-			HomeLgaID:      Text(req.HomeLGAID),
-			IsPublicBadges: true,
-		})
-		if err != nil {
-			return err
+		if err == nil {
+			break
 		}
-
-		// Generate 6-digit OTP
-		otpCode := security.GenerateVerificationCode()
-		identifier := email
-		if identifier == "" {
-			identifier = phone
+		if !strings.Contains(err.Error(), "users_membership_reference_key") {
+			return nil, err
 		}
-
-		_, err = q.CreateContactVerification(ctx, db.CreateContactVerificationParams{
-			ID:         security.GenerateUUID(),
-			UserID:     userID,
-			Identifier: identifier,
-			Code:       otpCode,
-			ExpiresAt:  TimestamptzFromTime(time.Now().Add(15 * time.Minute)),
-			IsUsed:     false,
-		})
-		if err != nil {
-			return err
-		}
-
-		// Dispatch via safe adapter
-		_ = s.delivery.SendVerificationCode(identifier, otpCode)
-		return nil
-	})
+	}
 
 	if err != nil {
 		return nil, err
