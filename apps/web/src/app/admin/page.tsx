@@ -19,6 +19,7 @@ import {
   History,
   Building,
   DollarSign,
+  Boxes,
 } from "lucide-react";
 import { useAuth } from "@/lib/auth-context";
 import { apiRequest } from "@/lib/api";
@@ -290,6 +291,21 @@ export default function AdminOverviewPage() {
             </h3>
             <p className="text-xs text-gray-600 leading-relaxed">
               Official double-entry fund movements, balanced general ledger, cash commitments, printable vouchers, and Super Admin clearances.
+            </p>
+          </Link>
+
+          <Link
+            href="/admin/inventory"
+            className="p-5 bg-white rounded-xl border border-gray-200 hover:border-emerald-500 shadow-sm space-y-2 group transition"
+          >
+            <div className="w-9 h-9 rounded-lg bg-emerald-50 text-emerald-800 flex items-center justify-center font-bold">
+              <Boxes className="w-5 h-5" />
+            </div>
+            <h3 className="font-bold text-gray-900 text-sm group-hover:text-emerald-800 transition">
+              Inventory & Material Distribution
+            </h3>
+            <p className="text-xs text-gray-600 leading-relaxed">
+              Manage operational movement supplies, track nationwide warehouses, allocate stock, monitor shipments in transit, and resolve discrepancies.
             </p>
           </Link>
 

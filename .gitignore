@@ -48,6 +48,10 @@ node_modules/
 .DS_Store
 Thumbs.db
 
+# Go binaries
+apps/api/server
+*.test
+
 # Include frontend source libraries
 !apps/web/src/lib/
 !apps/web/src/lib/**

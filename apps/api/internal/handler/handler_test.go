@@ -33,8 +33,9 @@ type TestHarness struct {
 	FoundService   *service.FoundationService
 	GeoService     *service.GeographyService
 	AdminService   *service.AdminService
-	FinanceService *service.FinanceService
-	Cleanup        func()
+	FinanceService   *service.FinanceService
+	InventoryService *service.InventoryService
+	Cleanup          func()
 }
 
 func setupTestHarness(t *testing.T) *TestHarness {
@@ -64,6 +65,7 @@ func setupTestHarness(t *testing.T) *TestHarness {
 	foundSvc := service.NewFoundationService(repo, cfg, auditSvc)
 	adminSvc := service.NewAdminService(repo)
 	financeSvc := service.NewFinanceService(repo, auditSvc)
+	inventorySvc := service.NewInventoryService(repo, auditSvc)
 
 	healthH := handler.NewHealthHandler(repo)
 	authH := handler.NewAuthHandler(authSvc, cfg)
@@ -75,6 +77,7 @@ func setupTestHarness(t *testing.T) *TestHarness {
 	foundH := handler.NewFoundationHandler(foundSvc)
 	adminH := handler.NewAdminHandler(adminSvc)
 	financeH := handler.NewFinanceHandler(financeSvc)
+	inventoryH := handler.NewInventoryHandler(inventorySvc)
 
 	router := handler.NewRouter(handler.RouterParams{
 		Config:               cfg,
@@ -89,6 +92,7 @@ func setupTestHarness(t *testing.T) *TestHarness {
 		FoundationHandler:    foundH,
 		AdminHandler:         adminH,
 		FinanceHandler:       financeH,
+		InventoryHandler:     inventoryH,
 	})
 
 	return &TestHarness{
@@ -105,6 +109,7 @@ func setupTestHarness(t *testing.T) *TestHarness {
 		GeoService:     geoSvc,
 		AdminService:   adminSvc,
 		FinanceService: financeSvc,
+		InventoryService: inventorySvc,
 		Cleanup: func() {
 			pool.Close()
 		},

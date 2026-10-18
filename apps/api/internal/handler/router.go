@@ -23,6 +23,7 @@ type RouterParams struct {
 	FoundationHandler    *FoundationHandler
 	AdminHandler         *AdminHandler
 	FinanceHandler       *FinanceHandler
+	InventoryHandler     *InventoryHandler
 }
 
 func NewRouter(p RouterParams) http.Handler {
@@ -144,6 +145,48 @@ func NewRouter(p RouterParams) http.Handler {
 			found.With(RequireRole("national_admin")).Get("/bank-accounts", p.FoundationHandler.ListBankAccounts)
 			found.With(RequireRole("national_admin")).Post("/bank-accounts", p.FoundationHandler.CreateBankAccount)
 			found.With(RequireRole("national_admin")).Post("/bank-accounts/{id}/verify", p.FoundationHandler.VerifyBankAccount)
+		})
+
+		// Inventory & Material Distribution (Blueprint v2.0 Section 05)
+		api.Route("/inventory", func(inv chi.Router) {
+			// Catalogue
+			inv.With(RequireAuth).Get("/items", p.InventoryHandler.ListItems)
+			inv.With(RequireRole("national_admin", "zonal_coordinator", "state_coordinator")).Post("/items", p.InventoryHandler.CreateItem)
+			inv.With(RequireAuth).Get("/items/{id}", p.InventoryHandler.GetItem)
+			inv.With(RequireRole("national_admin", "zonal_coordinator", "state_coordinator")).Put("/items/{id}", p.InventoryHandler.UpdateItem)
+
+			// Storage Locations (Warehouses)
+			inv.With(RequireAuth).Get("/locations", p.InventoryHandler.ListLocations)
+			inv.With(RequireRole("national_admin", "zonal_coordinator", "state_coordinator")).Post("/locations", p.InventoryHandler.CreateLocation)
+			inv.With(RequireAuth).Get("/locations/{id}", p.InventoryHandler.GetLocation)
+
+			// Balances & Initial Receipts
+			inv.With(RequireAuth).Get("/balances", p.InventoryHandler.ListBalances)
+			inv.With(RequireRole("national_admin", "zonal_coordinator", "state_coordinator")).Post("/balances/receive", p.InventoryHandler.ReceiveStock)
+			inv.With(RequireAuth).Get("/balances/low-stock", p.InventoryHandler.ListLowStockAlerts)
+
+			// Material Requests
+			inv.With(RequireAuth).Get("/requests", p.InventoryHandler.ListRequests)
+			inv.With(RequireAuth).Post("/requests", p.InventoryHandler.CreateRequest)
+			inv.With(RequireAuth).Get("/requests/{id}", p.InventoryHandler.GetRequest)
+			inv.With(RequireRole("national_admin", "zonal_coordinator", "state_coordinator", "lga_representative")).Post("/requests/{id}/review", p.InventoryHandler.ReviewRequest)
+			inv.With(RequireRole("national_admin", "zonal_coordinator", "state_coordinator")).Post("/requests/{id}/allocate", p.InventoryHandler.AllocateRequest)
+
+			// Transfers & Dispatches
+			inv.With(RequireAuth).Get("/transfers", p.InventoryHandler.ListTransfers)
+			inv.With(RequireRole("national_admin", "zonal_coordinator", "state_coordinator")).Post("/transfers", p.InventoryHandler.CreateTransfer)
+			inv.With(RequireAuth).Get("/transfers/{id}", p.InventoryHandler.GetTransfer)
+			inv.With(RequireRole("national_admin", "zonal_coordinator", "state_coordinator")).Post("/transfers/{id}/dispatch", p.InventoryHandler.DispatchTransfer)
+			inv.With(RequireRole("national_admin", "zonal_coordinator", "state_coordinator", "lga_representative")).Post("/transfers/{id}/receive", p.InventoryHandler.ConfirmReceipt)
+
+			// Discrepancies
+			inv.With(RequireAuth).Get("/discrepancies", p.InventoryHandler.ListDiscrepancies)
+			inv.With(RequireAuth).Get("/discrepancies/{id}", p.InventoryHandler.GetDiscrepancy)
+			inv.With(RequireRole("national_admin", "zonal_coordinator", "state_coordinator")).Post("/discrepancies/{id}/resolve", p.InventoryHandler.ResolveDiscrepancy)
+
+			// Stock Ledger & Reporting
+			inv.With(RequireRole("national_admin", "zonal_coordinator", "state_coordinator")).Get("/ledger", p.InventoryHandler.ListStockLedger)
+			inv.With(RequireAuth).Get("/summary", p.InventoryHandler.GetSummary)
 		})
 
 		// Admin Workspace

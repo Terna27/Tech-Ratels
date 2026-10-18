@@ -280,6 +280,21 @@ type FoundationEntity struct {
 	Version             int32              `json:"version"`
 }
 
+type InventoryItem struct {
+	ID                   string             `json:"id"`
+	Sku                  string             `json:"sku"`
+	Name                 string             `json:"name"`
+	Description          pgtype.Text        `json:"description"`
+	Category             string             `json:"category"`
+	UnitOfMeasure        string             `json:"unit_of_measure"`
+	MinThresholdQuantity int64              `json:"min_threshold_quantity"`
+	IsBatchTracked       bool               `json:"is_batch_tracked"`
+	IsActive             bool               `json:"is_active"`
+	CreatedAt            pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt            pgtype.Timestamptz `json:"updated_at"`
+	Version              int32              `json:"version"`
+}
+
 type Lga struct {
 	ID              string             `json:"id"`
 	StateID         string             `json:"state_id"`
@@ -290,6 +305,70 @@ type Lga struct {
 	CreatedAt       pgtype.Timestamptz `json:"created_at"`
 	UpdatedAt       pgtype.Timestamptz `json:"updated_at"`
 	Version         int32              `json:"version"`
+}
+
+type MaterialRequest struct {
+	ID                    string             `json:"id"`
+	Reference             string             `json:"reference"`
+	RequestingUserID      string             `json:"requesting_user_id"`
+	JurisdictionType      string             `json:"jurisdiction_type"`
+	JurisdictionID        pgtype.Text        `json:"jurisdiction_id"`
+	DestinationLocationID string             `json:"destination_location_id"`
+	Status                string             `json:"status"`
+	IntendedUse           string             `json:"intended_use"`
+	BeneficiaryCategory   pgtype.Text        `json:"beneficiary_category"`
+	RequiredDate          pgtype.Timestamptz `json:"required_date"`
+	Notes                 pgtype.Text        `json:"notes"`
+	RejectionReason       pgtype.Text        `json:"rejection_reason"`
+	ReductionReason       pgtype.Text        `json:"reduction_reason"`
+	ReviewedByUserID      pgtype.Text        `json:"reviewed_by_user_id"`
+	ReviewedAt            pgtype.Timestamptz `json:"reviewed_at"`
+	CreatedAt             pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt             pgtype.Timestamptz `json:"updated_at"`
+	Version               int32              `json:"version"`
+}
+
+type MaterialRequestItem struct {
+	ID                string             `json:"id"`
+	RequestID         string             `json:"request_id"`
+	ItemID            string             `json:"item_id"`
+	RequestedQuantity int64              `json:"requested_quantity"`
+	ApprovedQuantity  int64              `json:"approved_quantity"`
+	UnitOfMeasure     string             `json:"unit_of_measure"`
+	CreatedAt         pgtype.Timestamptz `json:"created_at"`
+}
+
+type MaterialTransfer struct {
+	ID                    string             `json:"id"`
+	Reference             string             `json:"reference"`
+	IdempotencyKey        pgtype.Text        `json:"idempotency_key"`
+	RequestID             pgtype.Text        `json:"request_id"`
+	SourceLocationID      string             `json:"source_location_id"`
+	DestinationLocationID string             `json:"destination_location_id"`
+	Status                string             `json:"status"`
+	CarrierName           pgtype.Text        `json:"carrier_name"`
+	CarrierPhone          pgtype.Text        `json:"carrier_phone"`
+	TrackingNumber        pgtype.Text        `json:"tracking_number"`
+	DispatchNotes         pgtype.Text        `json:"dispatch_notes"`
+	DispatchedByUserID    pgtype.Text        `json:"dispatched_by_user_id"`
+	DispatchedAt          pgtype.Timestamptz `json:"dispatched_at"`
+	ReceivedByUserID      pgtype.Text        `json:"received_by_user_id"`
+	ReceivedAt            pgtype.Timestamptz `json:"received_at"`
+	CreatedAt             pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt             pgtype.Timestamptz `json:"updated_at"`
+	Version               int32              `json:"version"`
+}
+
+type MaterialTransferItem struct {
+	ID                  string             `json:"id"`
+	TransferID          string             `json:"transfer_id"`
+	ItemID              string             `json:"item_id"`
+	BatchNumber         string             `json:"batch_number"`
+	DispatchedQuantity  int64              `json:"dispatched_quantity"`
+	ReceivedQuantity    int64              `json:"received_quantity"`
+	DiscrepancyQuantity int64              `json:"discrepancy_quantity"`
+	UnitOfMeasure       string             `json:"unit_of_measure"`
+	CreatedAt           pgtype.Timestamptz `json:"created_at"`
 }
 
 type MemberProfile struct {
@@ -346,6 +425,84 @@ type State struct {
 	CreatedAt pgtype.Timestamptz `json:"created_at"`
 	UpdatedAt pgtype.Timestamptz `json:"updated_at"`
 	Version   int32              `json:"version"`
+}
+
+type StockBalance struct {
+	ID               string             `json:"id"`
+	LocationID       string             `json:"location_id"`
+	ItemID           string             `json:"item_id"`
+	OnHandQuantity   int64              `json:"on_hand_quantity"`
+	ReservedQuantity int64              `json:"reserved_quantity"`
+	BatchNumber      string             `json:"batch_number"`
+	ExpiryDate       pgtype.Timestamptz `json:"expiry_date"`
+	UpdatedAt        pgtype.Timestamptz `json:"updated_at"`
+	Version          int32              `json:"version"`
+}
+
+type StockLedgerEntry struct {
+	ID                   string             `json:"id"`
+	Reference            string             `json:"reference"`
+	LocationID           string             `json:"location_id"`
+	ItemID               string             `json:"item_id"`
+	MovementType         string             `json:"movement_type"`
+	Quantity             int64              `json:"quantity"`
+	BalanceAfter         int64              `json:"balance_after"`
+	BatchNumber          string             `json:"batch_number"`
+	RelatedTransferID    pgtype.Text        `json:"related_transfer_id"`
+	RelatedRequestID     pgtype.Text        `json:"related_request_id"`
+	RelatedDiscrepancyID pgtype.Text        `json:"related_discrepancy_id"`
+	Notes                pgtype.Text        `json:"notes"`
+	ActorUserID          pgtype.Text        `json:"actor_user_id"`
+	OccurredAt           pgtype.Timestamptz `json:"occurred_at"`
+	CreatedAt            pgtype.Timestamptz `json:"created_at"`
+}
+
+type StockReservation struct {
+	ID            string             `json:"id"`
+	RequestID     string             `json:"request_id"`
+	RequestItemID pgtype.Text        `json:"request_item_id"`
+	LocationID    string             `json:"location_id"`
+	ItemID        string             `json:"item_id"`
+	BatchNumber   string             `json:"batch_number"`
+	Quantity      int64              `json:"quantity"`
+	Status        string             `json:"status"`
+	ExpiresAt     pgtype.Timestamptz `json:"expires_at"`
+	CreatedAt     pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt     pgtype.Timestamptz `json:"updated_at"`
+}
+
+type StorageLocation struct {
+	ID              string             `json:"id"`
+	Code            string             `json:"code"`
+	Name            string             `json:"name"`
+	LocationType    string             `json:"location_type"`
+	ZoneID          pgtype.Text        `json:"zone_id"`
+	StateID         pgtype.Text        `json:"state_id"`
+	LgaID           pgtype.Text        `json:"lga_id"`
+	Address         pgtype.Text        `json:"address"`
+	CustodianUserID pgtype.Text        `json:"custodian_user_id"`
+	ContactPhone    pgtype.Text        `json:"contact_phone"`
+	IsActive        bool               `json:"is_active"`
+	CreatedAt       pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt       pgtype.Timestamptz `json:"updated_at"`
+	Version         int32              `json:"version"`
+}
+
+type TransferDiscrepancy struct {
+	ID                    string             `json:"id"`
+	TransferID            string             `json:"transfer_id"`
+	TransferItemID        string             `json:"transfer_item_id"`
+	ExpectedQuantity      int64              `json:"expected_quantity"`
+	ReceivedQuantity      int64              `json:"received_quantity"`
+	DifferenceQuantity    int64              `json:"difference_quantity"`
+	Reason                string             `json:"reason"`
+	SupportingEvidenceUrl pgtype.Text        `json:"supporting_evidence_url"`
+	Status                string             `json:"status"`
+	AssignedReviewerID    pgtype.Text        `json:"assigned_reviewer_id"`
+	ResolutionNotes       pgtype.Text        `json:"resolution_notes"`
+	ResolvedAt            pgtype.Timestamptz `json:"resolved_at"`
+	CreatedAt             pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt             pgtype.Timestamptz `json:"updated_at"`
 }
 
 type User struct {

@@ -100,6 +100,7 @@ func main() {
 	foundService := service.NewFoundationService(repo, cfg, auditService)
 	adminService := service.NewAdminService(repo)
 	financeService := service.NewFinanceService(repo, auditService)
+	inventoryService := service.NewInventoryService(repo, auditService)
 
 	// Handlers
 	healthH := handler.NewHealthHandler(repo)
@@ -112,6 +113,7 @@ func main() {
 	foundH := handler.NewFoundationHandler(foundService)
 	adminH := handler.NewAdminHandler(adminService)
 	financeH := handler.NewFinanceHandler(financeService)
+	inventoryH := handler.NewInventoryHandler(inventoryService)
 
 	router := handler.NewRouter(handler.RouterParams{
 		Config:               cfg,
@@ -126,6 +128,7 @@ func main() {
 		FoundationHandler:    foundH,
 		AdminHandler:         adminH,
 		FinanceHandler:       financeH,
+		InventoryHandler:     inventoryH,
 	})
 
 	srv := &http.Server{

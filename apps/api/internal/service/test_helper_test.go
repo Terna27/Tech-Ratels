@@ -26,6 +26,7 @@ type TestEnv struct {
 	FoundService *service.FoundationService
 	AdminService *service.AdminService
 	FinanceService *service.FinanceService
+	InventoryService *service.InventoryService
 }
 
 func setupTestEnv(t *testing.T) *TestEnv {
@@ -55,6 +56,7 @@ func setupTestEnv(t *testing.T) *TestEnv {
 	foundSvc := service.NewFoundationService(repo, cfg, auditSvc)
 	adminSvc := service.NewAdminService(repo)
 	finSvc := service.NewFinanceService(repo, auditSvc)
+	invSvc := service.NewInventoryService(repo, auditSvc)
 
 	return &TestEnv{
 		Pool:           pool,
@@ -70,5 +72,6 @@ func setupTestEnv(t *testing.T) *TestEnv {
 		FoundService:   foundSvc,
 		AdminService:   adminSvc,
 		FinanceService: finSvc,
+		InventoryService: invSvc,
 	}
 }

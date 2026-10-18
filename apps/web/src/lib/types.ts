@@ -319,3 +319,197 @@ export interface AppointmentHistory {
   effective_date: string;
   timestamp: string;
 }
+
+// -------------------------------------------------------------
+// Inventory & Material Distribution (Blueprint v2.0 Section 05)
+// -------------------------------------------------------------
+
+export interface InventoryItem {
+  id: string;
+  sku: string;
+  name: string;
+  description?: string;
+  category: string;
+  unit_of_measure: string;
+  min_threshold_quantity: number;
+  is_batch_tracked: boolean;
+  is_active: boolean;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface StorageLocation {
+  id: string;
+  code: string;
+  name: string;
+  location_type: "national" | "zonal" | "state" | "lga";
+  zone_id?: string;
+  zone_name?: string;
+  state_id?: string;
+  state_name?: string;
+  lga_id?: string;
+  lga_name?: string;
+  address?: string;
+  custodian_user_id?: string;
+  custodian_name?: string;
+  custodian_email?: string;
+  contact_phone?: string;
+  is_active: boolean;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface StockBalance {
+  id: string;
+  location_id: string;
+  item_id: string;
+  sku: string;
+  item_name: string;
+  item_category: string;
+  unit_of_measure: string;
+  min_threshold_quantity: number;
+  on_hand_quantity: number;
+  reserved_quantity: number;
+  available_quantity: number;
+  batch_number: string;
+  expiry_date?: string;
+  location_name?: string;
+  location_code?: string;
+  location_type?: string;
+  updated_at: string;
+}
+
+export interface MaterialRequest {
+  id: string;
+  reference: string;
+  requesting_user_id: string;
+  requesting_user_name?: string;
+  requesting_user_email?: string;
+  jurisdiction_type: "national" | "zonal" | "state" | "lga";
+  jurisdiction_id?: string;
+  destination_location_id: string;
+  destination_location_name?: string;
+  destination_location_code?: string;
+  status: "submitted" | "approved" | "reduced" | "rejected" | "allocated" | "fulfilled" | "cancelled";
+  intended_use: string;
+  beneficiary_category?: string;
+  required_date: string;
+  notes?: string;
+  rejection_reason?: string;
+  reduction_reason?: string;
+  reviewed_by_user_id?: string;
+  reviewer_name?: string;
+  reviewed_at?: string;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface MaterialRequestItem {
+  id: string;
+  request_id: string;
+  item_id: string;
+  sku?: string;
+  item_name?: string;
+  item_category?: string;
+  requested_quantity: number;
+  approved_quantity: number;
+  unit_of_measure: string;
+  created_at: string;
+}
+
+export interface MaterialTransfer {
+  id: string;
+  reference: string;
+  idempotency_key?: string;
+  request_id?: string;
+  source_location_id: string;
+  source_location_name?: string;
+  source_location_code?: string;
+  destination_location_id: string;
+  destination_location_name?: string;
+  destination_location_code?: string;
+  status: "draft" | "dispatched" | "partially_received" | "received" | "disputed" | "cancelled";
+  carrier_name?: string;
+  carrier_phone?: string;
+  tracking_number?: string;
+  dispatch_notes?: string;
+  dispatched_by_user_id?: string;
+  dispatched_by_name?: string;
+  dispatched_at?: string;
+  received_by_user_id?: string;
+  received_by_name?: string;
+  received_at?: string;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface MaterialTransferItem {
+  id: string;
+  transfer_id: string;
+  item_id: string;
+  sku?: string;
+  item_name?: string;
+  item_category?: string;
+  batch_number: string;
+  dispatched_quantity: number;
+  received_quantity: number;
+  discrepancy_quantity: number;
+  unit_of_measure: string;
+  created_at: string;
+}
+
+export interface TransferDiscrepancy {
+  id: string;
+  transfer_id: string;
+  transfer_reference?: string;
+  transfer_item_id: string;
+  source_location_name?: string;
+  destination_location_name?: string;
+  item_name?: string;
+  item_sku?: string;
+  expected_quantity: number;
+  received_quantity: number;
+  difference_quantity: number;
+  reason: "missing_in_transit" | "damaged" | "expired" | "wrong_item" | "other";
+  supporting_evidence_url?: string;
+  status: "open" | "investigating" | "resolved_writeoff" | "resolved_returned";
+  assigned_reviewer_id?: string;
+  reviewer_name?: string;
+  resolution_notes?: string;
+  resolved_at?: string;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface StockLedgerEntry {
+  id: string;
+  reference: string;
+  location_id: string;
+  location_name?: string;
+  location_code?: string;
+  item_id: string;
+  item_name?: string;
+  item_sku?: string;
+  unit_of_measure?: string;
+  movement_type: "initial_receipt" | "donation_in_kind" | "transfer_dispatch" | "transfer_receipt" | "discrepancy_adjustment" | "write_off_loss" | "write_off_damage" | "return";
+  quantity: number;
+  balance_after: number;
+  batch_number: string;
+  related_transfer_id?: string;
+  related_request_id?: string;
+  related_discrepancy_id?: string;
+  notes?: string;
+  actor_user_id?: string;
+  actor_name?: string;
+  occurred_at: string;
+  created_at: string;
+}
+
+export interface InventorySummary {
+  total_items: number;
+  total_locations: number;
+  in_transit_transfers: number;
+  open_discrepancies: number;
+  low_stock_alerts_count: number;
+}
+
