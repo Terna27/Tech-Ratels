@@ -21,6 +21,8 @@ import {
   Eye,
   ChevronRight,
   ShieldCheck,
+  UploadCloud,
+  Loader2,
 } from "lucide-react";
 import { useAuth } from "@/lib/auth-context";
 import { apiRequest } from "@/lib/api";
@@ -74,7 +76,18 @@ export default function SellerPortalPage() {
   const [prodCompareNaira, setProdCompareNaira] = useState("");
   const [prodStock, setProdStock] = useState("10");
   const [prodLowStock, setProdLowStock] = useState("3");
-  const [prodImages, setProdImages] = useState("");
+  const [productImages, setProductImages] = useState<{
+    id: string;
+    url: string;
+    objectKey?: string;
+    isUploading?: boolean;
+    progress?: number;
+    error?: string;
+  }[]>([]);
+  const [imageError, setImageError] = useState<string | null>(null);
+  const [isUploadingImage, setIsUploadingImage] = useState(false);
+  const [isDragOver, setIsDragOver] = useState(false);
+  const fileInputRef = React.useRef<HTMLInputElement>(null);
   const [prodStatus, setProdStatus] = useState("published");
   const [prodSubmitting, setProdSubmitting] = useState(false);
 
@@ -191,18 +204,185 @@ export default function SellerPortalPage() {
     }
   };
 
+  const handleFilesSelected = async (files: FileList | File[]) => {
+    setImageError(null);
+    const fileArray = Array.from(files);
+    if (fileArray.length === 0) return;
+
+    if (productImages.length + fileArray.length > 5) {
+      setImageError(`A maximum of 5 images is allowed per product (you have ${productImages.length}, selected ${fileArray.length}).`);
+      return;
+    }
+
+    const allowedTypes = ["image/jpeg", "image/png", "image/webp"];
+    const allowedExtensions = [".jpg", ".jpeg", ".png", ".webp"];
+
+    for (const file of fileArray) {
+      const ext = "." + file.name.split(".").pop()?.toLowerCase();
+      if (!allowedExtensions.includes(ext) && !allowedTypes.includes(file.type)) {
+        setImageError(`"${file.name}" is not a supported format. Please select JPG, PNG, or WebP images.`);
+        return;
+      }
+      if (file.size > 5 * 1024 * 1024) {
+        setImageError(`"${file.name}" exceeds the 5 MB limit (${(file.size / (1024 * 1024)).toFixed(1)} MB).`);
+        return;
+      }
+    }
+
+    setIsUploadingImage(true);
+
+    for (const file of fileArray) {
+      const tempId = "img-" + Math.random().toString(36).substring(2, 9);
+      const previewUrl = URL.createObjectURL(file);
+
+      // Add local preview immediately
+      setProductImages((prev) => [
+        ...prev,
+        {
+          id: tempId,
+          url: previewUrl,
+          isUploading: true,
+          progress: 10,
+        },
+      ]);
+
+      try {
+        // First try authenticated direct server upload (verifies magic bytes & dimensions)
+        const formData = new FormData();
+        formData.append("file", file);
+
+        setProductImages((prev) =>
+          prev.map((item) => (item.id === tempId ? { ...item, progress: 40 } : item))
+        );
+
+        const uploadRes = await apiRequest("/marketplace/seller/products/images/upload", {
+          method: "POST",
+          body: formData,
+        });
+
+        setProductImages((prev) =>
+          prev.map((item) =>
+            item.id === tempId
+              ? {
+                  id: tempId,
+                  url: uploadRes.public_url,
+                  objectKey: uploadRes.object_key,
+                  isUploading: false,
+                  progress: 100,
+                }
+              : item
+          )
+        );
+      } catch (directErr: any) {
+        // If direct upload failed (e.g. server configured for presigned direct R2 upload), request upload authorization
+        try {
+          const presignRes = await apiRequest("/marketplace/seller/products/images/presign", {
+            method: "POST",
+            body: JSON.stringify({
+              filename: file.name,
+              content_type: file.type || "image/jpeg",
+              file_size: file.size,
+            }),
+          });
+
+          // Upload directly to Cloudflare R2
+          const putRes = await fetch(presignRes.upload_url, {
+            method: "PUT",
+            headers: {
+              "Content-Type": file.type || "image/jpeg",
+            },
+            body: file,
+          });
+
+          if (!putRes.ok) {
+            throw new Error(`Cloudflare R2 upload returned status ${putRes.status}`);
+          }
+
+          setProductImages((prev) =>
+            prev.map((item) =>
+              item.id === tempId
+                ? {
+                    id: tempId,
+                    url: presignRes.public_url,
+                    objectKey: presignRes.object_key,
+                    isUploading: false,
+                    progress: 100,
+                  }
+                : item
+            )
+          );
+        } catch (presignErr: any) {
+          const finalErrMsg = presignErr.message || directErr.message || "Upload failed";
+          setProductImages((prev) =>
+            prev.map((item) =>
+              item.id === tempId ? { ...item, isUploading: false, error: finalErrMsg } : item
+            )
+          );
+          setImageError(`Failed to upload "${file.name}": ${finalErrMsg}`);
+        }
+      }
+    }
+
+    setIsUploadingImage(false);
+  };
+
+  const handleRemoveImage = async (index: number) => {
+    const item = productImages[index];
+    if (item && item.objectKey) {
+      try {
+        await apiRequest("/marketplace/seller/products/images", {
+          method: "DELETE",
+          body: JSON.stringify({ object_key: item.objectKey }),
+        });
+      } catch (_) {
+        // continue deletion from UI
+      }
+    }
+    setProductImages((prev) => prev.filter((_, i) => i !== index));
+  };
+
+  const handleSetCover = (index: number) => {
+    if (index === 0) return;
+    setProductImages((prev) => {
+      const copy = [...prev];
+      const [selected] = copy.splice(index, 1);
+      return [selected, ...copy];
+    });
+  };
+
+  const handleMoveImage = (index: number, direction: "left" | "right") => {
+    const targetIndex = direction === "left" ? index - 1 : index + 1;
+    if (targetIndex < 0 || targetIndex >= productImages.length) return;
+    setProductImages((prev) => {
+      const copy = [...prev];
+      const temp = copy[index];
+      copy[index] = copy[targetIndex];
+      copy[targetIndex] = temp;
+      return copy;
+    });
+  };
+
   const handleSaveProduct = async (e: React.FormEvent) => {
     e.preventDefault();
     setError(null);
+
+    if (productImages.some((img) => img.isUploading)) {
+      setError("Please wait for all images to finish uploading before saving.");
+      return;
+    }
+
     setProdSubmitting(true);
 
     try {
       const priceKobo = Math.round(parseFloat(prodPriceNaira) * 100);
       const compareKobo = prodCompareNaira ? Math.round(parseFloat(prodCompareNaira) * 100) : undefined;
-      const imagesArray = prodImages
-        .split(",")
-        .map((s) => s.trim())
-        .filter(Boolean);
+      const imagesArray = productImages.map((img) => img.url.trim()).filter(Boolean);
+
+      if (imagesArray.length > 5) {
+        setError("A maximum of 5 images is allowed per product.");
+        setProdSubmitting(false);
+        return;
+      }
 
       const payload = {
         title: prodTitle.trim(),
@@ -337,12 +517,20 @@ export default function SellerPortalPage() {
     setProdCompareNaira(p.compare_at_price_kobo ? (p.compare_at_price_kobo / 100).toString() : "");
     setProdStock(p.stock_quantity.toString());
     setProdLowStock(p.low_stock_threshold.toString());
-    let imgs = "";
+    
+    let parsedImages: { id: string; url: string; isUploading?: boolean }[] = [];
     try {
       const arr = typeof p.images === "string" ? JSON.parse(p.images) : p.images;
-      if (Array.isArray(arr)) imgs = arr.join(", ");
+      if (Array.isArray(arr)) {
+        parsedImages = arr.map((url: string, idx: number) => ({
+          id: `existing-${idx}-${url}`,
+          url,
+          isUploading: false,
+        }));
+      }
     } catch (_) {}
-    setProdImages(imgs);
+    setProductImages(parsedImages);
+    setImageError(null);
     setProdStatus(p.status);
     setShowProductModal(true);
   };
@@ -357,7 +545,8 @@ export default function SellerPortalPage() {
     setProdCompareNaira("");
     setProdStock("10");
     setProdLowStock("3");
-    setProdImages("");
+    setProductImages([]);
+    setImageError(null);
     setProdStatus("published");
   };
 
@@ -738,9 +927,29 @@ export default function SellerPortalPage() {
                   <tbody className="divide-y divide-gray-100">
                     {products.map((p) => (
                       <tr key={p.id} className="hover:bg-gray-50/50">
-                        <td className="py-3 px-4 font-bold text-gray-900 flex items-center gap-2">
-                          <Package className="w-4 h-4 text-gray-400" />
-                          <span>{p.title}</span>
+                        <td className="py-3 px-4 font-bold text-gray-900 flex items-center gap-3">
+                          {(() => {
+                            let firstImg = "";
+                            try {
+                              const arr = typeof p.images === "string" ? JSON.parse(p.images) : p.images;
+                              if (Array.isArray(arr) && arr.length > 0) firstImg = arr[0];
+                            } catch (_) {}
+                            return firstImg ? (
+                              <img
+                                src={firstImg}
+                                alt={p.title}
+                                className="w-8 h-8 rounded-lg object-cover border border-gray-100 shrink-0"
+                                onError={(e) => {
+                                  (e.target as HTMLElement).style.display = "none";
+                                }}
+                              />
+                            ) : (
+                              <div className="w-8 h-8 rounded-lg bg-gray-100 flex items-center justify-center shrink-0 text-gray-400">
+                                <Package className="w-4 h-4" />
+                              </div>
+                            );
+                          })()}
+                          <span className="truncate max-w-xs">{p.title}</span>
                         </td>
                         <td className="py-3 px-4 capitalize">{p.category}</td>
                         <td className="py-3 px-4 font-bold text-gray-900">
@@ -1035,15 +1244,198 @@ export default function SellerPortalPage() {
                 </div>
               </div>
 
-              <div>
-                <label className="block font-semibold text-gray-700 mb-1">Image URLs (comma-separated)</label>
+              {/* Native Cloudflare R2 Image Upload & Management Control */}
+              <div className="space-y-2">
+                <div className="flex items-center justify-between">
+                  <label className="block font-semibold text-gray-700">
+                    Product Images <span className="text-gray-400 font-normal">({productImages.length}/5)</span>
+                  </label>
+                  <span className="text-[10px] text-gray-500">First image is primary cover</span>
+                </div>
+
+                {imageError && (
+                  <div className="p-2.5 bg-red-50 border border-red-200 text-red-700 rounded-xl text-xs flex items-center justify-between">
+                    <div className="flex items-center gap-2">
+                      <AlertCircle className="w-4 h-4 shrink-0 text-red-500" />
+                      <span>{imageError}</span>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => setImageError(null)}
+                      className="text-red-500 hover:text-red-800 text-sm ml-2 font-bold"
+                    >
+                      ✕
+                    </button>
+                  </div>
+                )}
+
+                {/* Hidden File Input */}
                 <input
-                  type="text"
-                  value={prodImages}
-                  onChange={(e) => setProdImages(e.target.value)}
-                  placeholder="https://example.com/img1.jpg, https://example.com/img2.jpg"
-                  className="w-full px-3 py-2 border border-gray-300 rounded-xl focus:ring-2 focus:ring-emerald-500"
+                  type="file"
+                  ref={fileInputRef}
+                  multiple
+                  accept="image/jpeg,image/png,image/webp"
+                  className="hidden"
+                  onChange={(e) => {
+                    if (e.target.files) {
+                      handleFilesSelected(e.target.files);
+                      e.target.value = "";
+                    }
+                  }}
                 />
+
+                {/* Drag and Drop Upload Zone */}
+                {productImages.length < 5 && (
+                  <div
+                    onDragOver={(e) => {
+                      e.preventDefault();
+                      setIsDragOver(true);
+                    }}
+                    onDragLeave={() => setIsDragOver(false)}
+                    onDrop={(e) => {
+                      e.preventDefault();
+                      setIsDragOver(false);
+                      if (e.dataTransfer.files) {
+                        handleFilesSelected(e.dataTransfer.files);
+                      }
+                    }}
+                    onClick={() => fileInputRef.current?.click()}
+                    className={`border-2 border-dashed rounded-2xl p-4 text-center cursor-pointer transition-all ${
+                      isDragOver
+                        ? "border-emerald-500 bg-emerald-50/50"
+                        : "border-gray-300 hover:border-emerald-400 hover:bg-gray-50/70"
+                    }`}
+                  >
+                    <div className="flex flex-col items-center justify-center space-y-1.5">
+                      <div className="w-10 h-10 rounded-full bg-emerald-100 text-emerald-600 flex items-center justify-center">
+                        <UploadCloud className="w-5 h-5" />
+                      </div>
+                      <div className="text-xs font-semibold text-gray-800">
+                        {isUploadingImage ? (
+                          <span className="flex items-center gap-1.5 text-emerald-600">
+                            <Loader2 className="w-3.5 h-3.5 animate-spin" /> Uploading image to Cloudflare R2...
+                          </span>
+                        ) : (
+                          <span>Click to browse device or drag and drop images</span>
+                        )}
+                      </div>
+                      <p className="text-[10px] text-gray-500">
+                        JPG, JPEG, PNG, or WebP &bull; Max 5 MB per image &bull; Up to 5 images
+                      </p>
+                      <button
+                        type="button"
+                        className="mt-1 px-3 py-1 bg-emerald-600 hover:bg-emerald-700 text-white font-medium rounded-lg text-[11px] shadow-sm transition"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          fileInputRef.current?.click();
+                        }}
+                      >
+                        Select Images from Device
+                      </button>
+                    </div>
+                  </div>
+                )}
+
+                {/* Uploaded Images Grid */}
+                {productImages.length > 0 && (
+                  <div className="grid grid-cols-5 gap-2 pt-1">
+                    {productImages.map((img, idx) => (
+                      <div
+                        key={img.id}
+                        className={`relative group rounded-xl overflow-hidden border bg-gray-50 aspect-square flex items-center justify-center ${
+                          idx === 0 ? "border-emerald-500 ring-2 ring-emerald-500/20" : "border-gray-200"
+                        }`}
+                      >
+                        <img
+                          src={img.url}
+                          alt={`Product media ${idx + 1}`}
+                          className="w-full h-full object-cover"
+                          onError={(e) => {
+                            (e.target as HTMLImageElement).src =
+                              "data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='100' height='100' viewBox='0 0 24 24' fill='none' stroke='%239ca3af' stroke-width='2'><rect width='18' height='18' x='3' y='3' rx='2'/><circle cx='9' cy='9' r='2'/><path d='m21 15-3.086-3.086a2 2 0 0 0-2.828 0L6 21'/></svg>";
+                          }}
+                        />
+
+                        {/* Primary Cover Badge */}
+                        {idx === 0 && (
+                          <div className="absolute top-1 left-1 bg-emerald-600 text-white text-[9px] font-bold px-1.5 py-0.5 rounded shadow">
+                            Cover
+                          </div>
+                        )}
+
+                        {/* Uploading Spinner Overlay */}
+                        {img.isUploading && (
+                          <div className="absolute inset-0 bg-black/60 flex flex-col items-center justify-center text-white text-[9px] p-1">
+                            <Loader2 className="w-4 h-4 animate-spin text-white mb-1" />
+                            <span>Uploading...</span>
+                          </div>
+                        )}
+
+                        {/* Error Overlay */}
+                        {img.error && (
+                          <div className="absolute inset-0 bg-red-600/80 flex flex-col items-center justify-center text-white text-[9px] p-1 text-center">
+                            <AlertCircle className="w-4 h-4 text-white mb-0.5" />
+                            <span className="line-clamp-2">Error</span>
+                          </div>
+                        )}
+
+                        {/* Actions Overlay */}
+                        {!img.isUploading && (
+                          <div className="absolute inset-0 bg-black/50 opacity-0 group-hover:opacity-100 transition-opacity flex flex-col justify-between p-1">
+                            <div className="flex justify-between items-center">
+                              {idx > 0 ? (
+                                <button
+                                  type="button"
+                                  onClick={() => handleSetCover(idx)}
+                                  title="Set as primary cover image"
+                                  className="bg-white/90 hover:bg-emerald-600 hover:text-white text-gray-800 text-[9px] font-bold px-1 py-0.5 rounded shadow transition"
+                                >
+                                  Cover
+                                </button>
+                              ) : <span />}
+
+                              <button
+                                type="button"
+                                onClick={() => handleRemoveImage(idx)}
+                                title="Remove this image"
+                                className="w-5 h-5 rounded-full bg-red-500 hover:bg-red-600 text-white flex items-center justify-center shadow transition"
+                              >
+                                ✕
+                              </button>
+                            </div>
+
+                            {/* Reordering Controls */}
+                            <div className="flex justify-between items-center bg-black/40 rounded px-1 py-0.5">
+                              <button
+                                type="button"
+                                disabled={idx === 0}
+                                onClick={() => handleMoveImage(idx, "left")}
+                                className={`text-white text-[10px] hover:text-emerald-300 transition ${
+                                  idx === 0 ? "opacity-30 cursor-not-allowed" : ""
+                                }`}
+                                title="Move left"
+                              >
+                                ◀
+                              </button>
+                              <span className="text-[9px] text-white/80 font-mono">#{idx + 1}</span>
+                              <button
+                                type="button"
+                                disabled={idx === productImages.length - 1}
+                                onClick={() => handleMoveImage(idx, "right")}
+                                className={`text-white text-[10px] hover:text-emerald-300 transition ${
+                                  idx === productImages.length - 1 ? "opacity-30 cursor-not-allowed" : ""
+                                }`}
+                                title="Move right"
+                              >
+                                ▶
+                              </button>
+                            </div>
+                          </div>
+                        )}
+                      </div>
+                    ))}
+                  </div>
+                )}
               </div>
 
               <div>

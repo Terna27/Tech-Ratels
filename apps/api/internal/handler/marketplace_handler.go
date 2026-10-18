@@ -5,11 +5,13 @@ import (
 	"errors"
 	"io"
 	"net/http"
+	"strings"
 
 	"github.com/go-chi/chi/v5"
 	"ratels-api/internal/db"
 	"ratels-api/internal/payment"
 	"ratels-api/internal/service"
+	"ratels-api/internal/storage"
 )
 
 type MarketplaceHandler struct {
@@ -481,6 +483,174 @@ func (h *MarketplaceHandler) DeleteProduct(w http.ResponseWriter, r *http.Reques
 		return
 	}
 	JSON(w, http.StatusOK, map[string]string{"message": "Product deleted successfully"})
+}
+
+// -------------------------------------------------------------
+// Product Image Upload & Media Management Endpoints
+// -------------------------------------------------------------
+
+type AuthorizeImageUploadRequest struct {
+	Filename    string `json:"filename"`
+	ContentType string `json:"content_type"`
+	FileSize    int64  `json:"file_size"`
+}
+
+func (h *MarketplaceHandler) AuthorizeImageUpload(w http.ResponseWriter, r *http.Request) {
+	user := GetCurrentUser(r.Context())
+	if user == nil {
+		ErrorJSON(w, http.StatusUnauthorized, "UNAUTHORIZED", "Authentication required", nil)
+		return
+	}
+
+	var req AuthorizeImageUploadRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		ErrorJSON(w, http.StatusBadRequest, "INVALID_REQUEST", "Malformed JSON payload", nil)
+		return
+	}
+
+	res, err := h.marketplaceService.AuthorizeProductImageUpload(r.Context(), user, req.Filename, req.ContentType, req.FileSize)
+	if err != nil {
+		if errors.Is(err, service.ErrBusinessNotFound) {
+			ErrorJSON(w, http.StatusNotFound, "BUSINESS_NOT_FOUND", "No active business profile found for this seller account", nil)
+			return
+		}
+		if errors.Is(err, service.ErrBusinessNotApproved) {
+			ErrorJSON(w, http.StatusForbidden, "BUSINESS_NOT_APPROVED", "Business account must be active or pending approval to upload product media", nil)
+			return
+		}
+		if errors.Is(err, service.ErrUnauthorizedSellerAction) {
+			ErrorJSON(w, http.StatusForbidden, "FORBIDDEN", err.Error(), nil)
+			return
+		}
+		if errors.Is(err, storage.ErrStorageUnconfigured) {
+			ErrorJSON(w, http.StatusServiceUnavailable, "STORAGE_UNCONFIGURED", "Product image storage service is currently unconfigured in this environment.", nil)
+			return
+		}
+		if errors.Is(err, storage.ErrImageEmpty) || errors.Is(err, storage.ErrImageTooLarge) || errors.Is(err, storage.ErrInvalidImageType) {
+			ErrorJSON(w, http.StatusBadRequest, "INVALID_IMAGE", err.Error(), nil)
+			return
+		}
+		ErrorJSON(w, http.StatusInternalServerError, "UPLOAD_AUTHORIZATION_FAILED", err.Error(), nil)
+		return
+	}
+
+	JSON(w, http.StatusOK, res)
+}
+
+func (h *MarketplaceHandler) UploadProductImage(w http.ResponseWriter, r *http.Request) {
+	user := GetCurrentUser(r.Context())
+	if user == nil {
+		ErrorJSON(w, http.StatusUnauthorized, "UNAUTHORIZED", "Authentication required", nil)
+		return
+	}
+
+	// Limit request body to 6MB (5MB file + multipart form metadata)
+	r.Body = http.MaxBytesReader(w, r.Body, 6*1024*1024)
+	if err := r.ParseMultipartForm(5 * 1024 * 1024); err != nil {
+		ErrorJSON(w, http.StatusBadRequest, "PAYLOAD_TOO_LARGE", "Upload exceeds maximum allowed limit of 5 MB", nil)
+		return
+	}
+
+	file, header, err := r.FormFile("file")
+	if err != nil {
+		// Also accept "image" field
+		file, header, err = r.FormFile("image")
+		if err != nil {
+			ErrorJSON(w, http.StatusBadRequest, "MISSING_FILE", "A multipart file field named 'file' or 'image' is required", nil)
+			return
+		}
+	}
+	defer file.Close()
+
+	res, err := h.marketplaceService.UploadProductImageDirect(r.Context(), user, header.Filename, file, header.Size)
+	if err != nil {
+		if errors.Is(err, service.ErrBusinessNotFound) {
+			ErrorJSON(w, http.StatusNotFound, "BUSINESS_NOT_FOUND", "No active business profile found for this seller account", nil)
+			return
+		}
+		if errors.Is(err, service.ErrBusinessNotApproved) {
+			ErrorJSON(w, http.StatusForbidden, "BUSINESS_NOT_APPROVED", "Business account must be active or pending approval to upload product media", nil)
+			return
+		}
+		if errors.Is(err, service.ErrUnauthorizedSellerAction) {
+			ErrorJSON(w, http.StatusForbidden, "FORBIDDEN", err.Error(), nil)
+			return
+		}
+		if errors.Is(err, storage.ErrStorageUnconfigured) {
+			ErrorJSON(w, http.StatusServiceUnavailable, "STORAGE_UNCONFIGURED", "Product image storage service is currently unconfigured in this environment.", nil)
+			return
+		}
+		if errors.Is(err, storage.ErrImageEmpty) || errors.Is(err, storage.ErrImageTooLarge) ||
+			errors.Is(err, storage.ErrInvalidImageType) || errors.Is(err, storage.ErrCorruptImage) ||
+			errors.Is(err, storage.ErrInvalidDimensions) {
+			ErrorJSON(w, http.StatusBadRequest, "INVALID_IMAGE", err.Error(), nil)
+			return
+		}
+		ErrorJSON(w, http.StatusInternalServerError, "UPLOAD_FAILED", err.Error(), nil)
+		return
+	}
+
+	JSON(w, http.StatusCreated, res)
+}
+
+func (h *MarketplaceHandler) DeleteProductImage(w http.ResponseWriter, r *http.Request) {
+	user := GetCurrentUser(r.Context())
+	if user == nil {
+		ErrorJSON(w, http.StatusUnauthorized, "UNAUTHORIZED", "Authentication required", nil)
+		return
+	}
+
+	var objectKey string
+	if r.Header.Get("Content-Type") == "application/json" {
+		var req struct {
+			ObjectKey string `json:"object_key"`
+			URL       string `json:"url"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&req); err == nil {
+			objectKey = req.ObjectKey
+			if objectKey == "" && req.URL != "" {
+				parts := strings.Split(req.URL, storage.MarketplaceImagePrefix)
+				if len(parts) > 1 {
+					objectKey = storage.MarketplaceImagePrefix + parts[1]
+				}
+			}
+		}
+	}
+	if objectKey == "" {
+		objectKey = r.URL.Query().Get("key")
+	}
+	if objectKey == "" {
+		ErrorJSON(w, http.StatusBadRequest, "INVALID_REQUEST", "object_key or url is required", nil)
+		return
+	}
+
+	if err := h.marketplaceService.DeleteProductImage(r.Context(), user, objectKey); err != nil {
+		if errors.Is(err, service.ErrBusinessNotFound) {
+			ErrorJSON(w, http.StatusNotFound, "BUSINESS_NOT_FOUND", "Business not found", nil)
+			return
+		}
+		if errors.Is(err, storage.ErrUnauthorizedKey) {
+			ErrorJSON(w, http.StatusForbidden, "FORBIDDEN", "Unauthorized: this image does not belong to your business", nil)
+			return
+		}
+		if errors.Is(err, storage.ErrStorageUnconfigured) {
+			ErrorJSON(w, http.StatusServiceUnavailable, "STORAGE_UNCONFIGURED", "Storage service is unconfigured", nil)
+			return
+		}
+		ErrorJSON(w, http.StatusBadRequest, "DELETE_IMAGE_FAILED", err.Error(), nil)
+		return
+	}
+
+	JSON(w, http.StatusOK, map[string]interface{}{
+		"success": true,
+		"message": "Product image deleted successfully",
+	})
+}
+
+func (h *MarketplaceHandler) MockDevUpload(w http.ResponseWriter, r *http.Request) {
+	// Accept mock upload payload in dev/sandbox mode
+	w.WriteHeader(http.StatusOK)
+	_, _ = w.Write([]byte(`{"status":"uploaded"}`))
 }
 
 func (h *MarketplaceHandler) ListSellerOrders(w http.ResponseWriter, r *http.Request) {

@@ -69,8 +69,20 @@ export default function ProductDetailPage({ params }: { params: Promise<{ id: st
   }
 
   const inStock = product.stock_quantity > 0;
-  const images = Array.isArray(product.images) ? product.images : [];
-  const currentImage = images.length > 0 ? images[activeImageIndex] : "";
+  let images: string[] = [];
+  if (Array.isArray(product.images)) {
+    images = product.images.filter((x: any): x is string => typeof x === "string" && Boolean(x.trim()));
+  } else if (typeof product.images === "string") {
+    try {
+      const parsed = JSON.parse(product.images);
+      if (Array.isArray(parsed)) {
+        images = parsed.filter((x: any): x is string => typeof x === "string" && Boolean(x.trim()));
+      }
+    } catch (_) {
+      if (product.images.trim()) images = [product.images.trim()];
+    }
+  }
+  const currentImage = images.length > 0 ? images[activeImageIndex] || images[0] : "";
 
   const formatNaira = (kobo: number) => {
     const naira = kobo / 100;

@@ -630,8 +630,29 @@ export default function AdminMarketplacePage() {
                   {products.map((p) => (
                     <tr key={p.id} className="hover:bg-gray-50/50">
                       <td className="py-3.5 px-4 font-bold text-gray-900">
-                        {p.title}
-                        {p.sku && <span className="block text-[10px] text-gray-400 font-mono">{p.sku}</span>}
+                        <div className="flex items-center gap-2.5">
+                          {(() => {
+                            let firstImg = "";
+                            try {
+                              const arr = typeof p.images === "string" ? JSON.parse(p.images) : p.images;
+                              if (Array.isArray(arr) && arr.length > 0) firstImg = arr[0];
+                            } catch (_) {}
+                            return firstImg ? (
+                              <img
+                                src={firstImg}
+                                alt={p.title}
+                                className="w-8 h-8 rounded-lg object-cover border border-gray-100 shrink-0"
+                                onError={(e) => {
+                                  (e.target as HTMLElement).style.display = "none";
+                                }}
+                              />
+                            ) : null;
+                          })()}
+                          <div className="truncate">
+                            <span className="truncate block">{p.title}</span>
+                            {p.sku && <span className="block text-[10px] text-gray-400 font-mono">{p.sku}</span>}
+                          </div>
+                        </div>
                       </td>
                       <td className="py-3.5 px-4">{p.business_name}</td>
                       <td className="py-3.5 px-4 capitalize">{p.category}</td>

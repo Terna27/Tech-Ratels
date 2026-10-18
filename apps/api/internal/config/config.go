@@ -33,6 +33,12 @@ type Config struct {
 	PaymentProvider           string // "paystack", "sandbox"
 	PaystackSecretKey         string
 	PaystackPublicKey         string
+	R2AccountID               string
+	R2AccessKeyID             string
+	R2SecretAccessKey         string
+	R2BucketName              string
+	R2PublicDomain            string
+	R2Endpoint                string
 }
 
 func Load() *Config {
@@ -170,6 +176,13 @@ func Load() *Config {
 		}
 	}
 
+	r2AccountID := strings.TrimSpace(os.Getenv("R2_ACCOUNT_ID"))
+	r2AccessKeyID := strings.TrimSpace(os.Getenv("R2_ACCESS_KEY_ID"))
+	r2SecretAccessKey := strings.TrimSpace(os.Getenv("R2_SECRET_ACCESS_KEY"))
+	r2BucketName := strings.TrimSpace(os.Getenv("R2_BUCKET_NAME"))
+	r2PublicDomain := strings.TrimRight(strings.TrimSpace(os.Getenv("R2_PUBLIC_DOMAIN")), "/")
+	r2Endpoint := strings.TrimRight(strings.TrimSpace(os.Getenv("R2_ENDPOINT")), "/")
+
 	return &Config{
 		DatabaseURL:               dbURL,
 		Port:                      port,
@@ -189,6 +202,12 @@ func Load() *Config {
 		PaymentProvider:           paymentProvider,
 		PaystackSecretKey:         paystackSecretKey,
 		PaystackPublicKey:         paystackPublicKey,
+		R2AccountID:               r2AccountID,
+		R2AccessKeyID:             r2AccessKeyID,
+		R2SecretAccessKey:         r2SecretAccessKey,
+		R2BucketName:              r2BucketName,
+		R2PublicDomain:            r2PublicDomain,
+		R2Endpoint:                r2Endpoint,
 	}
 }
 
@@ -260,6 +279,23 @@ func (c *Config) Validate() error {
 			// Allowed in production: checkout will be safely disabled until keys are supplied
 		default:
 			return fmt.Errorf("unsupported PAYMENT_PROVIDER in production: %q; supported providers are 'paystack' and 'unconfigured'", c.PaymentProvider)
+		}
+
+		// Cloudflare R2: If any R2 configuration is provided in production, all required keys must be provided
+		hasAnyR2 := c.R2AccessKeyID != "" || c.R2SecretAccessKey != "" || c.R2BucketName != "" || c.R2AccountID != ""
+		if hasAnyR2 {
+			if c.R2AccessKeyID == "" {
+				return errors.New("R2_ACCESS_KEY_ID is required in production when Cloudflare R2 is configured")
+			}
+			if c.R2SecretAccessKey == "" {
+				return errors.New("R2_SECRET_ACCESS_KEY is required in production when Cloudflare R2 is configured")
+			}
+			if c.R2BucketName == "" {
+				return errors.New("R2_BUCKET_NAME is required in production when Cloudflare R2 is configured")
+			}
+			if c.R2AccountID == "" && c.R2Endpoint == "" {
+				return errors.New("R2_ACCOUNT_ID (or R2_ENDPOINT) is required in production when Cloudflare R2 is configured")
+			}
 		}
 	}
 	return nil

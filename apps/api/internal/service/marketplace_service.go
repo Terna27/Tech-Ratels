@@ -1,10 +1,12 @@
 package service
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"strings"
 	"time"
 
@@ -13,6 +15,7 @@ import (
 	"ratels-api/internal/payment"
 	"ratels-api/internal/repository"
 	"ratels-api/internal/security"
+	"ratels-api/internal/storage"
 )
 
 var (
@@ -35,14 +38,47 @@ type MarketplaceService struct {
 	repo           *repository.Repository
 	audit          *AuditService
 	paymentGateway payment.PaymentGateway
+	storage        storage.StorageService
 }
 
-func NewMarketplaceService(repo *repository.Repository, audit *AuditService, gateway payment.PaymentGateway) *MarketplaceService {
+func NewMarketplaceService(repo *repository.Repository, audit *AuditService, gateway payment.PaymentGateway, stor ...storage.StorageService) *MarketplaceService {
+	var s storage.StorageService = storage.NewDevSandboxStorageService("")
+	if len(stor) > 0 && stor[0] != nil {
+		s = stor[0]
+	}
 	return &MarketplaceService{
 		repo:           repo,
 		audit:          audit,
 		paymentGateway: gateway,
+		storage:        s,
 	}
+}
+
+func (s *MarketplaceService) SetStorage(stor storage.StorageService) {
+	if stor != nil {
+		s.storage = stor
+	}
+}
+
+func (s *MarketplaceService) Storage() storage.StorageService {
+	return s.storage
+}
+
+type PresignedUploadResult struct {
+	UploadURL        string `json:"upload_url"`
+	ObjectKey        string `json:"object_key"`
+	PublicURL        string `json:"public_url"`
+	ExpiresInSeconds int64  `json:"expires_in_seconds"`
+}
+
+type UploadedImageResult struct {
+	ObjectKey   string `json:"object_key"`
+	PublicURL   string `json:"public_url"`
+	Width       int    `json:"width"`
+	Height      int    `json:"height"`
+	Format      string `json:"format"`
+	ContentType string `json:"content_type"`
+	Size        int64  `json:"size"`
 }
 
 // -------------------------------------------------------------
@@ -428,6 +464,15 @@ func (s *MarketplaceService) CreateProduct(ctx context.Context, user *db.User, i
 		slug = fmt.Sprintf("%s-%s", slug, strings.ToLower(security.GenerateUUID()[:6]))
 	}
 
+	if len(input.Images) > storage.MaxImagesPerProduct {
+		return nil, storage.ErrTooManyImages
+	}
+	for _, img := range input.Images {
+		if strings.Contains(img, storage.MarketplaceImagePrefix) && !strings.Contains(img, storage.MarketplaceImagePrefix+b.ID+"/") {
+			return nil, errors.New("cannot associate product with an image belonging to another business")
+		}
+	}
+
 	imagesJSON, _ := json.Marshal(input.Images)
 	if len(input.Images) == 0 {
 		imagesJSON = []byte("[]")
@@ -568,6 +613,15 @@ func (s *MarketplaceService) UpdateProduct(ctx context.Context, user *db.User, i
 		return nil, ErrInvalidPrice
 	}
 
+	if len(input.Images) > storage.MaxImagesPerProduct {
+		return nil, storage.ErrTooManyImages
+	}
+	for _, img := range input.Images {
+		if strings.Contains(img, storage.MarketplaceImagePrefix) && !strings.Contains(img, storage.MarketplaceImagePrefix+existing.BusinessID+"/") {
+			return nil, errors.New("cannot associate product with an image belonging to another business")
+		}
+	}
+
 	imagesJSON, _ := json.Marshal(input.Images)
 	if len(input.Images) == 0 {
 		imagesJSON = []byte("[]")
@@ -621,6 +675,118 @@ func (s *MarketplaceService) DeleteProduct(ctx context.Context, user *db.User, i
 		return fmt.Errorf("failed to delete product: %w", err)
 	}
 	_ = s.audit.Log(ctx, &user.ID, &user.PrimaryRole, "delete_marketplace_product", "marketplace_product", id, nil, nil, nil, nil)
+	return nil
+}
+
+// -------------------------------------------------------------
+// Product Image Upload & Storage Services
+// -------------------------------------------------------------
+
+func (s *MarketplaceService) AuthorizeProductImageUpload(ctx context.Context, user *db.User, filename, contentType string, fileSize int64) (*PresignedUploadResult, error) {
+	if user == nil {
+		return nil, ErrUnauthorizedSellerAction
+	}
+
+	b, err := s.repo.Queries().GetMarketplaceBusinessByOwner(ctx, user.ID)
+	if err != nil {
+		return nil, ErrBusinessNotFound
+	}
+	if b.Status != "approved" && b.Status != "pending" && !isAdmin(user) {
+		return nil, ErrBusinessNotApproved
+	}
+
+	canonicalExt, cleanContentType, err := storage.ValidateUploadRequest(filename, contentType, fileSize)
+	if err != nil {
+		return nil, err
+	}
+
+	if !s.storage.IsConfigured() {
+		return nil, storage.ErrStorageUnconfigured
+	}
+
+	objectKey := storage.GenerateProductImageKey(b.ID, canonicalExt)
+	expiry := 15 * time.Minute
+	uploadURL, err := s.storage.GeneratePresignedUpload(ctx, objectKey, cleanContentType, fileSize, expiry)
+	if err != nil {
+		return nil, fmt.Errorf("failed to generate upload authorization: %w", err)
+	}
+
+	publicURL := s.storage.GetPublicURL(objectKey)
+
+	_ = s.audit.Log(ctx, &user.ID, &user.PrimaryRole, "authorize_product_image_upload", "marketplace_image", objectKey, nil, nil, nil, nil)
+
+	return &PresignedUploadResult{
+		UploadURL:        uploadURL,
+		ObjectKey:        objectKey,
+		PublicURL:        publicURL,
+		ExpiresInSeconds: int64(expiry.Seconds()),
+	}, nil
+}
+
+func (s *MarketplaceService) UploadProductImageDirect(ctx context.Context, user *db.User, filename string, r io.Reader, size int64) (*UploadedImageResult, error) {
+	if user == nil {
+		return nil, ErrUnauthorizedSellerAction
+	}
+
+	b, err := s.repo.Queries().GetMarketplaceBusinessByOwner(ctx, user.ID)
+	if err != nil {
+		return nil, ErrBusinessNotFound
+	}
+	if b.Status != "approved" && b.Status != "pending" && !isAdmin(user) {
+		return nil, ErrBusinessNotApproved
+	}
+
+	if !s.storage.IsConfigured() {
+		return nil, storage.ErrStorageUnconfigured
+	}
+
+	imgBytes, meta, err := storage.InspectAndValidateImage(r, size)
+	if err != nil {
+		return nil, err
+	}
+
+	objectKey := storage.GenerateProductImageKey(b.ID, meta.Format)
+	publicURL, err := s.storage.UploadObject(ctx, objectKey, meta.ContentType, bytes.NewReader(imgBytes), meta.Size)
+	if err != nil {
+		return nil, fmt.Errorf("failed to store product image: %w", err)
+	}
+
+	_ = s.audit.Log(ctx, &user.ID, &user.PrimaryRole, "upload_product_image_direct", "marketplace_image", objectKey, nil, nil, nil, nil)
+
+	return &UploadedImageResult{
+		ObjectKey:   objectKey,
+		PublicURL:   publicURL,
+		Width:       meta.Width,
+		Height:      meta.Height,
+		Format:      meta.Format,
+		ContentType: meta.ContentType,
+		Size:        meta.Size,
+	}, nil
+}
+
+func (s *MarketplaceService) DeleteProductImage(ctx context.Context, user *db.User, objectKey string) error {
+	if user == nil {
+		return ErrUnauthorizedSellerAction
+	}
+
+	b, err := s.repo.Queries().GetMarketplaceBusinessByOwner(ctx, user.ID)
+	if err != nil {
+		return ErrBusinessNotFound
+	}
+
+	if !storage.ValidateKeyBelongsToBusiness(objectKey, b.ID) && !isAdmin(user) {
+		return storage.ErrUnauthorizedKey
+	}
+
+	if !s.storage.IsConfigured() {
+		return storage.ErrStorageUnconfigured
+	}
+
+	if err := s.storage.DeleteObject(ctx, objectKey); err != nil {
+		return fmt.Errorf("failed to delete image object: %w", err)
+	}
+
+	_ = s.audit.Log(ctx, &user.ID, &user.PrimaryRole, "delete_product_image", "marketplace_image", objectKey, nil, nil, nil, nil)
 	return nil
 }
 

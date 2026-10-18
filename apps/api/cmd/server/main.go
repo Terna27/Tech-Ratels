@@ -20,6 +20,7 @@ import (
 	"ratels-api/internal/repository"
 	"ratels-api/internal/security"
 	"ratels-api/internal/service"
+	"ratels-api/internal/storage"
 )
 
 func main() {
@@ -120,7 +121,31 @@ func main() {
 		paymentGateway = payment.NewUnconfiguredGateway()
 		log.Println("WARNING: Marketplace payment gateway is UNCONFIGURED. Checkout is safely disabled in this environment.")
 	}
-	marketplaceService := service.NewMarketplaceService(repo, auditService, paymentGateway)
+
+	var storageService storage.StorageService
+	if cfg.R2AccessKeyID != "" && cfg.R2SecretAccessKey != "" && cfg.R2BucketName != "" {
+		r2, err := storage.NewR2StorageService(ctx, storage.R2Config{
+			AccountID:       cfg.R2AccountID,
+			AccessKeyID:     cfg.R2AccessKeyID,
+			SecretAccessKey: cfg.R2SecretAccessKey,
+			BucketName:      cfg.R2BucketName,
+			PublicDomain:    cfg.R2PublicDomain,
+			Endpoint:        cfg.R2Endpoint,
+		})
+		if err != nil {
+			log.Fatalf("Failed to initialize Cloudflare R2 storage client: %v\n", err)
+		}
+		storageService = r2
+		log.Printf("Marketplace image storage initialized via Cloudflare R2 (bucket: %s, domain: %s)\n", cfg.R2BucketName, r2.GetPublicURL(""))
+	} else if !isProduction {
+		storageService = storage.NewDevSandboxStorageService(cfg.FrontendBaseURL)
+		log.Println("Marketplace image storage running in development safe sandbox mode (in-memory mock).")
+	} else {
+		storageService = storage.NewUnconfiguredStorageService()
+		log.Println("WARNING: Marketplace image storage is UNCONFIGURED in production. Image uploads will return 503 until R2 credentials are configured.")
+	}
+
+	marketplaceService := service.NewMarketplaceService(repo, auditService, paymentGateway, storageService)
 	careersService := service.NewCareersService(repo, auditService, emailDelivery)
 
 	// Handlers

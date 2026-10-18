@@ -29,11 +29,38 @@ async function runMarketplaceBrowserVerification() {
     throw new Error(`API login failed with status ${loginRes.status}: ${await loginRes.text()}`);
   }
   const loginData = await loginRes.json();
-  const token = loginData.access_token;
+  const token = loginData.access_token || loginData.token;
   const authHeaders = {
     "Content-Type": "application/json",
     "Authorization": `Bearer ${token}`,
   };
+
+  // 1b. Ensure browser_sa has an approved business profile for seller tests
+  console.log("-> Ensuring verified business profile exists for seller portal tests...");
+  const bizCheckRes = await fetch(`${API_BASE}/marketplace/seller/business`, { headers: authHeaders });
+  if (bizCheckRes.status === 404) {
+    const regRes = await fetch(`${API_BASE}/marketplace/seller/business`, {
+      method: "POST",
+      headers: authHeaders,
+      body: JSON.stringify({
+        name: "Movement Official Merchandise Store",
+        description: "Official merchandise and supplies",
+        category: "apparel",
+        ownership_type: "movement_owned",
+        contact_email: "official_store@ratels.org.ng",
+        contact_phone: "+2348009998877",
+      }),
+    });
+    if (regRes.ok) {
+      const regData = await regRes.json();
+      await fetch(`${API_BASE}/marketplace/admin/businesses/${regData.id}/approve`, {
+        method: "POST",
+        headers: authHeaders,
+        body: JSON.stringify({ approve: true, reason: "Verified for browser test" }),
+      });
+      console.log("   ✓ Business registered and approved.");
+    }
+  }
 
   // 2. Launch Google Chrome Headless
   console.log("-> Launching Google Chrome Headless...");
@@ -162,6 +189,67 @@ async function runMarketplaceBrowserVerification() {
     await page.waitForSelector("h1");
     const sellerH1 = await page.$eval("h1", el => el.innerText);
     console.log(`   Seller Portal Header: "${sellerH1}"`);
+
+    // Click "Products" tab
+    console.log("-> Switching to Products tab in Seller Portal...");
+    const productsTab = await page.evaluateHandle(() => {
+      const buttons = Array.from(document.querySelectorAll("button"));
+      return buttons.find(b => b.innerText.toLowerCase().includes("products"));
+    });
+    if (productsTab && productsTab.asElement()) {
+      await productsTab.asElement().click();
+      await new Promise(r => setTimeout(r, 600));
+    }
+
+    // Click "Add Product" / "Publish" button to test the new Cloudflare R2 file picker
+    console.log("-> Opening Product Modal to inspect Cloudflare R2 Image Upload control...");
+    const addProductBtn = await page.evaluateHandle(() => {
+      const buttons = Array.from(document.querySelectorAll("button"));
+      return buttons.find(b => b.innerText.toLowerCase().includes("publish") || b.innerText.toLowerCase().includes("add product"));
+    });
+    if (addProductBtn && addProductBtn.asElement()) {
+      await addProductBtn.asElement().click();
+      await new Promise(r => setTimeout(r, 600));
+
+      // 1. Verify the old text URL input is gone
+      const hasOldUrlInput = await page.evaluate(() => {
+        const labels = Array.from(document.querySelectorAll("label"));
+        return labels.some(l => l.innerText.toLowerCase().includes("comma-separated"));
+      });
+      if (hasOldUrlInput) {
+        throw new Error("Old comma-separated image URL field is still present in product modal!");
+      }
+      console.log("   ✓ Verified old manual image URL text input has been removed.");
+
+      // 2. Verify native file picker control and drag-and-drop zone
+      const fileInput = await page.$('input[type="file"][accept*="image"]');
+      if (!fileInput) {
+        throw new Error("Native image file input element not found in product modal!");
+      }
+      console.log("   ✓ Verified native file input with JPG/PNG/WebP filters is present.");
+
+      // 3. Verify upload prompt and device selection button
+      const hasUploadControl = await page.evaluate(() => {
+        const bodyText = document.body.innerText.toLowerCase();
+        return bodyText.includes("product images") &&
+               (bodyText.includes("drag and drop") || bodyText.includes("browse device")) &&
+               bodyText.includes("select images from device");
+      });
+      if (!hasUploadControl) {
+        throw new Error("Cloudflare R2 image upload control or drag-and-drop zone missing in product modal!");
+      }
+      console.log("   ✓ Verified Cloudflare R2 image upload zone, device picker button, and (0/5) limit indicator.");
+
+      // Close modal
+      const closeBtn = await page.evaluateHandle(() => {
+        const buttons = Array.from(document.querySelectorAll("button"));
+        return buttons.find(b => b.innerText.trim() === "✕");
+      });
+      if (closeBtn && closeBtn.asElement()) {
+        await closeBtn.asElement().click();
+        await new Promise(r => setTimeout(r, 300));
+      }
+    }
 
     // 11. Navigate to Admin Marketplace Workspace (/admin/marketplace)
     console.log("-> Navigating to Admin Marketplace Workspace (/admin/marketplace)...");

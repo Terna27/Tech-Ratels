@@ -225,11 +225,18 @@ func NewRouter(p RouterParams) http.Handler {
 				seller.Post("/products", p.MarketplaceHandler.CreateProduct)
 				seller.Put("/products/{id}", p.MarketplaceHandler.UpdateProduct)
 				seller.Delete("/products/{id}", p.MarketplaceHandler.DeleteProduct)
+				seller.Post("/products/images/presign", p.MarketplaceHandler.AuthorizeImageUpload)
+				seller.Post("/products/images/upload", p.MarketplaceHandler.UploadProductImage)
+				seller.Delete("/products/images", p.MarketplaceHandler.DeleteProductImage)
 				seller.Get("/orders", p.MarketplaceHandler.ListSellerOrders)
 				seller.Post("/orders/{id}/dispatch", p.MarketplaceHandler.DispatchOrder)
 				seller.Post("/orders/{id}/delivered", p.MarketplaceHandler.ConfirmDelivery)
 				seller.Get("/metrics", p.MarketplaceHandler.GetSellerMetrics)
 			})
+
+			// Dev sandbox mock presigned upload endpoint
+			mkt.Put("/uploads/mock-presign", p.MarketplaceHandler.MockDevUpload)
+			mkt.Post("/uploads/mock-presign", p.MarketplaceHandler.MockDevUpload)
 
 			// Marketplace Administration Workspace
 			mkt.Route("/admin", func(mktAdm chi.Router) {

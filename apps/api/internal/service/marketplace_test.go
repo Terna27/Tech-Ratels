@@ -1,15 +1,21 @@
 package service_test
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"image"
+	"image/color"
+	"image/jpeg"
+	"strings"
 	"testing"
 	"time"
 
 	"ratels-api/internal/payment"
 	"ratels-api/internal/service"
+	"ratels-api/internal/storage"
 )
 
 func TestMarketplaceService_VendorRegistrationAndApproval(t *testing.T) {
@@ -1113,5 +1119,328 @@ func TestMarketplaceService_DispatchStatusGuards(t *testing.T) {
 	})
 	if err == nil {
 		t.Fatal("Expected error dispatching already dispatched order, got nil")
+	}
+}
+
+func makeTestJPEGBytes(w, h int) []byte {
+	img := image.NewRGBA(image.Rect(0, 0, w, h))
+	for x := 0; x < w; x++ {
+		for y := 0; y < h; y++ {
+			img.Set(x, y, color.RGBA{R: 200, G: 100, B: 50, A: 255})
+		}
+	}
+	var buf bytes.Buffer
+	_ = jpeg.Encode(&buf, img, nil)
+	return buf.Bytes()
+}
+
+func TestMarketplaceService_ProductImageUpload_Presigned(t *testing.T) {
+	env := setupTestEnv(t)
+	defer env.Pool.Close()
+	ctx := context.Background()
+
+	seller := createRegisteredUser(t, env, "img_seller_1", "member")
+	admin := createRegisteredUser(t, env, "img_admin_1", "super_admin")
+	unverifiedSeller := createRegisteredUser(t, env, "img_unverified", "member")
+
+	// Register and approve business
+	biz, err := env.MarketplaceService.RegisterBusiness(ctx, seller, service.RegisterBusinessInput{
+		Name:          "Ratels Storefront Lagos",
+		Description:   "Official equipment store",
+		Category:      "apparel",
+		OwnershipType: "member_owned",
+		ContactEmail:  "lagos_store@example.org",
+		ContactPhone:  "+2348001112233",
+	})
+	if err != nil {
+		t.Fatalf("RegisterBusiness failed: %v", err)
+	}
+	_, err = env.MarketplaceService.ApproveBusiness(ctx, admin, biz.ID, true, "Approved for testing")
+	if err != nil {
+		t.Fatalf("ApproveBusiness failed: %v", err)
+	}
+
+	// 1. Valid presigned upload request by verified seller
+	res, err := env.MarketplaceService.AuthorizeProductImageUpload(ctx, seller, "beret.jpg", "image/jpeg", 150000)
+	if err != nil {
+		t.Fatalf("AuthorizeProductImageUpload failed: %v", err)
+	}
+	if !strings.HasPrefix(res.ObjectKey, "marketplace/products/"+biz.ID+"/") {
+		t.Fatalf("Expected key prefix marketplace/products/%s/, got %s", biz.ID, res.ObjectKey)
+	}
+	if !strings.HasSuffix(res.ObjectKey, ".jpg") {
+		t.Fatalf("Expected .jpg suffix, got %s", res.ObjectKey)
+	}
+	if res.UploadURL == "" || res.PublicURL == "" {
+		t.Fatalf("Missing UploadURL or PublicURL in response")
+	}
+	if res.ExpiresInSeconds <= 0 {
+		t.Fatalf("Invalid ExpiresInSeconds: %d", res.ExpiresInSeconds)
+	}
+
+	// 2. Unregistered / unverified seller cannot request upload authorization
+	_, err = env.MarketplaceService.AuthorizeProductImageUpload(ctx, unverifiedSeller, "beret.jpg", "image/jpeg", 150000)
+	if err == nil {
+		t.Fatal("Expected error for seller without business profile, got nil")
+	}
+
+	// 3. File exceeding 5MB rejected
+	_, err = env.MarketplaceService.AuthorizeProductImageUpload(ctx, seller, "huge.png", "image/png", storage.MaxProductImageSize+10)
+	if !errors.Is(err, storage.ErrImageTooLarge) {
+		t.Fatalf("Expected ErrImageTooLarge, got %v", err)
+	}
+
+	// 4. Disallowed extensions rejected (.pdf, .exe, .svg)
+	_, err = env.MarketplaceService.AuthorizeProductImageUpload(ctx, seller, "malicious.pdf", "application/pdf", 20000)
+	if !errors.Is(err, storage.ErrInvalidImageType) {
+		t.Fatalf("Expected ErrInvalidImageType, got %v", err)
+	}
+}
+
+func TestMarketplaceService_ProductImageUpload_DirectAndInspection(t *testing.T) {
+	env := setupTestEnv(t)
+	defer env.Pool.Close()
+	ctx := context.Background()
+
+	seller := createRegisteredUser(t, env, "direct_seller", "member")
+	admin := createRegisteredUser(t, env, "direct_admin", "super_admin")
+
+	biz, _ := env.MarketplaceService.RegisterBusiness(ctx, seller, service.RegisterBusinessInput{
+		Name:          "Direct Uploads Shop",
+		Description:   "Testing direct uploads",
+		Category:      "apparel",
+		OwnershipType: "member_owned",
+		ContactEmail:  "direct@example.org",
+		ContactPhone:  "+2348002223344",
+	})
+	_, _ = env.MarketplaceService.ApproveBusiness(ctx, admin, biz.ID, true, "Approved for testing")
+
+	// 1. Direct valid JPEG upload
+	jpegBytes := makeTestJPEGBytes(400, 300)
+	upRes, err := env.MarketplaceService.UploadProductImageDirect(ctx, seller, "test.jpg", bytes.NewReader(jpegBytes), int64(len(jpegBytes)))
+	if err != nil {
+		t.Fatalf("UploadProductImageDirect failed: %v", err)
+	}
+	if upRes.Width != 400 || upRes.Height != 300 {
+		t.Fatalf("Expected 400x300 dimensions, got %dx%d", upRes.Width, upRes.Height)
+	}
+	if !strings.HasPrefix(upRes.ObjectKey, "marketplace/products/"+biz.ID+"/") {
+		t.Fatalf("Unexpected key prefix: %s", upRes.ObjectKey)
+	}
+
+	// 2. Reject non-image file disguised as image
+	disguised := []byte("Not a real image file, just plain ASCII text")
+	_, err = env.MarketplaceService.UploadProductImageDirect(ctx, seller, "fake.jpg", bytes.NewReader(disguised), int64(len(disguised)))
+	if err == nil || !errors.Is(err, storage.ErrInvalidImageType) {
+		t.Fatalf("Expected ErrInvalidImageType for disguised text, got %v", err)
+	}
+
+	// 3. Reject corrupted image payload
+	corrupted := []byte{0xFF, 0xD8, 0xFF, 0xE0, 0x00, 0x10, 'J', 'F', 'I', 'F', 0x00, 0x00, 0x00}
+	_, err = env.MarketplaceService.UploadProductImageDirect(ctx, seller, "corrupt.jpg", bytes.NewReader(corrupted), int64(len(corrupted)))
+	if err == nil || !errors.Is(err, storage.ErrCorruptImage) {
+		t.Fatalf("Expected ErrCorruptImage for corrupted image, got %v", err)
+	}
+}
+
+func TestMarketplaceService_ProductImages_Enforce5MaxAndOrdering(t *testing.T) {
+	env := setupTestEnv(t)
+	defer env.Pool.Close()
+	ctx := context.Background()
+
+	seller := createRegisteredUser(t, env, "max_seller", "member")
+	admin := createRegisteredUser(t, env, "max_admin", "super_admin")
+
+	biz, _ := env.MarketplaceService.RegisterBusiness(ctx, seller, service.RegisterBusinessInput{
+		Name:          "Five Images Shop",
+		Description:   "Testing max 5 images",
+		Category:      "apparel",
+		OwnershipType: "member_owned",
+		ContactEmail:  "max5@example.org",
+		ContactPhone:  "+2348003334455",
+	})
+	_, _ = env.MarketplaceService.ApproveBusiness(ctx, admin, biz.ID, true, "Approved for testing")
+
+	validImages := []string{
+		fmt.Sprintf("https://images.ratels.org.ng/marketplace/products/%s/img1.jpg", biz.ID),
+		fmt.Sprintf("https://images.ratels.org.ng/marketplace/products/%s/img2.jpg", biz.ID),
+		fmt.Sprintf("https://images.ratels.org.ng/marketplace/products/%s/img3.jpg", biz.ID),
+	}
+
+	// 1. Create with 3 images succeeds and preserves order (index 0 is cover)
+	prod, err := env.MarketplaceService.CreateProduct(ctx, seller, service.CreateProductInput{
+		BusinessID:        biz.ID,
+		Title:             "Official Beret",
+		Description:       "Test beret",
+		Category:          "apparel",
+		SKU:               "BER-001",
+		PriceKobo:         500000,
+		StockQuantity:     20,
+		LowStockThreshold: 5,
+		Images:            validImages,
+		Status:            "published",
+	})
+	if err != nil {
+		t.Fatalf("CreateProduct failed: %v", err)
+	}
+
+	var savedImages []string
+	_ = json.Unmarshal(prod.Images, &savedImages)
+	if len(savedImages) != 3 {
+		t.Fatalf("Expected 3 images, got %d", len(savedImages))
+	}
+	if savedImages[0] != validImages[0] {
+		t.Fatalf("Expected primary cover image %s, got %s", validImages[0], savedImages[0])
+	}
+
+	// 2. Reject creating with more than 5 images
+	tooMany := []string{
+		"https://images.ratels.org.ng/1.jpg",
+		"https://images.ratels.org.ng/2.jpg",
+		"https://images.ratels.org.ng/3.jpg",
+		"https://images.ratels.org.ng/4.jpg",
+		"https://images.ratels.org.ng/5.jpg",
+		"https://images.ratels.org.ng/6.jpg",
+	}
+	_, err = env.MarketplaceService.CreateProduct(ctx, seller, service.CreateProductInput{
+		BusinessID:        biz.ID,
+		Title:             "Too Many Images Product",
+		Description:       "Test",
+		Category:          "apparel",
+		SKU:               "BER-002",
+		PriceKobo:         500000,
+		StockQuantity:     10,
+		LowStockThreshold: 2,
+		Images:            tooMany,
+		Status:            "published",
+	})
+	if !errors.Is(err, storage.ErrTooManyImages) {
+		t.Fatalf("Expected ErrTooManyImages, got %v", err)
+	}
+
+	// 3. Reordering images: change cover image to img3
+	reorderedImages := []string{
+		validImages[2], // new cover
+		validImages[0],
+		validImages[1],
+	}
+	updatedProd, err := env.MarketplaceService.UpdateProduct(ctx, seller, prod.ID, service.UpdateProductInput{
+		Title:             prod.Title,
+		Description:       prod.Description,
+		Category:          prod.Category,
+		SKU:               prod.Sku,
+		PriceKobo:         prod.PriceKobo,
+		StockQuantity:     prod.StockQuantity,
+		LowStockThreshold: prod.LowStockThreshold,
+		Images:            reorderedImages,
+		Status:            prod.Status,
+	})
+	if err != nil {
+		t.Fatalf("UpdateProduct failed: %v", err)
+	}
+
+	var updatedSaved []string
+	_ = json.Unmarshal(updatedProd.Images, &updatedSaved)
+	if updatedSaved[0] != validImages[2] {
+		t.Fatalf("Expected new cover image %s, got %s", validImages[2], updatedSaved[0])
+	}
+}
+
+func TestMarketplaceService_CrossSellerImageIsolation(t *testing.T) {
+	env := setupTestEnv(t)
+	defer env.Pool.Close()
+	ctx := context.Background()
+
+	sellerA := createRegisteredUser(t, env, "seller_iso_a", "member")
+	sellerB := createRegisteredUser(t, env, "seller_iso_b", "member")
+	admin := createRegisteredUser(t, env, "seller_iso_adm", "super_admin")
+
+	bizA, _ := env.MarketplaceService.RegisterBusiness(ctx, sellerA, service.RegisterBusinessInput{
+		Name:          "Seller A Shop",
+		Description:   "Shop A",
+		Category:      "apparel",
+		OwnershipType: "member_owned",
+		ContactEmail:  "a@example.org",
+		ContactPhone:  "+2348001110001",
+	})
+	_, _ = env.MarketplaceService.ApproveBusiness(ctx, admin, bizA.ID, true, "Approved for testing")
+
+	bizB, _ := env.MarketplaceService.RegisterBusiness(ctx, sellerB, service.RegisterBusinessInput{
+		Name:          "Seller B Shop",
+		Description:   "Shop B",
+		Category:      "apparel",
+		OwnershipType: "member_owned",
+		ContactEmail:  "b@example.org",
+		ContactPhone:  "+2348001110002",
+	})
+	_, _ = env.MarketplaceService.ApproveBusiness(ctx, admin, bizB.ID, true, "Approved for testing")
+
+	// Seller A creates an image
+	upResA, err := env.MarketplaceService.UploadProductImageDirect(ctx, sellerA, "a.jpg", bytes.NewReader(makeTestJPEGBytes(100, 100)), int64(len(makeTestJPEGBytes(100, 100))))
+	if err != nil {
+		t.Fatalf("UploadProductImageDirect for seller A failed: %v", err)
+	}
+
+	// 1. Seller B tries to create a product referencing Seller A's private upload key -> REJECTED
+	_, err = env.MarketplaceService.CreateProduct(ctx, sellerB, service.CreateProductInput{
+		BusinessID:        bizB.ID,
+		Title:             "Pirated Product",
+		Description:       "Using Seller A's images",
+		Category:          "apparel",
+		SKU:               "PIR-001",
+		PriceKobo:         100000,
+		StockQuantity:     5,
+		LowStockThreshold: 1,
+		Images:            []string{upResA.PublicURL},
+		Status:            "published",
+	})
+	if err == nil {
+		t.Fatal("Expected error when Seller B references Seller A's image, got nil")
+	}
+
+	// 2. Seller B tries to delete Seller A's image -> REJECTED
+	err = env.MarketplaceService.DeleteProductImage(ctx, sellerB, upResA.ObjectKey)
+	if err == nil || !errors.Is(err, storage.ErrUnauthorizedKey) {
+		t.Fatalf("Expected ErrUnauthorizedKey when Seller B attempts to delete Seller A's image, got %v", err)
+	}
+
+	// 3. Seller A can delete their own image -> SUCCEEDS
+	err = env.MarketplaceService.DeleteProductImage(ctx, sellerA, upResA.ObjectKey)
+	if err != nil {
+		t.Fatalf("Seller A should be able to delete their own image, got: %v", err)
+	}
+}
+
+func TestMarketplaceService_StorageUnconfiguredHandling(t *testing.T) {
+	env := setupTestEnv(t)
+	defer env.Pool.Close()
+	ctx := context.Background()
+
+	seller := createRegisteredUser(t, env, "unconf_seller", "member")
+	admin := createRegisteredUser(t, env, "unconf_admin", "super_admin")
+
+	biz, _ := env.MarketplaceService.RegisterBusiness(ctx, seller, service.RegisterBusinessInput{
+		Name:          "Unconfigured Shop",
+		Description:   "Shop",
+		Category:      "apparel",
+		OwnershipType: "member_owned",
+		ContactEmail:  "unconf@example.org",
+		ContactPhone:  "+2348009990000",
+	})
+	_, _ = env.MarketplaceService.ApproveBusiness(ctx, admin, biz.ID, true, "Approved for testing")
+
+	// Set storage to Unconfigured (as in production without R2 credentials)
+	env.MarketplaceService.SetStorage(storage.NewUnconfiguredStorageService())
+
+	// Presign request must fail cleanly with ErrStorageUnconfigured
+	_, err := env.MarketplaceService.AuthorizeProductImageUpload(ctx, seller, "beret.jpg", "image/jpeg", 50000)
+	if !errors.Is(err, storage.ErrStorageUnconfigured) {
+		t.Fatalf("Expected ErrStorageUnconfigured, got %v", err)
+	}
+
+	// Direct upload request must fail cleanly with ErrStorageUnconfigured
+	_, err = env.MarketplaceService.UploadProductImageDirect(ctx, seller, "beret.jpg", bytes.NewReader(makeTestJPEGBytes(100, 100)), int64(len(makeTestJPEGBytes(100, 100))))
+	if !errors.Is(err, storage.ErrStorageUnconfigured) {
+		t.Fatalf("Expected ErrStorageUnconfigured on direct upload, got %v", err)
 	}
 }

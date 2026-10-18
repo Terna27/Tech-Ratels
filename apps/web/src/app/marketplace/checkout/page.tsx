@@ -438,14 +438,30 @@ export default function CheckoutPage() {
               {/* Items List */}
               <div className="divide-y divide-gray-100 max-h-60 overflow-y-auto pr-1">
                 {items.map((item) => (
-                  <div key={item.productId} className="py-3 flex items-center justify-between text-xs">
-                    <div className="space-y-0.5 max-w-[70%]">
-                      <div className="font-bold text-gray-900 truncate">{item.title}</div>
-                      <div className="text-gray-500">
-                        Qty: {item.quantity} × ₦{(item.priceKobo / 100).toLocaleString()}
+                  <div key={item.productId} className="py-3 flex items-center justify-between text-xs gap-3">
+                    <div className="flex items-center gap-2.5 max-w-[70%]">
+                      {item.imageUrl ? (
+                        <img
+                          src={item.imageUrl}
+                          alt={item.title}
+                          className="w-10 h-10 rounded-lg object-cover border border-gray-100 shrink-0"
+                          onError={(e) => {
+                            (e.target as HTMLElement).style.display = "none";
+                          }}
+                        />
+                      ) : (
+                        <div className="w-10 h-10 rounded-lg bg-gray-100 flex items-center justify-center shrink-0">
+                          <ShoppingBag className="w-4 h-4 text-gray-400" />
+                        </div>
+                      )}
+                      <div className="space-y-0.5 truncate">
+                        <div className="font-bold text-gray-900 truncate">{item.title}</div>
+                        <div className="text-gray-500 text-[11px]">
+                          Qty: {item.quantity} × ₦{(item.priceKobo / 100).toLocaleString()}
+                        </div>
                       </div>
                     </div>
-                    <div className="font-bold text-gray-900">
+                    <div className="font-bold text-gray-900 shrink-0">
                       ₦{((item.priceKobo * item.quantity) / 100).toLocaleString()}
                     </div>
                   </div>

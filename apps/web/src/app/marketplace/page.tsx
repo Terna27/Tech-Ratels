@@ -36,6 +36,19 @@ const CATEGORIES = [
   { id: "general_goods", label: "General Goods" },
 ];
 
+function parseImages(raw: any): string[] {
+  if (Array.isArray(raw)) return raw.filter((x): x is string => typeof x === "string" && Boolean(x.trim()));
+  if (typeof raw === "string") {
+    try {
+      const parsed = JSON.parse(raw);
+      if (Array.isArray(parsed)) return parsed.filter((x): x is string => typeof x === "string" && Boolean(x.trim()));
+    } catch (_) {
+      if (raw.trim()) return [raw.trim()];
+    }
+  }
+  return [];
+}
+
 export default function MarketplaceStorefrontPage() {
   const { user } = useAuth();
   const { addToCart } = useCart();
@@ -78,10 +91,8 @@ export default function MarketplaceStorefrontPage() {
     e.preventDefault();
     e.stopPropagation();
 
-    let img = "";
-    if (Array.isArray(p.images) && p.images.length > 0) {
-      img = p.images[0];
-    }
+    const pImages = parseImages(p.images);
+    const img = pImages.length > 0 ? pImages[0] : "";
 
     addToCart({
       productId: p.id,
@@ -244,8 +255,8 @@ export default function MarketplaceStorefrontPage() {
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-6">
             {products.map((product) => {
               const inStock = product.stock_quantity > 0;
-              const hasImages = Array.isArray(product.images) && product.images.length > 0;
-              const firstImage = hasImages ? product.images[0] : "";
+              const prodImages = parseImages(product.images);
+              const firstImage = prodImages.length > 0 ? prodImages[0] : "";
 
               return (
                 <Link

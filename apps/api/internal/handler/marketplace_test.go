@@ -8,6 +8,10 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"image"
+	"image/color"
+	"image/jpeg"
+	"mime/multipart"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -18,6 +22,18 @@ import (
 	"ratels-api/internal/payment"
 	"ratels-api/internal/service"
 )
+
+func makeTestJPEGBytes(w, h int) []byte {
+	img := image.NewRGBA(image.Rect(0, 0, w, h))
+	for x := 0; x < w; x++ {
+		for y := 0; y < h; y++ {
+			img.Set(x, y, color.RGBA{R: 220, G: 80, B: 40, A: 255})
+		}
+	}
+	var buf bytes.Buffer
+	_ = jpeg.Encode(&buf, img, nil)
+	return buf.Bytes()
+}
 
 func createTestUserWithToken(t *testing.T, h *TestHarness, prefix, name, role string) (*db.User, string) {
 	t.Helper()
@@ -576,4 +592,196 @@ func computePaystackSignature(secret string, body []byte) string {
 	mac := hmac.New(sha512.New, []byte(secret))
 	mac.Write(body)
 	return hex.EncodeToString(mac.Sum(nil))
+}
+
+func TestMarketplaceHandler_ProductImageUpload_PresignEndpoint(t *testing.T) {
+	h := setupTestHarness(t)
+	defer h.Pool.Close()
+	ctx := context.Background()
+
+	seller, token := createTestUserWithToken(t, h, "h_img_seller", "H Seller", "member")
+	admin, _ := createTestUserWithToken(t, h, "h_img_admin", "H Admin", "super_admin")
+
+	biz, err := h.MarketplaceService.RegisterBusiness(ctx, seller, service.RegisterBusinessInput{
+		Name:          "H Image Store",
+		Description:   "Testing Image Handlers",
+		Category:      "apparel",
+		OwnershipType: "member_owned",
+		ContactEmail:  "himg@example.org",
+		ContactPhone:  "+2348008889999",
+	})
+	if err != nil {
+		t.Fatalf("RegisterBusiness failed: %v", err)
+	}
+	_, _ = h.MarketplaceService.ApproveBusiness(ctx, admin, biz.ID, true, "Approved for testing")
+
+	// 1. Authorized presign request
+	reqBody, _ := json.Marshal(map[string]interface{}{
+		"filename":     "product.jpg",
+		"content_type": "image/jpeg",
+		"file_size":    200000,
+	})
+	req, _ := http.NewRequest("POST", "/api/v1/marketplace/seller/products/images/presign", bytes.NewBuffer(reqBody))
+	req.Header.Set("Authorization", "Bearer "+token)
+	req.Header.Set("Content-Type", "application/json")
+	rr := httptest.NewRecorder()
+	h.Router.ServeHTTP(rr, req)
+
+	if rr.Code != http.StatusOK {
+		t.Fatalf("Expected 200 OK for presign request, got %d: %s", rr.Code, rr.Body.String())
+	}
+
+	var res map[string]interface{}
+	_ = json.Unmarshal(rr.Body.Bytes(), &res)
+	if res["upload_url"] == "" || res["object_key"] == "" || res["public_url"] == "" {
+		t.Fatalf("Expected upload_url, object_key, public_url in response: %v", res)
+	}
+
+	// 2. Reject request exceeding 5MB
+	hugeBody, _ := json.Marshal(map[string]interface{}{
+		"filename":     "huge.jpg",
+		"content_type": "image/jpeg",
+		"file_size":    6 * 1024 * 1024,
+	})
+	req, _ = http.NewRequest("POST", "/api/v1/marketplace/seller/products/images/presign", bytes.NewBuffer(hugeBody))
+	req.Header.Set("Authorization", "Bearer "+token)
+	req.Header.Set("Content-Type", "application/json")
+	rr = httptest.NewRecorder()
+	h.Router.ServeHTTP(rr, req)
+
+	if rr.Code != http.StatusBadRequest {
+		t.Fatalf("Expected 400 Bad Request for file > 5MB, got %d", rr.Code)
+	}
+
+	// 3. Reject unauthenticated request
+	req, _ = http.NewRequest("POST", "/api/v1/marketplace/seller/products/images/presign", bytes.NewBuffer(reqBody))
+	req.Header.Set("Content-Type", "application/json")
+	rr = httptest.NewRecorder()
+	h.Router.ServeHTTP(rr, req)
+
+	if rr.Code != http.StatusUnauthorized {
+		t.Fatalf("Expected 401 Unauthorized for missing auth token, got %d", rr.Code)
+	}
+}
+
+func TestMarketplaceHandler_ProductImageUpload_DirectMultipartEndpoint(t *testing.T) {
+	h := setupTestHarness(t)
+	defer h.Pool.Close()
+	ctx := context.Background()
+
+	seller, token := createTestUserWithToken(t, h, "h_direct_seller", "Direct Seller", "member")
+	admin, _ := createTestUserWithToken(t, h, "h_direct_admin", "Direct Admin", "super_admin")
+
+	biz, _ := h.MarketplaceService.RegisterBusiness(ctx, seller, service.RegisterBusinessInput{
+		Name:          "Direct Multipart Store",
+		Description:   "Testing Multipart",
+		Category:      "apparel",
+		OwnershipType: "member_owned",
+		ContactEmail:  "direct_mp@example.org",
+		ContactPhone:  "+2348007776666",
+	})
+	_, _ = h.MarketplaceService.ApproveBusiness(ctx, admin, biz.ID, true, "Approved for testing")
+
+	// 1. Valid multipart upload of JPEG
+	jpegBytes := makeTestJPEGBytes(300, 200)
+	var body bytes.Buffer
+	writer := multipart.NewWriter(&body)
+	part, _ := writer.CreateFormFile("file", "cap.jpg")
+	_, _ = part.Write(jpegBytes)
+	_ = writer.Close()
+
+	req, _ := http.NewRequest("POST", "/api/v1/marketplace/seller/products/images/upload", &body)
+	req.Header.Set("Authorization", "Bearer "+token)
+	req.Header.Set("Content-Type", writer.FormDataContentType())
+	rr := httptest.NewRecorder()
+	h.Router.ServeHTTP(rr, req)
+
+	if rr.Code != http.StatusCreated {
+		t.Fatalf("Expected 201 Created from direct multipart upload, got %d: %s", rr.Code, rr.Body.String())
+	}
+
+	var res map[string]interface{}
+	_ = json.Unmarshal(rr.Body.Bytes(), &res)
+	if res["object_key"] == "" || res["public_url"] == "" {
+		t.Fatalf("Expected object_key and public_url: %v", res)
+	}
+	if fmt.Sprintf("%v", res["width"]) != "300" || fmt.Sprintf("%v", res["height"]) != "200" {
+		t.Fatalf("Expected 300x200 dimensions, got %v x %v", res["width"], res["height"])
+	}
+
+	// 2. Reject corrupt image upload
+	var badBody bytes.Buffer
+	badWriter := multipart.NewWriter(&badBody)
+	badPart, _ := badWriter.CreateFormFile("file", "corrupt.jpg")
+	_, _ = badPart.Write([]byte("not an image at all"))
+	_ = badWriter.Close()
+
+	req, _ = http.NewRequest("POST", "/api/v1/marketplace/seller/products/images/upload", &badBody)
+	req.Header.Set("Authorization", "Bearer "+token)
+	req.Header.Set("Content-Type", badWriter.FormDataContentType())
+	rr = httptest.NewRecorder()
+	h.Router.ServeHTTP(rr, req)
+
+	if rr.Code != http.StatusBadRequest {
+		t.Fatalf("Expected 400 Bad Request for corrupted image payload, got %d", rr.Code)
+	}
+}
+
+func TestMarketplaceHandler_ProductImageUpload_DeleteEndpoint(t *testing.T) {
+	h := setupTestHarness(t)
+	defer h.Pool.Close()
+	ctx := context.Background()
+
+	sellerA, tokenA := createTestUserWithToken(t, h, "del_seller_a", "Del Seller A", "member")
+	sellerB, tokenB := createTestUserWithToken(t, h, "del_seller_b", "Del Seller B", "member")
+	admin, _ := createTestUserWithToken(t, h, "del_admin", "Del Admin", "super_admin")
+
+	bizA, _ := h.MarketplaceService.RegisterBusiness(ctx, sellerA, service.RegisterBusinessInput{
+		Name:          "Delete Store A",
+		Description:   "Store A",
+		Category:      "apparel",
+		OwnershipType: "member_owned",
+		ContactEmail:  "dela@example.org",
+		ContactPhone:  "+2348005551111",
+	})
+	_, _ = h.MarketplaceService.ApproveBusiness(ctx, admin, bizA.ID, true, "Approved for testing")
+
+	bizB, _ := h.MarketplaceService.RegisterBusiness(ctx, sellerB, service.RegisterBusinessInput{
+		Name:          "Delete Store B",
+		Description:   "Store B",
+		Category:      "apparel",
+		OwnershipType: "member_owned",
+		ContactEmail:  "delb@example.org",
+		ContactPhone:  "+2348005552222",
+	})
+	_, _ = h.MarketplaceService.ApproveBusiness(ctx, admin, bizB.ID, true, "Approved for testing")
+
+	// Upload image for Seller A
+	upResA, err := h.MarketplaceService.UploadProductImageDirect(ctx, sellerA, "a.jpg", bytes.NewReader(makeTestJPEGBytes(100, 100)), int64(len(makeTestJPEGBytes(100, 100))))
+	if err != nil {
+		t.Fatalf("UploadProductImageDirect failed: %v", err)
+	}
+
+	// 1. Seller B attempts to delete Seller A's image -> 403 Forbidden
+	delBody, _ := json.Marshal(map[string]interface{}{"object_key": upResA.ObjectKey})
+	req, _ := http.NewRequest("DELETE", "/api/v1/marketplace/seller/products/images", bytes.NewBuffer(delBody))
+	req.Header.Set("Authorization", "Bearer "+tokenB)
+	req.Header.Set("Content-Type", "application/json")
+	rr := httptest.NewRecorder()
+	h.Router.ServeHTTP(rr, req)
+
+	if rr.Code != http.StatusForbidden {
+		t.Fatalf("Expected 403 Forbidden when deleting other seller's image, got %d: %s", rr.Code, rr.Body.String())
+	}
+
+	// 2. Seller A deletes their own image -> 200 OK
+	req, _ = http.NewRequest("DELETE", "/api/v1/marketplace/seller/products/images", bytes.NewBuffer(delBody))
+	req.Header.Set("Authorization", "Bearer "+tokenA)
+	req.Header.Set("Content-Type", "application/json")
+	rr = httptest.NewRecorder()
+	h.Router.ServeHTTP(rr, req)
+
+	if rr.Code != http.StatusOK {
+		t.Fatalf("Expected 200 OK when seller deletes their own image, got %d: %s", rr.Code, rr.Body.String())
+	}
 }
