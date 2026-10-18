@@ -15,18 +15,22 @@ import {
   LogOut,
   LayoutDashboard,
   CheckCircle2,
+  ShoppingCart,
 } from "lucide-react";
 import { Badge } from "@/components/ui/Badge";
+import { useCart } from "@/lib/cart-context";
 
 export function Navbar() {
   const pathname = usePathname();
   const { user, isCoordinator, logout } = useAuth();
+  const { totalItems } = useCart();
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
 
   const navLinks = [
     { href: "/", label: "Home" },
     { href: "/about", label: "About" },
     { href: "/activities", label: "Cleanups & Events" },
+    { href: "/marketplace", label: "Ratels Marketplace" },
     { href: "/leadership", label: "Leadership" },
     { href: "/foundation", label: "Foundation" },
   ];
@@ -79,6 +83,20 @@ export function Navbar() {
 
           {/* Right Action Buttons */}
           <div className="hidden md:flex items-center gap-3">
+            {/* Shopping Cart Button */}
+            <Link
+              href="/marketplace/cart"
+              className="relative p-2 text-gray-700 hover:text-emerald-900 hover:bg-gray-100 rounded-lg transition"
+              title="Shopping Cart"
+            >
+              <ShoppingCart className="w-5 h-5" />
+              {totalItems > 0 && (
+                <span className="absolute -top-1 -right-1 bg-emerald-700 text-white text-[10px] font-bold w-4 h-4 rounded-full flex items-center justify-center">
+                  {totalItems > 99 ? "99+" : totalItems}
+                </span>
+              )}
+            </Link>
+
             {user ? (
               <div className="flex items-center gap-3">
                 {isCoordinator && (
@@ -129,8 +147,20 @@ export function Navbar() {
             )}
           </div>
 
-          {/* Mobile Menu Trigger */}
-          <div className="flex md:hidden items-center">
+          {/* Mobile Menu & Cart Trigger */}
+          <div className="flex md:hidden items-center gap-2">
+            <Link
+              href="/marketplace/cart"
+              className="relative p-2 text-gray-700 hover:text-emerald-900 rounded-lg"
+              title="Shopping Cart"
+            >
+              <ShoppingCart className="w-5 h-5" />
+              {totalItems > 0 && (
+                <span className="absolute -top-1 -right-1 bg-emerald-700 text-white text-[10px] font-bold w-4 h-4 rounded-full flex items-center justify-center">
+                  {totalItems > 99 ? "99+" : totalItems}
+                </span>
+              )}
+            </Link>
             <button
               type="button"
               onClick={() => setMobileMenuOpen(!mobileMenuOpen)}

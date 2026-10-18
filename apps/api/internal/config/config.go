@@ -30,6 +30,9 @@ type Config struct {
 	EmailFromAddress          string
 	EmailFrom                 string
 	FrontendBaseURL           string
+	PaymentProvider           string // "paystack", "sandbox"
+	PaystackSecretKey         string
+	PaystackPublicKey         string
 }
 
 func Load() *Config {
@@ -153,6 +156,18 @@ func Load() *Config {
 	}
 	frontendBaseURL = strings.TrimRight(frontendBaseURL, "/")
 
+	paymentProvider := strings.ToLower(strings.TrimSpace(os.Getenv("PAYMENT_PROVIDER")))
+	paystackSecretKey := strings.TrimSpace(os.Getenv("PAYSTACK_SECRET_KEY"))
+	paystackPublicKey := strings.TrimSpace(os.Getenv("PAYSTACK_PUBLIC_KEY"))
+
+	if paymentProvider == "" {
+		if paystackSecretKey != "" {
+			paymentProvider = "paystack"
+		} else {
+			paymentProvider = "sandbox"
+		}
+	}
+
 	return &Config{
 		DatabaseURL:               dbURL,
 		Port:                      port,
@@ -169,6 +184,9 @@ func Load() *Config {
 		EmailFromAddress:          emailFromAddress,
 		EmailFrom:                 emailFrom,
 		FrontendBaseURL:           frontendBaseURL,
+		PaymentProvider:           paymentProvider,
+		PaystackSecretKey:         paystackSecretKey,
+		PaystackPublicKey:         paystackPublicKey,
 	}
 }
 

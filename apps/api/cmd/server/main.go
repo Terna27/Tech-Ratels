@@ -15,6 +15,7 @@ import (
 	"ratels-api/internal/config"
 	"ratels-api/internal/delivery"
 	"ratels-api/internal/handler"
+	"ratels-api/internal/payment"
 	"ratels-api/internal/repository"
 	"ratels-api/internal/security"
 	"ratels-api/internal/service"
@@ -102,6 +103,16 @@ func main() {
 	financeService := service.NewFinanceService(repo, auditService)
 	inventoryService := service.NewInventoryService(repo, auditService)
 
+	var paymentGateway payment.PaymentGateway
+	if cfg.PaystackSecretKey != "" {
+		paymentGateway = payment.NewPaystackGateway(cfg.PaystackSecretKey, cfg.PaystackPublicKey)
+		log.Println("Marketplace payment gateway initialized via Paystack HTTPS API.")
+	} else {
+		paymentGateway = payment.NewSandboxGateway(cfg.FrontendBaseURL)
+		log.Println("Marketplace payment running in development safe sandbox mode (no external charges).")
+	}
+	marketplaceService := service.NewMarketplaceService(repo, auditService, paymentGateway)
+
 	// Handlers
 	healthH := handler.NewHealthHandler(repo)
 	authH := handler.NewAuthHandler(authService, cfg)
@@ -114,6 +125,7 @@ func main() {
 	adminH := handler.NewAdminHandler(adminService)
 	financeH := handler.NewFinanceHandler(financeService)
 	inventoryH := handler.NewInventoryHandler(inventoryService)
+	marketplaceH := handler.NewMarketplaceHandler(marketplaceService)
 
 	router := handler.NewRouter(handler.RouterParams{
 		Config:               cfg,
@@ -129,6 +141,7 @@ func main() {
 		AdminHandler:         adminH,
 		FinanceHandler:       financeH,
 		InventoryHandler:     inventoryH,
+		MarketplaceHandler:   marketplaceH,
 	})
 
 	srv := &http.Server{

@@ -24,6 +24,7 @@ type RouterParams struct {
 	AdminHandler         *AdminHandler
 	FinanceHandler       *FinanceHandler
 	InventoryHandler     *InventoryHandler
+	MarketplaceHandler   *MarketplaceHandler
 }
 
 func NewRouter(p RouterParams) http.Handler {
@@ -187,6 +188,58 @@ func NewRouter(p RouterParams) http.Handler {
 			// Stock Ledger & Reporting
 			inv.With(RequireRole("national_admin", "zonal_coordinator", "state_coordinator")).Get("/ledger", p.InventoryHandler.ListStockLedger)
 			inv.With(RequireAuth).Get("/summary", p.InventoryHandler.GetSummary)
+		})
+
+		// Ratels Marketplace (Blueprint v2.0 Section 07)
+		api.Route("/marketplace", func(mkt chi.Router) {
+			// Public Storefront
+			mkt.Get("/products", p.MarketplaceHandler.ListPublicProducts)
+			mkt.Get("/products/{id}", p.MarketplaceHandler.GetProduct)
+			mkt.Get("/products/slug/{slug}", p.MarketplaceHandler.GetProductBySlug)
+			mkt.Get("/businesses", p.MarketplaceHandler.ListBusinesses)
+			mkt.Get("/businesses/{id}", p.MarketplaceHandler.GetBusiness)
+			mkt.Get("/businesses/{id}/branches", p.MarketplaceHandler.ListBusinessBranches)
+			mkt.Post("/cart/validate", p.MarketplaceHandler.ValidateCart)
+			mkt.Post("/checkout", p.MarketplaceHandler.Checkout)
+			mkt.Get("/orders/lookup/{orderNumber}", p.MarketplaceHandler.LookupOrder)
+			mkt.Post("/payments/verify", p.MarketplaceHandler.VerifyPayment)
+			mkt.Post("/webhooks/paystack", p.MarketplaceHandler.PaystackWebhook)
+
+			// Authenticated Buyer Orders
+			mkt.With(RequireAuth).Get("/orders", p.MarketplaceHandler.ListMyOrders)
+			mkt.With(RequireAuth).Get("/orders/{id}", p.MarketplaceHandler.GetOrder)
+			mkt.With(RequireAuth).Post("/orders/{id}/dispute", p.MarketplaceHandler.RaiseDispute)
+
+			// Seller / Vendor Management
+			mkt.Route("/seller", func(seller chi.Router) {
+				seller.Use(RequireAuth)
+				seller.Post("/business", p.MarketplaceHandler.RegisterBusiness)
+				seller.Get("/business", p.MarketplaceHandler.GetMyBusiness)
+				seller.Put("/business", p.MarketplaceHandler.UpdateMyBusiness)
+				seller.Post("/branches", p.MarketplaceHandler.CreateBranch)
+				seller.Get("/products", p.MarketplaceHandler.ListMyProducts)
+				seller.Post("/products", p.MarketplaceHandler.CreateProduct)
+				seller.Put("/products/{id}", p.MarketplaceHandler.UpdateProduct)
+				seller.Delete("/products/{id}", p.MarketplaceHandler.DeleteProduct)
+				seller.Get("/orders", p.MarketplaceHandler.ListSellerOrders)
+				seller.Post("/orders/{id}/dispatch", p.MarketplaceHandler.DispatchOrder)
+				seller.Post("/orders/{id}/delivered", p.MarketplaceHandler.ConfirmDelivery)
+				seller.Get("/metrics", p.MarketplaceHandler.GetSellerMetrics)
+			})
+
+			// Marketplace Administration Workspace
+			mkt.Route("/admin", func(mktAdm chi.Router) {
+				mktAdm.Use(RequireRole("national_admin", "super_admin", "zonal_coordinator", "state_coordinator"))
+				mktAdm.Get("/overview", p.MarketplaceHandler.GetAdminOverview)
+				mktAdm.Get("/businesses", p.MarketplaceHandler.ListAllBusinessesAdmin)
+				mktAdm.Post("/businesses/{id}/approve", p.MarketplaceHandler.ApproveBusiness)
+				mktAdm.Get("/products", p.MarketplaceHandler.ListAllProductsAdmin)
+				mktAdm.Put("/products/{id}/status", p.MarketplaceHandler.ModerateProduct)
+				mktAdm.Get("/orders", p.MarketplaceHandler.ListAllOrdersAdmin)
+				mktAdm.Get("/payments", p.MarketplaceHandler.ListPaymentsAdmin)
+				mktAdm.Get("/disputes", p.MarketplaceHandler.ListDisputesAdmin)
+				mktAdm.Post("/disputes/{id}/resolve", p.MarketplaceHandler.ResolveDispute)
+			})
 		})
 
 		// Admin Workspace

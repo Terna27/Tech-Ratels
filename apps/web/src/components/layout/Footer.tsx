@@ -49,6 +49,11 @@ export function Footer() {
                 </Link>
               </li>
               <li>
+                <Link href="/marketplace" className="hover:text-emerald-400 transition">
+                  Ratels Marketplace
+                </Link>
+              </li>
+              <li>
                 <Link href="/about" className="hover:text-emerald-400 transition">
                   About the Movement
                 </Link>

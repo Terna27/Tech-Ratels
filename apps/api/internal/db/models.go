@@ -307,6 +307,157 @@ type Lga struct {
 	Version         int32              `json:"version"`
 }
 
+type MarketplaceBusiness struct {
+	ID                      string             `json:"id"`
+	OwnerUserID             string             `json:"owner_user_id"`
+	Name                    string             `json:"name"`
+	Slug                    string             `json:"slug"`
+	Description             string             `json:"description"`
+	Category                string             `json:"category"`
+	OwnershipType           string             `json:"ownership_type"`
+	Status                  string             `json:"status"`
+	ContactEmail            string             `json:"contact_email"`
+	ContactPhone            string             `json:"contact_phone"`
+	LogoUrl                 pgtype.Text        `json:"logo_url"`
+	BannerUrl               pgtype.Text        `json:"banner_url"`
+	SettlementBankName      pgtype.Text        `json:"settlement_bank_name"`
+	SettlementAccountNumber pgtype.Text        `json:"settlement_account_number"`
+	SettlementAccountName   pgtype.Text        `json:"settlement_account_name"`
+	IsVerified              bool               `json:"is_verified"`
+	VerifiedByUserID        pgtype.Text        `json:"verified_by_user_id"`
+	VerifiedAt              pgtype.Timestamptz `json:"verified_at"`
+	RejectionReason         pgtype.Text        `json:"rejection_reason"`
+	CreatedAt               pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt               pgtype.Timestamptz `json:"updated_at"`
+	Version                 int32              `json:"version"`
+}
+
+type MarketplaceBusinessBranch struct {
+	ID             string             `json:"id"`
+	BusinessID     string             `json:"business_id"`
+	BranchName     string             `json:"branch_name"`
+	StateID        string             `json:"state_id"`
+	LgaID          pgtype.Text        `json:"lga_id"`
+	Address        string             `json:"address"`
+	ContactPhone   string             `json:"contact_phone"`
+	ManagerName    pgtype.Text        `json:"manager_name"`
+	IsHeadquarters bool               `json:"is_headquarters"`
+	IsActive       bool               `json:"is_active"`
+	CreatedAt      pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt      pgtype.Timestamptz `json:"updated_at"`
+}
+
+type MarketplaceDispute struct {
+	ID               string             `json:"id"`
+	OrderID          string             `json:"order_id"`
+	RaisedByUserID   string             `json:"raised_by_user_id"`
+	Reason           string             `json:"reason"`
+	CustomerNotes    string             `json:"customer_notes"`
+	Status           string             `json:"status"`
+	ResolutionNotes  pgtype.Text        `json:"resolution_notes"`
+	ResolvedByUserID pgtype.Text        `json:"resolved_by_user_id"`
+	ResolvedAt       pgtype.Timestamptz `json:"resolved_at"`
+	CreatedAt        pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt        pgtype.Timestamptz `json:"updated_at"`
+}
+
+type MarketplaceOrder struct {
+	ID               string             `json:"id"`
+	OrderNumber      string             `json:"order_number"`
+	BuyerUserID      pgtype.Text        `json:"buyer_user_id"`
+	BuyerName        string             `json:"buyer_name"`
+	BuyerEmail       string             `json:"buyer_email"`
+	BuyerPhone       string             `json:"buyer_phone"`
+	DeliveryType     string             `json:"delivery_type"`
+	ShippingAddress  string             `json:"shipping_address"`
+	ShippingStateID  pgtype.Text        `json:"shipping_state_id"`
+	ShippingLgaID    pgtype.Text        `json:"shipping_lga_id"`
+	PickupBranchID   pgtype.Text        `json:"pickup_branch_id"`
+	SubtotalKobo     int64              `json:"subtotal_kobo"`
+	DeliveryFeeKobo  int64              `json:"delivery_fee_kobo"`
+	TotalKobo        int64              `json:"total_kobo"`
+	Currency         string             `json:"currency"`
+	OrderStatus      string             `json:"order_status"`
+	PaymentStatus    string             `json:"payment_status"`
+	FulfilmentStatus string             `json:"fulfilment_status"`
+	IdempotencyKey   pgtype.Text        `json:"idempotency_key"`
+	Notes            pgtype.Text        `json:"notes"`
+	CreatedAt        pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt        pgtype.Timestamptz `json:"updated_at"`
+	Version          int32              `json:"version"`
+}
+
+type MarketplaceOrderItem struct {
+	ID                string             `json:"id"`
+	OrderID           string             `json:"order_id"`
+	ProductID         pgtype.Text        `json:"product_id"`
+	BusinessID        string             `json:"business_id"`
+	TitleSnapshot     string             `json:"title_snapshot"`
+	SkuSnapshot       string             `json:"sku_snapshot"`
+	PriceKoboSnapshot int64              `json:"price_kobo_snapshot"`
+	Quantity          int32              `json:"quantity"`
+	SubtotalKobo      int64              `json:"subtotal_kobo"`
+	ImageUrlSnapshot  pgtype.Text        `json:"image_url_snapshot"`
+	CreatedAt         pgtype.Timestamptz `json:"created_at"`
+}
+
+type MarketplacePayment struct {
+	ID                string             `json:"id"`
+	OrderID           string             `json:"order_id"`
+	Reference         string             `json:"reference"`
+	Provider          string             `json:"provider"`
+	ProviderReference pgtype.Text        `json:"provider_reference"`
+	Channel           pgtype.Text        `json:"channel"`
+	AmountKobo        int64              `json:"amount_kobo"`
+	Currency          string             `json:"currency"`
+	Status            string             `json:"status"`
+	PaidAt            pgtype.Timestamptz `json:"paid_at"`
+	RawWebhookPayload []byte             `json:"raw_webhook_payload"`
+	ErrorMessage      pgtype.Text        `json:"error_message"`
+	CreatedAt         pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt         pgtype.Timestamptz `json:"updated_at"`
+}
+
+type MarketplaceProduct struct {
+	ID                   string             `json:"id"`
+	BusinessID           string             `json:"business_id"`
+	BranchID             pgtype.Text        `json:"branch_id"`
+	Title                string             `json:"title"`
+	Slug                 string             `json:"slug"`
+	Description          string             `json:"description"`
+	Category             string             `json:"category"`
+	Sku                  string             `json:"sku"`
+	PriceKobo            int64              `json:"price_kobo"`
+	CompareAtPriceKobo   pgtype.Int8        `json:"compare_at_price_kobo"`
+	StockQuantity        int32              `json:"stock_quantity"`
+	LowStockThreshold    int32              `json:"low_stock_threshold"`
+	Images               []byte             `json:"images"`
+	WeightGrams          pgtype.Int4        `json:"weight_grams"`
+	DeliveryRestrictions pgtype.Text        `json:"delivery_restrictions"`
+	ReturnPolicy         pgtype.Text        `json:"return_policy"`
+	Status               string             `json:"status"`
+	IsFeatured           bool               `json:"is_featured"`
+	CreatedAt            pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt            pgtype.Timestamptz `json:"updated_at"`
+	Version              int32              `json:"version"`
+}
+
+type MarketplaceShipment struct {
+	ID                  string             `json:"id"`
+	OrderID             string             `json:"order_id"`
+	CarrierName         string             `json:"carrier_name"`
+	TrackingNumber      string             `json:"tracking_number"`
+	TrackingUrl         pgtype.Text        `json:"tracking_url"`
+	Status              string             `json:"status"`
+	DispatchedAt        pgtype.Timestamptz `json:"dispatched_at"`
+	EstimatedDeliveryAt pgtype.Timestamptz `json:"estimated_delivery_at"`
+	DeliveredAt         pgtype.Timestamptz `json:"delivered_at"`
+	DeliveryNotes       pgtype.Text        `json:"delivery_notes"`
+	ProofOfDeliveryUrl  pgtype.Text        `json:"proof_of_delivery_url"`
+	CreatedAt           pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt           pgtype.Timestamptz `json:"updated_at"`
+}
+
 type MaterialRequest struct {
 	ID                    string             `json:"id"`
 	Reference             string             `json:"reference"`

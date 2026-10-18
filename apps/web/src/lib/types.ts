@@ -514,3 +514,211 @@ export interface InventorySummary {
   low_stock_alerts_count: number;
 }
 
+// -------------------------------------------------------------
+// Ratels Marketplace Types (Blueprint v2.0 Section 07)
+// -------------------------------------------------------------
+
+export interface MarketplaceBusiness {
+  id: string;
+  owner_user_id: string;
+  owner_name?: string;
+  owner_email?: string;
+  owner_phone?: string;
+  name: string;
+  slug: string;
+  description: string;
+  category: string;
+  ownership_type: "movement_owned" | "member_owned" | "approved_partner";
+  status: "pending_review" | "approved" | "suspended" | "rejected";
+  contact_email: string;
+  contact_phone: string;
+  logo_url?: string;
+  banner_url?: string;
+  settlement_bank_name?: string;
+  settlement_account_number?: string;
+  settlement_account_name?: string;
+  is_verified: boolean;
+  verified_by_user_id?: string;
+  verified_by_name?: string;
+  verified_at?: string;
+  rejection_reason?: string;
+  total_products?: number;
+  total_branches?: number;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface BusinessBranch {
+  id: string;
+  business_id: string;
+  branch_name: string;
+  state_id: string;
+  state_name?: string;
+  lga_id?: string;
+  lga_name?: string;
+  address: string;
+  contact_phone: string;
+  manager_name?: string;
+  is_headquarters: boolean;
+  is_active: boolean;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface MarketplaceProduct {
+  id: string;
+  business_id: string;
+  business_name?: string;
+  business_slug?: string;
+  business_ownership_type?: string;
+  business_owner_id?: string;
+  branch_id?: string;
+  branch_name?: string;
+  branch_state_name?: string;
+  title: string;
+  slug: string;
+  description: string;
+  category: string;
+  sku: string;
+  price_kobo: number;
+  compare_at_price_kobo?: number;
+  stock_quantity: number;
+  low_stock_threshold: number;
+  images: string[] | any;
+  weight_grams?: number;
+  delivery_restrictions?: string;
+  return_policy?: string;
+  status: "draft" | "published" | "archived";
+  is_featured: boolean;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface MarketplaceOrderItem {
+  id: string;
+  order_id: string;
+  product_id?: string;
+  business_id: string;
+  business_name?: string;
+  business_slug?: string;
+  title_snapshot: string;
+  sku_snapshot: string;
+  price_kobo_snapshot: number;
+  quantity: number;
+  subtotal_kobo: number;
+  image_url_snapshot?: string;
+  created_at: string;
+}
+
+export interface MarketplaceOrder {
+  id: string;
+  order_number: string;
+  buyer_user_id?: string;
+  buyer_name: string;
+  buyer_email: string;
+  buyer_phone: string;
+  delivery_type: "delivery" | "pickup";
+  shipping_address: string;
+  shipping_state_id?: string;
+  shipping_state_name?: string;
+  shipping_lga_id?: string;
+  shipping_lga_name?: string;
+  pickup_branch_id?: string;
+  pickup_branch_name?: string;
+  pickup_branch_address?: string;
+  subtotal_kobo: number;
+  delivery_fee_kobo: number;
+  total_kobo: number;
+  currency: string;
+  order_status: "placed" | "processing" | "ready_for_pickup" | "dispatched" | "delivered" | "cancelled" | "refunded";
+  payment_status: "pending" | "paid" | "failed" | "refunded";
+  fulfilment_status: "unfulfilled" | "preparing" | "dispatched" | "delivered" | "returned";
+  idempotency_key?: string;
+  notes?: string;
+  item_count?: number;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface MarketplacePayment {
+  id: string;
+  order_id: string;
+  order_number?: string;
+  buyer_name?: string;
+  buyer_email?: string;
+  reference: string;
+  provider: string;
+  provider_reference?: string;
+  channel?: string;
+  amount_kobo: number;
+  currency: string;
+  status: "pending" | "successful" | "failed" | "refunded";
+  paid_at?: string;
+  error_message?: string;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface MarketplaceShipment {
+  id: string;
+  order_id: string;
+  carrier_name: string;
+  tracking_number: string;
+  tracking_url?: string;
+  status: "dispatched" | "in_transit" | "delivered" | "failed" | "returned";
+  dispatched_at: string;
+  estimated_delivery_at?: string;
+  delivered_at?: string;
+  delivery_notes?: string;
+  proof_of_delivery_url?: string;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface MarketplaceDispute {
+  id: string;
+  order_id: string;
+  order_number?: string;
+  total_kobo?: number;
+  raised_by_user_id: string;
+  raised_by_name?: string;
+  raised_by_email?: string;
+  reason: "damaged_goods" | "missing_delivery" | "item_mismatch" | "cancelled_before_dispatch" | "other";
+  customer_notes: string;
+  status: "open" | "under_review" | "resolved_refunded" | "rejected";
+  resolution_notes?: string;
+  resolved_by_user_id?: string;
+  resolved_by_name?: string;
+  resolved_at?: string;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface CartItem {
+  productId: string;
+  title: string;
+  priceKobo: number;
+  quantity: number;
+  imageUrl?: string;
+  sku: string;
+  businessName?: string;
+}
+
+export interface MarketplaceAdminOverviewMetrics {
+  total_gmv_kobo: number;
+  total_orders_count: number;
+  active_orders_count: number;
+  pending_businesses_count: number;
+  approved_businesses_count: number;
+  active_products_count: number;
+  open_disputes_count: number;
+}
+
+export interface MarketplaceSellerOverviewMetrics {
+  seller_gross_sales_kobo: number;
+  seller_orders_count: number;
+  seller_pending_orders_count: number;
+  seller_products_count: number;
+}
+
+

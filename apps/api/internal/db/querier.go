@@ -34,6 +34,10 @@ type Querier interface {
 	CreateBadge(ctx context.Context, arg CreateBadgeParams) (Badge, error)
 	CreateBadgeAward(ctx context.Context, arg CreateBadgeAwardParams) (BadgeAward, error)
 	CreateBankAccountVersion(ctx context.Context, arg CreateBankAccountVersionParams) (VerifiedBankAccountVersion, error)
+	// -------------------------------------------------------------
+	// Marketplace Business Branches
+	// -------------------------------------------------------------
+	CreateBusinessBranch(ctx context.Context, arg CreateBusinessBranchParams) (MarketplaceBusinessBranch, error)
 	CreateCapitalCity(ctx context.Context, arg CreateCapitalCityParams) (CapitalCity, error)
 	CreateCleanupCampaign(ctx context.Context, arg CreateCleanupCampaignParams) (CleanupCampaign, error)
 	CreateContactVerification(ctx context.Context, arg CreateContactVerificationParams) (ContactVerification, error)
@@ -48,6 +52,34 @@ type Querier interface {
 	CreateInventoryItem(ctx context.Context, arg CreateInventoryItemParams) (InventoryItem, error)
 	CreateLGA(ctx context.Context, arg CreateLGAParams) (Lga, error)
 	CreateLedgerEntry(ctx context.Context, arg CreateLedgerEntryParams) (FinancialLedgerEntry, error)
+	// -------------------------------------------------------------
+	// Marketplace Businesses
+	// -------------------------------------------------------------
+	CreateMarketplaceBusiness(ctx context.Context, arg CreateMarketplaceBusinessParams) (MarketplaceBusiness, error)
+	// -------------------------------------------------------------
+	// Marketplace Disputes
+	// -------------------------------------------------------------
+	CreateMarketplaceDispute(ctx context.Context, arg CreateMarketplaceDisputeParams) (MarketplaceDispute, error)
+	// -------------------------------------------------------------
+	// Marketplace Orders
+	// -------------------------------------------------------------
+	CreateMarketplaceOrder(ctx context.Context, arg CreateMarketplaceOrderParams) (MarketplaceOrder, error)
+	// -------------------------------------------------------------
+	// Marketplace Order Items
+	// -------------------------------------------------------------
+	CreateMarketplaceOrderItem(ctx context.Context, arg CreateMarketplaceOrderItemParams) (MarketplaceOrderItem, error)
+	// -------------------------------------------------------------
+	// Marketplace Payments
+	// -------------------------------------------------------------
+	CreateMarketplacePayment(ctx context.Context, arg CreateMarketplacePaymentParams) (MarketplacePayment, error)
+	// -------------------------------------------------------------
+	// Marketplace Products
+	// -------------------------------------------------------------
+	CreateMarketplaceProduct(ctx context.Context, arg CreateMarketplaceProductParams) (MarketplaceProduct, error)
+	// -------------------------------------------------------------
+	// Marketplace Shipments
+	// -------------------------------------------------------------
+	CreateMarketplaceShipment(ctx context.Context, arg CreateMarketplaceShipmentParams) (MarketplaceShipment, error)
 	CreateMaterialRequest(ctx context.Context, arg CreateMaterialRequestParams) (MaterialRequest, error)
 	CreateMaterialRequestItem(ctx context.Context, arg CreateMaterialRequestItemParams) (MaterialRequestItem, error)
 	CreateMaterialTransfer(ctx context.Context, arg CreateMaterialTransferParams) (MaterialTransfer, error)
@@ -63,8 +95,11 @@ type Querier interface {
 	CreateUser(ctx context.Context, arg CreateUserParams) (User, error)
 	CreateUserSession(ctx context.Context, arg CreateUserSessionParams) (UserSession, error)
 	CreateZone(ctx context.Context, arg CreateZoneParams) (Zone, error)
+	DecrementProductStock(ctx context.Context, arg DecrementProductStockParams) (MarketplaceProduct, error)
 	DecrementRegisteredCount(ctx context.Context, id string) (EventInstance, error)
+	DeleteBusinessBranch(ctx context.Context, id string) error
 	DeleteLGA(ctx context.Context, id string) error
+	DeleteMarketplaceProduct(ctx context.Context, id string) error
 	GetActiveAppointmentByJurisdiction(ctx context.Context, arg GetActiveAppointmentByJurisdictionParams) (Appointment, error)
 	GetActiveFinancialAuthorization(ctx context.Context, userID string) (FinancialAuthorization, error)
 	GetActiveVerification(ctx context.Context, arg GetActiveVerificationParams) (ContactVerification, error)
@@ -72,6 +107,7 @@ type Querier interface {
 	GetBadgeAward(ctx context.Context, arg GetBadgeAwardParams) (BadgeAward, error)
 	GetBadgeByCode(ctx context.Context, code string) (Badge, error)
 	GetBankAccountVersionByID(ctx context.Context, id string) (VerifiedBankAccountVersion, error)
+	GetBusinessBranchByID(ctx context.Context, id string) (GetBusinessBranchByIDRow, error)
 	GetCapitalCityByState(ctx context.Context, stateID string) (CapitalCity, error)
 	GetCleanupCampaignByID(ctx context.Context, id string) (CleanupCampaign, error)
 	GetCleanupCampaignByYearMonth(ctx context.Context, arg GetCleanupCampaignByYearMonthParams) (CleanupCampaign, error)
@@ -89,6 +125,23 @@ type Querier interface {
 	GetLGAByID(ctx context.Context, id string) (Lga, error)
 	GetLGAByStateAndName(ctx context.Context, arg GetLGAByStateAndNameParams) (Lga, error)
 	GetLatestStockLedgerEntry(ctx context.Context, arg GetLatestStockLedgerEntryParams) (StockLedgerEntry, error)
+	// -------------------------------------------------------------
+	// Marketplace Overview Analytics
+	// -------------------------------------------------------------
+	GetMarketplaceAdminOverviewMetrics(ctx context.Context) (GetMarketplaceAdminOverviewMetricsRow, error)
+	GetMarketplaceBusinessByID(ctx context.Context, id string) (GetMarketplaceBusinessByIDRow, error)
+	GetMarketplaceBusinessByOwner(ctx context.Context, ownerUserID string) (MarketplaceBusiness, error)
+	GetMarketplaceBusinessBySlug(ctx context.Context, slug string) (GetMarketplaceBusinessBySlugRow, error)
+	GetMarketplaceDisputeByID(ctx context.Context, id string) (GetMarketplaceDisputeByIDRow, error)
+	GetMarketplaceOrderByID(ctx context.Context, id string) (GetMarketplaceOrderByIDRow, error)
+	GetMarketplaceOrderByIdempotencyKey(ctx context.Context, idempotencyKey pgtype.Text) (MarketplaceOrder, error)
+	GetMarketplaceOrderByOrderNumber(ctx context.Context, orderNumber string) (GetMarketplaceOrderByOrderNumberRow, error)
+	GetMarketplacePaymentByOrder(ctx context.Context, orderID string) (MarketplacePayment, error)
+	GetMarketplacePaymentByReference(ctx context.Context, reference string) (MarketplacePayment, error)
+	GetMarketplaceProductByID(ctx context.Context, id string) (GetMarketplaceProductByIDRow, error)
+	GetMarketplaceProductBySlug(ctx context.Context, slug string) (GetMarketplaceProductBySlugRow, error)
+	GetMarketplaceSellerOverviewMetrics(ctx context.Context, businessID string) (GetMarketplaceSellerOverviewMetricsRow, error)
+	GetMarketplaceShipmentByOrder(ctx context.Context, orderID string) (MarketplaceShipment, error)
 	GetMaterialRequestByID(ctx context.Context, id string) (GetMaterialRequestByIDRow, error)
 	GetMaterialRequestByReference(ctx context.Context, reference string) (MaterialRequest, error)
 	GetMaterialTransferByID(ctx context.Context, id string) (GetMaterialTransferByIDRow, error)
@@ -113,17 +166,21 @@ type Querier interface {
 	GetVerificationRateLimit(ctx context.Context, arg GetVerificationRateLimitParams) (EmailVerificationRateLimit, error)
 	GetZoneByCode(ctx context.Context, code string) (Zone, error)
 	GetZoneByID(ctx context.Context, id string) (Zone, error)
+	IncrementProductStock(ctx context.Context, arg IncrementProductStockParams) (MarketplaceProduct, error)
 	IncrementRegisteredCount(ctx context.Context, id string) (EventInstance, error)
 	IncrementVerificationAttempt(ctx context.Context, id string) (ContactVerification, error)
 	InvalidatePendingEmailVerificationTokens(ctx context.Context, userID string) error
 	ListActiveAppointmentsByUser(ctx context.Context, userID string) ([]Appointment, error)
 	ListAllEvents(ctx context.Context) ([]ListAllEventsRow, error)
+	ListAllMarketplaceDisputes(ctx context.Context, dollar_1 string) ([]ListAllMarketplaceDisputesRow, error)
+	ListAllMarketplaceOrders(ctx context.Context, arg ListAllMarketplaceOrdersParams) ([]ListAllMarketplaceOrdersRow, error)
 	ListAllStockBalances(ctx context.Context, arg ListAllStockBalancesParams) ([]ListAllStockBalancesRow, error)
 	ListAppointmentHistory(ctx context.Context, appointmentID string) ([]ListAppointmentHistoryRow, error)
 	ListAppointments(ctx context.Context) ([]ListAppointmentsRow, error)
 	ListAuditEvents(ctx context.Context, arg ListAuditEventsParams) ([]AuditEvent, error)
 	ListBadgeAwardsByUser(ctx context.Context, userID string) ([]ListBadgeAwardsByUserRow, error)
 	ListBadges(ctx context.Context) ([]Badge, error)
+	ListBusinessBranchesByBusiness(ctx context.Context, businessID string) ([]ListBusinessBranchesByBusinessRow, error)
 	ListClaimsByUser(ctx context.Context, userID string) ([]ListClaimsByUserRow, error)
 	ListCleanupCampaigns(ctx context.Context) ([]CleanupCampaign, error)
 	ListEventsByState(ctx context.Context, stateID string) ([]ListEventsByStateRow, error)
@@ -136,6 +193,13 @@ type Querier interface {
 	ListLGAsByState(ctx context.Context, stateID string) ([]Lga, error)
 	ListLedgerEntriesByTransaction(ctx context.Context, transactionID string) ([]ListLedgerEntriesByTransactionRow, error)
 	ListLowStockAlerts(ctx context.Context) ([]ListLowStockAlertsRow, error)
+	ListMarketplaceBusinesses(ctx context.Context, arg ListMarketplaceBusinessesParams) ([]ListMarketplaceBusinessesRow, error)
+	ListMarketplaceDisputesByOrder(ctx context.Context, orderID string) ([]MarketplaceDispute, error)
+	ListMarketplaceOrderItemsByOrder(ctx context.Context, orderID string) ([]ListMarketplaceOrderItemsByOrderRow, error)
+	ListMarketplaceOrdersByBusiness(ctx context.Context, arg ListMarketplaceOrdersByBusinessParams) ([]ListMarketplaceOrdersByBusinessRow, error)
+	ListMarketplaceOrdersByBuyer(ctx context.Context, buyerUserID pgtype.Text) ([]ListMarketplaceOrdersByBuyerRow, error)
+	ListMarketplacePayments(ctx context.Context, arg ListMarketplacePaymentsParams) ([]ListMarketplacePaymentsRow, error)
+	ListMarketplaceProducts(ctx context.Context, arg ListMarketplaceProductsParams) ([]ListMarketplaceProductsRow, error)
 	ListMaterialRequestItemsByRequest(ctx context.Context, requestID string) ([]ListMaterialRequestItemsByRequestRow, error)
 	ListMaterialRequests(ctx context.Context, arg ListMaterialRequestsParams) ([]ListMaterialRequestsRow, error)
 	ListMaterialTransferItemsByTransfer(ctx context.Context, transferID string) ([]ListMaterialTransferItemsByTransferRow, error)
@@ -164,6 +228,7 @@ type Querier interface {
 	RemapMemberProfileLGA(ctx context.Context, arg RemapMemberProfileLGAParams) error
 	RescheduleEvent(ctx context.Context, arg RescheduleEventParams) (EventInstance, error)
 	ResetVerificationRateLimit(ctx context.Context, arg ResetVerificationRateLimitParams) (EmailVerificationRateLimit, error)
+	ResolveMarketplaceDispute(ctx context.Context, arg ResolveMarketplaceDisputeParams) (MarketplaceDispute, error)
 	ResolveTransferDiscrepancy(ctx context.Context, arg ResolveTransferDiscrepancyParams) (TransferDiscrepancy, error)
 	ReviewParticipationClaim(ctx context.Context, arg ReviewParticipationClaimParams) (ParticipationClaim, error)
 	RevokeAllUserSessions(ctx context.Context, userID string) error
@@ -173,6 +238,7 @@ type Querier interface {
 	UpdateAppointmentScopeAndDates(ctx context.Context, arg UpdateAppointmentScopeAndDatesParams) (Appointment, error)
 	UpdateAppointmentStatus(ctx context.Context, arg UpdateAppointmentStatusParams) (Appointment, error)
 	UpdateBankAccountVerification(ctx context.Context, arg UpdateBankAccountVerificationParams) (VerifiedBankAccountVersion, error)
+	UpdateBusinessBranch(ctx context.Context, arg UpdateBusinessBranchParams) (MarketplaceBusinessBranch, error)
 	UpdateCapitalCity(ctx context.Context, arg UpdateCapitalCityParams) (CapitalCity, error)
 	UpdateEventRegistrationStatus(ctx context.Context, arg UpdateEventRegistrationStatusParams) (EventRegistration, error)
 	UpdateEventStatus(ctx context.Context, arg UpdateEventStatusParams) (EventInstance, error)
@@ -180,6 +246,14 @@ type Querier interface {
 	UpdateFoundationEntity(ctx context.Context, arg UpdateFoundationEntityParams) (FoundationEntity, error)
 	UpdateInventoryItem(ctx context.Context, arg UpdateInventoryItemParams) (InventoryItem, error)
 	UpdateLGA(ctx context.Context, arg UpdateLGAParams) (Lga, error)
+	UpdateMarketplaceBusiness(ctx context.Context, arg UpdateMarketplaceBusinessParams) (MarketplaceBusiness, error)
+	UpdateMarketplaceBusinessStatus(ctx context.Context, arg UpdateMarketplaceBusinessStatusParams) (MarketplaceBusiness, error)
+	UpdateMarketplaceFulfilmentStatus(ctx context.Context, arg UpdateMarketplaceFulfilmentStatusParams) (MarketplaceOrder, error)
+	UpdateMarketplaceOrderPaymentStatus(ctx context.Context, arg UpdateMarketplaceOrderPaymentStatusParams) (MarketplaceOrder, error)
+	UpdateMarketplaceOrderStatus(ctx context.Context, arg UpdateMarketplaceOrderStatusParams) (MarketplaceOrder, error)
+	UpdateMarketplacePaymentTransactionStatus(ctx context.Context, arg UpdateMarketplacePaymentTransactionStatusParams) (MarketplacePayment, error)
+	UpdateMarketplaceProduct(ctx context.Context, arg UpdateMarketplaceProductParams) (MarketplaceProduct, error)
+	UpdateMarketplaceShipmentStatus(ctx context.Context, arg UpdateMarketplaceShipmentStatusParams) (MarketplaceShipment, error)
 	UpdateMaterialRequestItemApprovedQty(ctx context.Context, arg UpdateMaterialRequestItemApprovedQtyParams) (MaterialRequestItem, error)
 	UpdateMaterialRequestReview(ctx context.Context, arg UpdateMaterialRequestReviewParams) (MaterialRequest, error)
 	UpdateMaterialTransferItemReceipt(ctx context.Context, arg UpdateMaterialTransferItemReceiptParams) (MaterialTransferItem, error)

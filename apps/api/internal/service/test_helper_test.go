@@ -8,6 +8,7 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 	"ratels-api/internal/config"
 	"ratels-api/internal/delivery"
+	"ratels-api/internal/payment"
 	"ratels-api/internal/repository"
 	"ratels-api/internal/service"
 )
@@ -27,6 +28,7 @@ type TestEnv struct {
 	AdminService *service.AdminService
 	FinanceService *service.FinanceService
 	InventoryService *service.InventoryService
+	MarketplaceService *service.MarketplaceService
 }
 
 func setupTestEnv(t *testing.T) *TestEnv {
@@ -57,21 +59,24 @@ func setupTestEnv(t *testing.T) *TestEnv {
 	adminSvc := service.NewAdminService(repo)
 	finSvc := service.NewFinanceService(repo, auditSvc)
 	invSvc := service.NewInventoryService(repo, auditSvc)
+	sandboxGateway := payment.NewSandboxGateway(cfg.FrontendBaseURL)
+	mktSvc := service.NewMarketplaceService(repo, auditSvc, sandboxGateway)
 
 	return &TestEnv{
-		Pool:           pool,
-		Repo:           repo,
-		Config:         cfg,
-		Delivery:       del,
-		AuditService:   auditSvc,
-		GeoService:     geoSvc,
-		AuthService:    authSvc,
-		LeadService:    leadSvc,
-		CleanupService: cleanupSvc,
-		PartService:    partSvc,
-		FoundService:   foundSvc,
-		AdminService:   adminSvc,
-		FinanceService: finSvc,
-		InventoryService: invSvc,
+		Pool:               pool,
+		Repo:               repo,
+		Config:             cfg,
+		Delivery:           del,
+		AuditService:       auditSvc,
+		GeoService:         geoSvc,
+		AuthService:        authSvc,
+		LeadService:        leadSvc,
+		CleanupService:     cleanupSvc,
+		PartService:        partSvc,
+		FoundService:       foundSvc,
+		AdminService:       adminSvc,
+		FinanceService:     finSvc,
+		InventoryService:   invSvc,
+		MarketplaceService: mktSvc,
 	}
 }
