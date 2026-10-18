@@ -41,6 +41,20 @@ export default function CheckoutPage() {
 
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [checkoutStatus, setCheckoutStatus] = useState<{ available: boolean; message: string; provider?: string } | null>(null);
+
+  // Fetch checkout and payment processing status
+  useEffect(() => {
+    async function fetchStatus() {
+      try {
+        const status = await apiRequest<{ available: boolean; message: string; provider?: string }>("/marketplace/checkout/status");
+        setCheckoutStatus(status);
+      } catch (err) {
+        // Fallback: non-blocking
+      }
+    }
+    fetchStatus();
+  }, []);
 
   // Pre-fill user data if logged in
   useEffect(() => {
@@ -94,6 +108,11 @@ export default function CheckoutPage() {
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setError(null);
+
+    if (checkoutStatus && !checkoutStatus.available) {
+      setError(checkoutStatus.message || "Payment processing is currently undergoing scheduled maintenance.");
+      return;
+    }
 
     if (items.length === 0) {
       setError("Your cart is empty. Add products to your cart before proceeding.");
@@ -205,6 +224,12 @@ export default function CheckoutPage() {
       </div>
 
       {error && <Alert type="error">{error}</Alert>}
+
+      {checkoutStatus && !checkoutStatus.available && (
+        <Alert type="warning">
+          <strong>Payment Gateway Notice:</strong> {checkoutStatus.message}
+        </Alert>
+      )}
 
       <form onSubmit={handleSubmit}>
         <div className="grid grid-cols-1 lg:grid-cols-12 gap-8">
@@ -452,13 +477,18 @@ export default function CheckoutPage() {
               {/* Submit Button */}
               <button
                 type="submit"
-                disabled={submitting}
+                disabled={submitting || (checkoutStatus !== null && !checkoutStatus.available)}
                 className="w-full py-3.5 px-4 bg-emerald-800 hover:bg-emerald-700 text-white font-bold rounded-xl transition shadow-sm disabled:opacity-50 flex items-center justify-center gap-2"
               >
                 {submitting ? (
                   <>
                     <Spinner size="sm" />
                     <span>Processing Order...</span>
+                  </>
+                ) : checkoutStatus !== null && !checkoutStatus.available ? (
+                  <>
+                    <AlertCircle className="w-4 h-4" />
+                    <span>Checkout Temporarily Unavailable</span>
                   </>
                 ) : (
                   <>

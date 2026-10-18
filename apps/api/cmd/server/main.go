@@ -107,9 +107,12 @@ func main() {
 	if cfg.PaystackSecretKey != "" {
 		paymentGateway = payment.NewPaystackGateway(cfg.PaystackSecretKey, cfg.PaystackPublicKey)
 		log.Println("Marketplace payment gateway initialized via Paystack HTTPS API.")
-	} else {
+	} else if !isProduction && (cfg.PaymentProvider == "sandbox" || cfg.PaymentProvider == "dev_sandbox") {
 		paymentGateway = payment.NewSandboxGateway(cfg.FrontendBaseURL)
 		log.Println("Marketplace payment running in development safe sandbox mode (no external charges).")
+	} else {
+		paymentGateway = payment.NewUnconfiguredGateway()
+		log.Println("WARNING: Marketplace payment gateway is UNCONFIGURED. Checkout is safely disabled in this environment.")
 	}
 	marketplaceService := service.NewMarketplaceService(repo, auditService, paymentGateway)
 

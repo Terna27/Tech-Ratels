@@ -8,6 +8,7 @@ import (
 
 	"github.com/go-chi/chi/v5"
 	"ratels-api/internal/db"
+	"ratels-api/internal/payment"
 	"ratels-api/internal/service"
 )
 
@@ -144,6 +145,11 @@ func (h *MarketplaceHandler) ValidateCart(w http.ResponseWriter, r *http.Request
 	JSON(w, http.StatusOK, result)
 }
 
+func (h *MarketplaceHandler) GetCheckoutStatus(w http.ResponseWriter, r *http.Request) {
+	status := h.marketplaceService.GetCheckoutStatus(r.Context())
+	JSON(w, http.StatusOK, status)
+}
+
 func (h *MarketplaceHandler) Checkout(w http.ResponseWriter, r *http.Request) {
 	user := GetCurrentUser(r.Context())
 	var req service.CheckoutInput
@@ -154,6 +160,10 @@ func (h *MarketplaceHandler) Checkout(w http.ResponseWriter, r *http.Request) {
 
 	result, err := h.marketplaceService.CreateOrder(r.Context(), user, req)
 	if err != nil {
+		if errors.Is(err, payment.ErrPaymentProcessingUnavailable) {
+			ErrorJSON(w, http.StatusServiceUnavailable, "PAYMENT_PROCESSING_UNAVAILABLE", "Payment processing is currently undergoing scheduled maintenance. Please check back shortly.", nil)
+			return
+		}
 		if errors.Is(err, service.ErrInsufficientStock) {
 			ErrorJSON(w, http.StatusConflict, "INSUFFICIENT_STOCK", err.Error(), nil)
 			return
@@ -192,6 +202,14 @@ func (h *MarketplaceHandler) VerifyPayment(w http.ResponseWriter, r *http.Reques
 
 	order, err := h.marketplaceService.ConfirmPayment(r.Context(), req.Reference)
 	if err != nil {
+		if errors.Is(err, payment.ErrPaymentProcessingUnavailable) {
+			ErrorJSON(w, http.StatusServiceUnavailable, "PAYMENT_PROCESSING_UNAVAILABLE", "Payment processing is currently unavailable.", nil)
+			return
+		}
+		if errors.Is(err, payment.ErrAmountMismatch) || errors.Is(err, payment.ErrCurrencyMismatch) {
+			ErrorJSON(w, http.StatusPaymentRequired, "PAYMENT_MISMATCH", err.Error(), nil)
+			return
+		}
 		ErrorJSON(w, http.StatusBadRequest, "VERIFICATION_FAILED", err.Error(), nil)
 		return
 	}
@@ -273,6 +291,33 @@ func (h *MarketplaceHandler) RaiseDispute(w http.ResponseWriter, r *http.Request
 		return
 	}
 	JSON(w, http.StatusCreated, dispute)
+}
+
+func (h *MarketplaceHandler) CancelOrder(w http.ResponseWriter, r *http.Request) {
+	user := GetCurrentUser(r.Context())
+	id := chi.URLParam(r, "id")
+	var req struct {
+		Reason string `json:"reason"`
+	}
+	_ = json.NewDecoder(r.Body).Decode(&req)
+	if req.Reason == "" {
+		req.Reason = "Cancelled by user"
+	}
+
+	order, err := h.marketplaceService.CancelOrder(r.Context(), user, id, req.Reason)
+	if err != nil {
+		if errors.Is(err, service.ErrOrderNotFound) {
+			ErrorJSON(w, http.StatusNotFound, "NOT_FOUND", "Order not found", nil)
+			return
+		}
+		if errors.Is(err, service.ErrUnauthorizedBuyerAction) {
+			ErrorJSON(w, http.StatusForbidden, "FORBIDDEN", err.Error(), nil)
+			return
+		}
+		ErrorJSON(w, http.StatusBadRequest, "CANCEL_FAILED", err.Error(), nil)
+		return
+	}
+	JSON(w, http.StatusOK, order)
 }
 
 // -------------------------------------------------------------
@@ -754,4 +799,26 @@ func (h *MarketplaceHandler) ResolveDispute(w http.ResponseWriter, r *http.Reque
 		return
 	}
 	JSON(w, http.StatusOK, d)
+}
+
+func (h *MarketplaceHandler) AdminRefundOrder(w http.ResponseWriter, r *http.Request) {
+	admin := GetCurrentUser(r.Context())
+	id := chi.URLParam(r, "id")
+
+	var req service.RefundOrderInput
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		ErrorJSON(w, http.StatusBadRequest, "INVALID_REQUEST", "Malformed JSON payload", nil)
+		return
+	}
+
+	order, err := h.marketplaceService.InitiateRefund(r.Context(), admin, id, req)
+	if err != nil {
+		if errors.Is(err, service.ErrOrderNotFound) {
+			ErrorJSON(w, http.StatusNotFound, "NOT_FOUND", "Order not found", nil)
+			return
+		}
+		ErrorJSON(w, http.StatusBadRequest, "REFUND_FAILED", err.Error(), nil)
+		return
+	}
+	JSON(w, http.StatusOK, order)
 }

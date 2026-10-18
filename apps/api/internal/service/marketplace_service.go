@@ -711,16 +711,56 @@ func (s *MarketplaceService) ValidateCart(ctx context.Context, items []CartItemI
 	}, nil
 }
 
+type CheckoutStatusResponse struct {
+	Provider  string `json:"provider"`
+	Available bool   `json:"available"`
+	Message   string `json:"message"`
+}
+
+func (s *MarketplaceService) GetCheckoutStatus(ctx context.Context) CheckoutStatusResponse {
+	p := s.paymentGateway.ProviderName()
+	if p == "unconfigured" {
+		return CheckoutStatusResponse{
+			Provider:  p,
+			Available: false,
+			Message:   "Payment processing is currently undergoing scheduled maintenance. Please check back shortly.",
+		}
+	}
+	return CheckoutStatusResponse{
+		Provider:  p,
+		Available: true,
+		Message:   "Payment processing is online.",
+	}
+}
+
 // -------------------------------------------------------------
 // Transactional Checkout & Order Creation
 // -------------------------------------------------------------
 
 func (s *MarketplaceService) CreateOrder(ctx context.Context, buyerUser *db.User, input CheckoutInput) (*CreateOrderResult, error) {
+	if s.paymentGateway.ProviderName() == "unconfigured" {
+		return nil, payment.ErrPaymentProcessingUnavailable
+	}
 	if len(input.Items) == 0 {
 		return nil, ErrEmptyCart
 	}
 	if strings.TrimSpace(input.BuyerEmail) == "" || strings.TrimSpace(input.BuyerName) == "" {
 		return nil, errors.New("buyer name and email are required")
+	}
+
+	// Strictly validate all item quantities: Reject zero or negative quantities
+	for _, itm := range input.Items {
+		if itm.Quantity <= 0 {
+			return nil, fmt.Errorf("invalid quantity %d for product %s; quantity must be at least 1", itm.Quantity, itm.ProductID)
+		}
+	}
+
+	deliveryType := input.DeliveryType
+	if deliveryType != "pickup" {
+		deliveryType = "delivery"
+	}
+	if deliveryType == "delivery" && strings.TrimSpace(input.ShippingAddress) == "" {
+		return nil, errors.New("shipping address is required for doorstep delivery")
 	}
 
 	// Idempotency protection: Prevent duplicate checkout requests
@@ -741,11 +781,6 @@ func (s *MarketplaceService) CreateOrder(ctx context.Context, buyerUser *db.User
 
 	orderID := security.GenerateUUID()
 	orderNumber := fmt.Sprintf("ORD-%s-%s", time.Now().Format("20060102"), strings.ToUpper(security.GenerateUUID()[:8]))
-
-	deliveryType := input.DeliveryType
-	if deliveryType != "pickup" {
-		deliveryType = "delivery"
-	}
 
 	// Delivery fee in kobo: 0 for pickup, 150,000 (₦1,500) for delivery
 	var deliveryFeeKobo int64 = 150000
@@ -910,6 +945,26 @@ func (s *MarketplaceService) CreateOrder(ctx context.Context, buyerUser *db.User
 		},
 	})
 	if err != nil {
+		// Rollback stock reservation and mark order cancelled to prevent dangling reserved stock
+		_ = s.repo.WithTx(ctx, func(q *db.Queries) error {
+			for _, itm := range input.Items {
+				if itm.Quantity > 0 {
+					_, _ = q.IncrementProductStock(ctx, db.IncrementProductStockParams{
+						ID:            itm.ProductID,
+						StockQuantity: itm.Quantity,
+					})
+				}
+			}
+			_, _ = q.UpdateMarketplaceOrderStatus(ctx, db.UpdateMarketplaceOrderStatusParams{
+				ID:          createdOrder.ID,
+				OrderStatus: "cancelled",
+			})
+			_, _ = q.UpdateMarketplaceOrderPaymentStatus(ctx, db.UpdateMarketplaceOrderPaymentStatusParams{
+				ID:            createdOrder.ID,
+				PaymentStatus: "failed",
+			})
+			return nil
+		})
 		return nil, fmt.Errorf("payment gateway initialization failed: %w", err)
 	}
 
@@ -935,6 +990,10 @@ func (s *MarketplaceService) CreateOrder(ctx context.Context, buyerUser *db.User
 // -------------------------------------------------------------
 
 func (s *MarketplaceService) ConfirmPayment(ctx context.Context, reference string) (*db.GetMarketplaceOrderByIDRow, error) {
+	if s.paymentGateway.ProviderName() == "unconfigured" {
+		return nil, payment.ErrPaymentProcessingUnavailable
+	}
+
 	// Look up payment by reference
 	payRec, err := s.repo.Queries().GetMarketplacePaymentByReference(ctx, reference)
 	if err != nil {
@@ -946,37 +1005,45 @@ func (s *MarketplaceService) ConfirmPayment(ctx context.Context, reference strin
 		return nil, ErrOrderNotFound
 	}
 
-	// Idempotency: if already paid, return early
+	// Idempotency: if already paid, return early to prevent duplicate processing
 	if payRec.Status == "successful" && order.PaymentStatus == "paid" {
 		return &order, nil
 	}
 
-	// Verify payment with provider
+	// Verify payment with authoritative provider
 	verifyOut, err := s.paymentGateway.VerifyPayment(ctx, reference)
 	if err != nil {
 		return nil, fmt.Errorf("payment verification failed: %w", err)
 	}
 
 	if verifyOut.Status != "successful" {
-		_, _ = s.repo.Queries().UpdateMarketplacePaymentTransactionStatus(ctx, db.UpdateMarketplacePaymentTransactionStatusParams{
-			Reference:         reference,
-			Status:            "failed",
-			ProviderReference: TextFromString(verifyOut.ProviderReference),
-			Channel:           TextFromString(verifyOut.Channel),
-			PaidAt:            pgtype.Timestamptz{Valid: false},
-			RawWebhookPayload: verifyOut.RawResponse,
-			ErrorMessage:      TextFromString("Payment status returned: " + verifyOut.Status),
-		})
-		_, _ = s.repo.Queries().UpdateMarketplaceOrderPaymentStatus(ctx, db.UpdateMarketplaceOrderPaymentStatusParams{
-			ID:            order.ID,
-			PaymentStatus: "failed",
-		})
+		// Out-of-order event safeguard: Never downgrade an already-paid order to failed
+		if order.PaymentStatus != "paid" {
+			_, _ = s.repo.Queries().UpdateMarketplacePaymentTransactionStatus(ctx, db.UpdateMarketplacePaymentTransactionStatusParams{
+				Reference:         reference,
+				Status:            "failed",
+				ProviderReference: TextFromString(verifyOut.ProviderReference),
+				Channel:           TextFromString(verifyOut.Channel),
+				PaidAt:            pgtype.Timestamptz{Valid: false},
+				RawWebhookPayload: verifyOut.RawResponse,
+				ErrorMessage:      TextFromString("Payment status returned: " + verifyOut.Status),
+			})
+			_, _ = s.repo.Queries().UpdateMarketplaceOrderPaymentStatus(ctx, db.UpdateMarketplaceOrderPaymentStatusParams{
+				ID:            order.ID,
+				PaymentStatus: "failed",
+			})
+		}
 		return nil, fmt.Errorf("payment was not successful (status: %s)", verifyOut.Status)
 	}
 
 	// Server-side amount validation: Never mark paid without verifying full amount!
 	if verifyOut.AmountKobo < order.TotalKobo {
 		return nil, fmt.Errorf("%w: expected %d kobo, got %d kobo", payment.ErrAmountMismatch, order.TotalKobo, verifyOut.AmountKobo)
+	}
+
+	// Server-side currency validation: Provider currency must match order currency
+	if verifyOut.Currency != "" && strings.ToUpper(verifyOut.Currency) != strings.ToUpper(order.Currency) {
+		return nil, fmt.Errorf("%w: expected %s, got %s", payment.ErrCurrencyMismatch, order.Currency, verifyOut.Currency)
 	}
 
 	now := time.Now()
@@ -1032,6 +1099,7 @@ func (s *MarketplaceService) HandleWebhook(ctx context.Context, signatureHeader 
 			Reference string `json:"reference"`
 			Status    string `json:"status"`
 			Amount    int64  `json:"amount"`
+			Currency  string `json:"currency"`
 		} `json:"data"`
 	}
 
@@ -1044,9 +1112,13 @@ func (s *MarketplaceService) HandleWebhook(ctx context.Context, signatureHeader 
 		return errors.New("webhook event missing reference")
 	}
 
-	// Idempotently confirm payment
-	_, err := s.ConfirmPayment(ctx, ref)
-	return err
+	// Confirm payment idempotently on charge.success or successful status
+	if event.Event == "charge.success" || event.Data.Status == "success" || event.Data.Status == "successful" {
+		_, err := s.ConfirmPayment(ctx, ref)
+		return err
+	}
+
+	return nil
 }
 
 // -------------------------------------------------------------
@@ -1054,29 +1126,31 @@ func (s *MarketplaceService) HandleWebhook(ctx context.Context, signatureHeader 
 // -------------------------------------------------------------
 
 func (s *MarketplaceService) GetOrderByID(ctx context.Context, user *db.User, id string) (*db.GetMarketplaceOrderByIDRow, []db.ListMarketplaceOrderItemsByOrderRow, *db.MarketplaceShipment, error) {
+	if user == nil {
+		return nil, nil, nil, ErrUnauthorizedBuyerAction
+	}
+
 	o, err := s.repo.Queries().GetMarketplaceOrderByID(ctx, id)
 	if err != nil {
 		return nil, nil, nil, ErrOrderNotFound
 	}
 
+	isBuyer := o.BuyerUserID.Valid && o.BuyerUserID.String == user.ID
+
 	// Ownership check if authenticated user is buyer or seller
-	if user != nil && !isAdmin(user) {
-		// Buyer check
-		isBuyer := o.BuyerUserID.Valid && o.BuyerUserID.String == user.ID
-		if !isBuyer {
-			// Seller check: does user own the business of any item?
-			items, _ := s.repo.Queries().ListMarketplaceOrderItemsByOrder(ctx, id)
-			isSeller := false
-			for _, item := range items {
-				b, _ := s.repo.Queries().GetMarketplaceBusinessByID(ctx, item.BusinessID)
-				if b.OwnerUserID == user.ID {
-					isSeller = true
-					break
-				}
+	if !isAdmin(user) && !isBuyer {
+		// Seller check: does user own the business of any item in this order?
+		rawItems, _ := s.repo.Queries().ListMarketplaceOrderItemsByOrder(ctx, id)
+		isSeller := false
+		for _, item := range rawItems {
+			b, _ := s.repo.Queries().GetMarketplaceBusinessByID(ctx, item.BusinessID)
+			if b.OwnerUserID == user.ID {
+				isSeller = true
+				break
 			}
-			if !isSeller {
-				return nil, nil, nil, ErrUnauthorizedBuyerAction
-			}
+		}
+		if !isSeller {
+			return nil, nil, nil, ErrUnauthorizedBuyerAction
 		}
 	}
 
@@ -1086,6 +1160,18 @@ func (s *MarketplaceService) GetOrderByID(ctx context.Context, user *db.User, id
 	}
 	if items == nil {
 		items = []db.ListMarketplaceOrderItemsByOrderRow{}
+	}
+
+	// Multi-tenant isolation: A seller must only see items belonging to their own business
+	if !isAdmin(user) && !isBuyer {
+		var filtered []db.ListMarketplaceOrderItemsByOrderRow
+		for _, item := range items {
+			b, err := s.repo.Queries().GetMarketplaceBusinessByID(ctx, item.BusinessID)
+			if err == nil && b.OwnerUserID == user.ID {
+				filtered = append(filtered, item)
+			}
+		}
+		items = filtered
 	}
 
 	var shipmentPtr *db.MarketplaceShipment
@@ -1195,6 +1281,10 @@ type DispatchOrderInput struct {
 }
 
 func (s *MarketplaceService) DispatchOrder(ctx context.Context, user *db.User, orderID string, input DispatchOrderInput) (*db.MarketplaceShipment, error) {
+	if user == nil {
+		return nil, errors.New("authentication required")
+	}
+
 	order, err := s.repo.Queries().GetMarketplaceOrderByID(ctx, orderID)
 	if err != nil {
 		return nil, ErrOrderNotFound
@@ -1202,6 +1292,16 @@ func (s *MarketplaceService) DispatchOrder(ctx context.Context, user *db.User, o
 
 	if order.PaymentStatus != "paid" {
 		return nil, errors.New("cannot dispatch an unpaid order")
+	}
+
+	if order.OrderStatus == "cancelled" || order.OrderStatus == "refunded" {
+		return nil, fmt.Errorf("cannot dispatch an order with status '%s'", order.OrderStatus)
+	}
+	if order.OrderStatus == "delivered" || order.FulfilmentStatus == "delivered" {
+		return nil, errors.New("order has already been delivered")
+	}
+	if order.FulfilmentStatus == "dispatched" {
+		return nil, errors.New("order has already been dispatched")
 	}
 
 	// Verify user is seller of an item in this order or admin
@@ -1256,6 +1356,36 @@ func (s *MarketplaceService) DispatchOrder(ctx context.Context, user *db.User, o
 }
 
 func (s *MarketplaceService) ConfirmDelivery(ctx context.Context, user *db.User, orderID string, proofURL, notes string) (*db.MarketplaceShipment, error) {
+	if user == nil {
+		return nil, errors.New("authentication required")
+	}
+
+	order, err := s.repo.Queries().GetMarketplaceOrderByID(ctx, orderID)
+	if err != nil {
+		return nil, ErrOrderNotFound
+	}
+
+	// Verify caller is buyer, seller of an item, or admin
+	isBuyer := order.BuyerUserID.Valid && order.BuyerUserID.String == user.ID
+	if !isBuyer && !isAdmin(user) {
+		items, _ := s.repo.Queries().ListMarketplaceOrderItemsByOrder(ctx, orderID)
+		isSeller := false
+		for _, itm := range items {
+			b, _ := s.repo.Queries().GetMarketplaceBusinessByID(ctx, itm.BusinessID)
+			if b.OwnerUserID == user.ID {
+				isSeller = true
+				break
+			}
+		}
+		if !isSeller {
+			return nil, ErrUnauthorizedBuyerAction
+		}
+	}
+
+	if order.OrderStatus == "cancelled" || order.OrderStatus == "refunded" {
+		return nil, fmt.Errorf("cannot confirm delivery for an order with status '%s'", order.OrderStatus)
+	}
+
 	sh, err := s.repo.Queries().GetMarketplaceShipmentByOrder(ctx, orderID)
 	if err != nil {
 		return nil, errors.New("shipment record not found for this order")
@@ -1284,6 +1414,194 @@ func (s *MarketplaceService) ConfirmDelivery(ctx context.Context, user *db.User,
 
 	_ = s.audit.Log(ctx, &user.ID, &user.PrimaryRole, "confirm_marketplace_delivery", "marketplace_shipment", sh.ID, nil, nil, nil, nil)
 	return &updatedSh, nil
+}
+
+func (s *MarketplaceService) CancelOrder(ctx context.Context, user *db.User, orderID string, reason string) (*db.GetMarketplaceOrderByIDRow, error) {
+	if user == nil {
+		return nil, errors.New("authentication required")
+	}
+
+	order, err := s.repo.Queries().GetMarketplaceOrderByID(ctx, orderID)
+	if err != nil {
+		return nil, ErrOrderNotFound
+	}
+
+	isBuyer := order.BuyerUserID.Valid && order.BuyerUserID.String == user.ID
+	if !isBuyer && !isAdmin(user) {
+		return nil, ErrUnauthorizedBuyerAction
+	}
+
+	if order.OrderStatus == "cancelled" {
+		return nil, errors.New("order is already cancelled")
+	}
+	if order.OrderStatus == "delivered" || order.FulfilmentStatus == "delivered" {
+		return nil, errors.New("cannot cancel an order that has already been delivered")
+	}
+	if order.FulfilmentStatus == "dispatched" {
+		return nil, errors.New("cannot cancel an order that has already been dispatched; please request a return or dispute")
+	}
+
+	// Atomic cancellation and stock restoration
+	err = s.repo.WithTx(ctx, func(q *db.Queries) error {
+		items, err := q.ListMarketplaceOrderItemsByOrder(ctx, orderID)
+		if err != nil {
+			return err
+		}
+		for _, itm := range items {
+			if itm.ProductID.Valid {
+				_, err = q.IncrementProductStock(ctx, db.IncrementProductStockParams{
+					ID:            itm.ProductID.String,
+					StockQuantity: itm.Quantity,
+				})
+				if err != nil {
+					return err
+				}
+			}
+		}
+
+		_, err = q.UpdateMarketplaceOrderStatus(ctx, db.UpdateMarketplaceOrderStatusParams{
+			ID:          orderID,
+			OrderStatus: "cancelled",
+		})
+		if err != nil {
+			return err
+		}
+
+		if order.PaymentStatus == "paid" {
+			_, _ = q.UpdateMarketplaceOrderPaymentStatus(ctx, db.UpdateMarketplaceOrderPaymentStatusParams{
+				ID:            orderID,
+				PaymentStatus: "refunded",
+			})
+			pay, err := q.GetMarketplacePaymentByOrder(ctx, orderID)
+			if err == nil {
+				_, _ = q.UpdateMarketplacePaymentTransactionStatus(ctx, db.UpdateMarketplacePaymentTransactionStatusParams{
+					Reference:         pay.Reference,
+					Status:            "refunded",
+					ProviderReference: pay.ProviderReference,
+					Channel:           pay.Channel,
+					PaidAt:            pay.PaidAt,
+					RawWebhookPayload: pay.RawWebhookPayload,
+					ErrorMessage:      TextFromString("Cancelled by buyer/admin: " + reason),
+				})
+			}
+		}
+
+		return nil
+	})
+	if err != nil {
+		return nil, fmt.Errorf("failed to cancel order: %w", err)
+	}
+
+	_ = s.audit.Log(ctx, &user.ID, &user.PrimaryRole, "cancel_marketplace_order", "marketplace_order", orderID, nil, nil, &reason, nil)
+
+	updated, err := s.repo.Queries().GetMarketplaceOrderByID(ctx, orderID)
+	if err != nil {
+		return nil, err
+	}
+	return &updated, nil
+}
+
+type RefundOrderInput struct {
+	AmountKobo int64  `json:"amount_kobo"`
+	Reason     string `json:"reason"`
+}
+
+func (s *MarketplaceService) InitiateRefund(ctx context.Context, admin *db.User, orderID string, input RefundOrderInput) (*db.GetMarketplaceOrderByIDRow, error) {
+	if !isAdmin(admin) {
+		return nil, errors.New("unauthorized: administrative permissions required")
+	}
+
+	order, err := s.repo.Queries().GetMarketplaceOrderByID(ctx, orderID)
+	if err != nil {
+		return nil, ErrOrderNotFound
+	}
+
+	if order.PaymentStatus != "paid" {
+		return nil, fmt.Errorf("cannot refund an order with payment status '%s'", order.PaymentStatus)
+	}
+
+	refundAmount := input.AmountKobo
+	if refundAmount <= 0 {
+		refundAmount = order.TotalKobo
+	}
+	if refundAmount > order.TotalKobo {
+		return nil, fmt.Errorf("refund amount %d kobo exceeds total order amount %d kobo", refundAmount, order.TotalKobo)
+	}
+
+	isFullRefund := refundAmount == order.TotalKobo
+
+	err = s.repo.WithTx(ctx, func(q *db.Queries) error {
+		if isFullRefund {
+			items, err := q.ListMarketplaceOrderItemsByOrder(ctx, orderID)
+			if err != nil {
+				return err
+			}
+			for _, itm := range items {
+				if itm.ProductID.Valid {
+					_, err = q.IncrementProductStock(ctx, db.IncrementProductStockParams{
+						ID:            itm.ProductID.String,
+						StockQuantity: itm.Quantity,
+					})
+					if err != nil {
+						return err
+					}
+				}
+			}
+
+			_, err = q.UpdateMarketplaceOrderStatus(ctx, db.UpdateMarketplaceOrderStatusParams{
+				ID:          orderID,
+				OrderStatus: "refunded",
+			})
+			if err != nil {
+				return err
+			}
+			_, err = q.UpdateMarketplaceOrderPaymentStatus(ctx, db.UpdateMarketplaceOrderPaymentStatusParams{
+				ID:            orderID,
+				PaymentStatus: "refunded",
+			})
+			if err != nil {
+				return err
+			}
+		} else {
+			_, err = q.UpdateMarketplaceOrderPaymentStatus(ctx, db.UpdateMarketplaceOrderPaymentStatusParams{
+				ID:            orderID,
+				PaymentStatus: "partially_refunded",
+			})
+			if err != nil {
+				return err
+			}
+		}
+
+		pay, err := q.GetMarketplacePaymentByOrder(ctx, orderID)
+		if err == nil {
+			payStatus := "refunded"
+			if !isFullRefund {
+				payStatus = "partially_refunded"
+			}
+			_, _ = q.UpdateMarketplacePaymentTransactionStatus(ctx, db.UpdateMarketplacePaymentTransactionStatusParams{
+				Reference:         pay.Reference,
+				Status:            payStatus,
+				ProviderReference: pay.ProviderReference,
+				Channel:           pay.Channel,
+				PaidAt:            pay.PaidAt,
+				RawWebhookPayload: pay.RawWebhookPayload,
+				ErrorMessage:      TextFromString(fmt.Sprintf("Refund of %d kobo processed by admin (%s): %s", refundAmount, admin.Email.String, input.Reason)),
+			})
+		}
+
+		return nil
+	})
+	if err != nil {
+		return nil, fmt.Errorf("failed to process refund: %w", err)
+	}
+
+	_ = s.audit.Log(ctx, &admin.ID, &admin.PrimaryRole, "refund_marketplace_order", "marketplace_order", orderID, nil, nil, &input.Reason, nil)
+
+	updated, err := s.repo.Queries().GetMarketplaceOrderByID(ctx, orderID)
+	if err != nil {
+		return nil, err
+	}
+	return &updated, nil
 }
 
 // -------------------------------------------------------------
@@ -1348,7 +1666,7 @@ func (s *MarketplaceService) ResolveDispute(ctx context.Context, admin *db.User,
 		return nil, fmt.Errorf("failed to resolve dispute: %w", err)
 	}
 
-	// If resolved with refund, restore stock quantities and set order status to refunded
+	// If resolved with refund, restore stock quantities and set order and payment status to refunded
 	if status == "resolved_refunded" {
 		_ = s.repo.WithTx(ctx, func(q *db.Queries) error {
 			items, _ := q.ListMarketplaceOrderItemsByOrder(ctx, d.OrderID)
@@ -1368,6 +1686,18 @@ func (s *MarketplaceService) ResolveDispute(ctx context.Context, admin *db.User,
 				ID:            d.OrderID,
 				PaymentStatus: "refunded",
 			})
+			pay, err := q.GetMarketplacePaymentByOrder(ctx, d.OrderID)
+			if err == nil {
+				_, _ = q.UpdateMarketplacePaymentTransactionStatus(ctx, db.UpdateMarketplacePaymentTransactionStatusParams{
+					Reference:         pay.Reference,
+					Status:            "refunded",
+					ProviderReference: pay.ProviderReference,
+					Channel:           pay.Channel,
+					PaidAt:            pay.PaidAt,
+					RawWebhookPayload: pay.RawWebhookPayload,
+					ErrorMessage:      TextFromString("Refunded via dispute resolution"),
+				})
+			}
 			return nil
 		})
 	}

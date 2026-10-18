@@ -193,6 +193,7 @@ func NewRouter(p RouterParams) http.Handler {
 		// Ratels Marketplace (Blueprint v2.0 Section 07)
 		api.Route("/marketplace", func(mkt chi.Router) {
 			// Public Storefront
+			mkt.Get("/checkout/status", p.MarketplaceHandler.GetCheckoutStatus)
 			mkt.Get("/products", p.MarketplaceHandler.ListPublicProducts)
 			mkt.Get("/products/{id}", p.MarketplaceHandler.GetProduct)
 			mkt.Get("/products/slug/{slug}", p.MarketplaceHandler.GetProductBySlug)
@@ -208,6 +209,8 @@ func NewRouter(p RouterParams) http.Handler {
 			// Authenticated Buyer Orders
 			mkt.With(RequireAuth).Get("/orders", p.MarketplaceHandler.ListMyOrders)
 			mkt.With(RequireAuth).Get("/orders/{id}", p.MarketplaceHandler.GetOrder)
+			mkt.With(RequireAuth).Post("/orders/{id}/cancel", p.MarketplaceHandler.CancelOrder)
+			mkt.With(RequireAuth).Post("/orders/{id}/confirm-delivery", p.MarketplaceHandler.ConfirmDelivery)
 			mkt.With(RequireAuth).Post("/orders/{id}/dispute", p.MarketplaceHandler.RaiseDispute)
 
 			// Seller / Vendor Management
@@ -236,6 +239,8 @@ func NewRouter(p RouterParams) http.Handler {
 				mktAdm.Get("/products", p.MarketplaceHandler.ListAllProductsAdmin)
 				mktAdm.Put("/products/{id}/status", p.MarketplaceHandler.ModerateProduct)
 				mktAdm.Get("/orders", p.MarketplaceHandler.ListAllOrdersAdmin)
+				mktAdm.Post("/orders/{id}/cancel", p.MarketplaceHandler.CancelOrder)
+				mktAdm.Post("/orders/{id}/refund", p.MarketplaceHandler.AdminRefundOrder)
 				mktAdm.Get("/payments", p.MarketplaceHandler.ListPaymentsAdmin)
 				mktAdm.Get("/disputes", p.MarketplaceHandler.ListDisputesAdmin)
 				mktAdm.Post("/disputes/{id}/resolve", p.MarketplaceHandler.ResolveDispute)

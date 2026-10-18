@@ -44,6 +44,10 @@ export default function OrderDetailPage({ params }: OrderDetailProps) {
   const [disputeSuccess, setDisputeSuccess] = useState<string | null>(null);
   const [disputeError, setDisputeError] = useState<string | null>(null);
 
+  const [cancelling, setCancelling] = useState(false);
+  const [confirmingDelivery, setConfirmingDelivery] = useState(false);
+  const [actionMessage, setActionMessage] = useState<string | null>(null);
+
   const fetchOrder = async () => {
     try {
       const res = await apiRequest<any>(`/marketplace/orders/${orderId}`);
@@ -52,6 +56,46 @@ export default function OrderDetailPage({ params }: OrderDetailProps) {
       setError(err.message || "Failed to load order details");
     } finally {
       setLoading(false);
+    }
+  };
+
+  const handleCancelOrder = async () => {
+    if (!window.confirm("Are you sure you want to cancel this order? Any reserved stock will be returned.")) {
+      return;
+    }
+    setCancelling(true);
+    setError(null);
+    try {
+      await apiRequest(`/marketplace/orders/${orderId}/cancel`, {
+        method: "POST",
+        body: JSON.stringify({ reason: "Cancelled by buyer" }),
+      });
+      setActionMessage("Order has been successfully cancelled.");
+      fetchOrder();
+    } catch (err: any) {
+      setError(err.message || "Failed to cancel order");
+    } finally {
+      setCancelling(false);
+    }
+  };
+
+  const handleConfirmDelivery = async () => {
+    if (!window.confirm("Confirm that you have received this shipment in good condition?")) {
+      return;
+    }
+    setConfirmingDelivery(true);
+    setError(null);
+    try {
+      await apiRequest(`/marketplace/orders/${orderId}/confirm-delivery`, {
+        method: "POST",
+        body: JSON.stringify({ notes: "Delivery confirmed by buyer" }),
+      });
+      setActionMessage("Receipt confirmed. Thank you for shopping on Ratels Marketplace!");
+      fetchOrder();
+    } catch (err: any) {
+      setError(err.message || "Failed to confirm delivery");
+    } finally {
+      setConfirmingDelivery(false);
     }
   };
 
@@ -132,6 +176,7 @@ export default function OrderDetailPage({ params }: OrderDetailProps) {
       </nav>
 
       {disputeSuccess && <Alert type="success">{disputeSuccess}</Alert>}
+      {actionMessage && <Alert type="success">{actionMessage}</Alert>}
 
       {/* Header */}
       <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 border-b border-gray-200 pb-5">
@@ -164,7 +209,31 @@ export default function OrderDetailPage({ params }: OrderDetailProps) {
           </p>
         </div>
 
-        <div className="flex items-center gap-3">
+        <div className="flex items-center gap-2 flex-wrap">
+          {order.order_status !== "cancelled" &&
+            order.order_status !== "refunded" &&
+            order.order_status !== "delivered" &&
+            order.fulfilment_status !== "dispatched" && (
+              <button
+                onClick={handleCancelOrder}
+                disabled={cancelling}
+                className="px-4 py-2 border border-gray-300 text-gray-700 bg-white hover:bg-gray-50 text-xs font-bold rounded-xl transition disabled:opacity-50"
+              >
+                {cancelling ? "Cancelling..." : "Cancel Order"}
+              </button>
+            )}
+
+          {order.fulfilment_status === "dispatched" && order.order_status !== "delivered" && (
+            <button
+              onClick={handleConfirmDelivery}
+              disabled={confirmingDelivery}
+              className="px-4 py-2 border border-emerald-300 text-emerald-800 bg-emerald-50 hover:bg-emerald-100 text-xs font-bold rounded-xl transition disabled:opacity-50 inline-flex items-center gap-1.5"
+            >
+              <CheckCircle2 className="w-4 h-4 text-emerald-600" />
+              {confirmingDelivery ? "Confirming..." : "Confirm Received"}
+            </button>
+          )}
+
           <button
             onClick={() => setShowDisputeModal(true)}
             className="px-4 py-2 border border-red-200 text-red-700 bg-red-50 hover:bg-red-100 text-xs font-bold rounded-xl transition inline-flex items-center gap-1.5"

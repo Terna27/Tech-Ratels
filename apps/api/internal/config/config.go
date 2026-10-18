@@ -163,6 +163,8 @@ func Load() *Config {
 	if paymentProvider == "" {
 		if paystackSecretKey != "" {
 			paymentProvider = "paystack"
+		} else if isProduction {
+			paymentProvider = "unconfigured"
 		} else {
 			paymentProvider = "sandbox"
 		}
@@ -245,6 +247,19 @@ func (c *Config) Validate() error {
 			}
 		} else if c.EmailProvider == "dev" {
 			return errors.New("EMAIL_PROVIDER cannot be set to 'dev' in production; configure 'brevo' or 'resend'")
+		}
+
+		switch c.PaymentProvider {
+		case "sandbox", "dev_sandbox":
+			return errors.New("PAYMENT_PROVIDER cannot be set to 'sandbox' or 'dev_sandbox' in production environment; live Paystack credentials required or leave unconfigured to safely disable checkout")
+		case "paystack":
+			if c.PaystackSecretKey == "" {
+				return errors.New("PAYSTACK_SECRET_KEY is required in production when PAYMENT_PROVIDER is set to paystack")
+			}
+		case "unconfigured", "":
+			// Allowed in production: checkout will be safely disabled until keys are supplied
+		default:
+			return fmt.Errorf("unsupported PAYMENT_PROVIDER in production: %q; supported providers are 'paystack' and 'unconfigured'", c.PaymentProvider)
 		}
 	}
 	return nil

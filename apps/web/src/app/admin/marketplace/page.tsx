@@ -86,6 +86,13 @@ export default function AdminMarketplacePage() {
   const [moderateStatus, setModerateStatus] = useState("published");
   const [moderateSubmitting, setModerateSubmitting] = useState(false);
 
+  // Refund Modal State
+  const [showRefundModal, setShowRefundModal] = useState(false);
+  const [selectedOrderForRefund, setSelectedOrderForRefund] = useState<any>(null);
+  const [refundAmountNaira, setRefundAmountNaira] = useState("");
+  const [refundReason, setRefundReason] = useState("");
+  const [refundSubmitting, setRefundSubmitting] = useState(false);
+
   useEffect(() => {
     if (!authLoading && (!user || !isCoordinator)) {
       router.push("/login?redirect=/admin/marketplace");
@@ -199,6 +206,50 @@ export default function AdminMarketplacePage() {
       setError(err.message || "Failed to moderate product");
     } finally {
       setModerateSubmitting(false);
+    }
+  };
+
+  const handleProcessRefund = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!selectedOrderForRefund) return;
+    setRefundSubmitting(true);
+    setError(null);
+    try {
+      const kobo = refundAmountNaira
+        ? Math.round(parseFloat(refundAmountNaira) * 100)
+        : selectedOrderForRefund.total_kobo;
+      await apiRequest(`/marketplace/admin/orders/${selectedOrderForRefund.id}/refund`, {
+        method: "POST",
+        body: JSON.stringify({
+          amount_kobo: kobo,
+          reason: refundReason.trim() || "Administrative refund",
+        }),
+      });
+      setSuccess(`Refund successfully processed for order ${selectedOrderForRefund.order_number}`);
+      setShowRefundModal(false);
+      setSelectedOrderForRefund(null);
+      loadTabContent("orders");
+    } catch (err: any) {
+      setError(err.message || "Failed to process refund");
+    } finally {
+      setRefundSubmitting(false);
+    }
+  };
+
+  const handleAdminCancelOrder = async (orderId: string, orderNumber: string) => {
+    if (!window.confirm(`Are you sure you want to cancel order ${orderNumber}? Stock will be restored.`)) {
+      return;
+    }
+    setError(null);
+    try {
+      await apiRequest(`/marketplace/admin/orders/${orderId}/cancel`, {
+        method: "POST",
+        body: JSON.stringify({ reason: "Cancelled by administrator" }),
+      });
+      setSuccess(`Order ${orderNumber} has been cancelled.`);
+      loadTabContent("orders");
+    } catch (err: any) {
+      setError(err.message || "Failed to cancel order");
     }
   };
 
@@ -655,6 +706,7 @@ export default function AdminMarketplacePage() {
                     <th className="py-3 px-4">Payment</th>
                     <th className="py-3 px-4">Fulfilment</th>
                     <th className="py-3 px-4">Date</th>
+                    <th className="py-3 px-4 text-right">Actions</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-gray-100">
@@ -695,6 +747,32 @@ export default function AdminMarketplacePage() {
                       </td>
                       <td className="py-3.5 px-4 text-gray-400">
                         {new Date(ord.created_at).toLocaleDateString("en-NG")}
+                      </td>
+                      <td className="py-3.5 px-4 text-right space-x-1.5 whitespace-nowrap">
+                        {ord.payment_status === "paid" && ord.order_status !== "refunded" && (
+                          <button
+                            onClick={() => {
+                              setSelectedOrderForRefund(ord);
+                              setRefundAmountNaira((ord.total_kobo / 100).toString());
+                              setRefundReason("Administrative customer refund");
+                              setShowRefundModal(true);
+                            }}
+                            className="px-2.5 py-1 text-[11px] font-bold text-red-700 bg-red-50 hover:bg-red-100 rounded-lg border border-red-200 transition"
+                          >
+                            Refund
+                          </button>
+                        )}
+                        {ord.order_status !== "cancelled" &&
+                          ord.order_status !== "refunded" &&
+                          ord.fulfilment_status !== "dispatched" &&
+                          ord.fulfilment_status !== "delivered" && (
+                            <button
+                              onClick={() => handleAdminCancelOrder(ord.id, ord.order_number)}
+                              className="px-2.5 py-1 text-[11px] font-bold text-gray-700 bg-gray-100 hover:bg-gray-200 rounded-lg border border-gray-200 transition"
+                            >
+                              Cancel
+                            </button>
+                          )}
                       </td>
                     </tr>
                   ))}
@@ -1084,6 +1162,67 @@ export default function AdminMarketplacePage() {
                   className="flex-1 py-2 bg-emerald-800 hover:bg-emerald-700 text-white font-bold rounded-xl disabled:opacity-50"
                 >
                   {resolveSubmitting ? "Executing..." : "Execute Ruling"}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* Refund Modal */}
+      {showRefundModal && selectedOrderForRefund && (
+        <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4">
+          <div className="bg-white rounded-2xl max-w-md w-full p-6 shadow-xl space-y-4">
+            <h3 className="font-bold text-sm text-gray-900 flex items-center gap-2">
+              <DollarSign className="w-4 h-4 text-emerald-700" />
+              Process Order Refund
+            </h3>
+            <p className="text-xs text-gray-600">
+              Order: <span className="font-bold font-mono text-gray-900">{selectedOrderForRefund.order_number}</span> • Total Paid: <span className="font-bold text-gray-900">₦{(selectedOrderForRefund.total_kobo / 100).toLocaleString()}</span>
+            </p>
+
+            <form onSubmit={handleProcessRefund} className="space-y-4 text-xs">
+              <div>
+                <label className="block font-semibold text-gray-700 mb-1">Refund Amount (NGN) *</label>
+                <input
+                  type="number"
+                  step="any"
+                  required
+                  value={refundAmountNaira}
+                  onChange={(e) => setRefundAmountNaira(e.target.value)}
+                  className="w-full px-3 py-2 border border-gray-300 rounded-xl focus:ring-2 focus:ring-emerald-500 font-bold"
+                />
+                <p className="text-[10px] text-gray-400 mt-1">Full refund will automatically restore inventory stock to vendors.</p>
+              </div>
+
+              <div>
+                <label className="block font-semibold text-gray-700 mb-1">
+                  Reason for Refund *
+                </label>
+                <textarea
+                  required
+                  rows={3}
+                  value={refundReason}
+                  onChange={(e) => setRefundReason(e.target.value)}
+                  placeholder="Reason for administrative refund..."
+                  className="w-full px-3 py-2 border border-gray-300 rounded-xl focus:ring-2 focus:ring-emerald-500"
+                />
+              </div>
+
+              <div className="flex gap-2">
+                <button
+                  type="button"
+                  onClick={() => setShowRefundModal(false)}
+                  className="flex-1 py-2 bg-gray-100 text-gray-700 font-bold rounded-xl"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  disabled={refundSubmitting}
+                  className="flex-1 py-2 bg-red-700 hover:bg-red-800 text-white font-bold rounded-xl disabled:opacity-50"
+                >
+                  {refundSubmitting ? "Processing..." : "Confirm Refund"}
                 </button>
               </div>
             </form>
