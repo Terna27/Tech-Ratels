@@ -2,6 +2,8 @@ package security
 
 import (
 	"crypto/rand"
+	"crypto/sha256"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"math/big"
@@ -102,4 +104,19 @@ func ParseJWT(tokenString, secret string) (*JWTClaims, error) {
 	}
 
 	return nil, errors.New("invalid token")
+}
+
+// GenerateSecureToken generates 32 cryptographically secure random bytes, hex-encoded as a 64-character string.
+func GenerateSecureToken() (string, error) {
+	bytes := make([]byte, 32)
+	if _, err := rand.Read(bytes); err != nil {
+		return "", fmt.Errorf("failed to generate secure random token: %w", err)
+	}
+	return hex.EncodeToString(bytes), nil
+}
+
+// HashToken computes the SHA-256 hash of a raw token and returns it as a 64-character hex string.
+func HashToken(rawToken string) string {
+	hash := sha256.Sum256([]byte(rawToken))
+	return hex.EncodeToString(hash[:])
 }

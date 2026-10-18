@@ -11,6 +11,18 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 )
 
+const countPendingAppeals = `-- name: CountPendingAppeals :one
+SELECT COUNT(*) FROM participation_appeals
+WHERE status = 'pending'
+`
+
+func (q *Queries) CountPendingAppeals(ctx context.Context) (int64, error) {
+	row := q.db.QueryRow(ctx, countPendingAppeals)
+	var count int64
+	err := row.Scan(&count)
+	return count, err
+}
+
 const countPendingClaims = `-- name: CountPendingClaims :one
 SELECT COUNT(*) FROM participation_claims
 WHERE status = 'pending'

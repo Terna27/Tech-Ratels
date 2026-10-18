@@ -11,6 +11,17 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 )
 
+const countDraftEvents = `-- name: CountDraftEvents :one
+SELECT COUNT(*) FROM event_instances WHERE status = 'draft'
+`
+
+func (q *Queries) CountDraftEvents(ctx context.Context) (int64, error) {
+	row := q.db.QueryRow(ctx, countDraftEvents)
+	var count int64
+	err := row.Scan(&count)
+	return count, err
+}
+
 const countPublishedEvents = `-- name: CountPublishedEvents :one
 SELECT COUNT(*) FROM event_instances WHERE status = 'published'
 `

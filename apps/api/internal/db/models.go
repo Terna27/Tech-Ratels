@@ -118,6 +118,26 @@ type ContactVerification struct {
 	Version      int32              `json:"version"`
 }
 
+type EmailVerificationRateLimit struct {
+	ID               string             `json:"id"`
+	Identifier       string             `json:"identifier"`
+	Action           string             `json:"action"`
+	RequestCount     int32              `json:"request_count"`
+	FirstRequestedAt pgtype.Timestamptz `json:"first_requested_at"`
+	LastRequestedAt  pgtype.Timestamptz `json:"last_requested_at"`
+}
+
+type EmailVerificationToken struct {
+	ID        string             `json:"id"`
+	UserID    string             `json:"user_id"`
+	Email     string             `json:"email"`
+	TokenHash string             `json:"token_hash"`
+	ExpiresAt pgtype.Timestamptz `json:"expires_at"`
+	IsUsed    bool               `json:"is_used"`
+	UsedAt    pgtype.Timestamptz `json:"used_at"`
+	CreatedAt pgtype.Timestamptz `json:"created_at"`
+}
+
 type EventInstance struct {
 	ID                 string             `json:"id"`
 	CampaignID         pgtype.Text        `json:"campaign_id"`

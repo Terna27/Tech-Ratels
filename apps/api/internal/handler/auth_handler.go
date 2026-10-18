@@ -2,6 +2,7 @@ package handler
 
 import (
 	"encoding/json"
+	"errors"
 	"net/http"
 	"strings"
 	"time"
@@ -64,6 +65,63 @@ func (h *AuthHandler) VerifyContact(w http.ResponseWriter, r *http.Request) {
 		"message":     "Contact verified successfully. Account is now active.",
 		"is_verified": true,
 	})
+}
+
+func (h *AuthHandler) VerifyEmail(w http.ResponseWriter, r *http.Request) {
+	var req service.VerifyEmailRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		ErrorJSON(w, http.StatusBadRequest, "INVALID_REQUEST", "Invalid request payload", nil)
+		return
+	}
+
+	res, err := h.authService.VerifyEmailToken(r.Context(), req.Token)
+	if err != nil {
+		if err == service.ErrTokenExpired {
+			ErrorJSON(w, http.StatusBadRequest, "TOKEN_EXPIRED", err.Error(), nil)
+			return
+		}
+		if err == service.ErrTokenAlreadyUsed {
+			ErrorJSON(w, http.StatusBadRequest, "TOKEN_ALREADY_USED", err.Error(), nil)
+			return
+		}
+		if err == service.ErrInvalidToken {
+			ErrorJSON(w, http.StatusBadRequest, "TOKEN_INVALID", err.Error(), nil)
+			return
+		}
+		ErrorJSON(w, http.StatusBadRequest, "VERIFICATION_FAILED", err.Error(), nil)
+		return
+	}
+
+	JSON(w, http.StatusOK, res)
+}
+
+func (h *AuthHandler) ResendVerification(w http.ResponseWriter, r *http.Request) {
+	var req service.ResendVerificationRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		ErrorJSON(w, http.StatusBadRequest, "INVALID_REQUEST", "Invalid request payload", nil)
+		return
+	}
+
+	ip := r.RemoteAddr
+	res, err := h.authService.ResendVerificationEmail(r.Context(), req.Email, ip)
+	if err != nil {
+		if errors.Is(err, service.ErrResendCooldownActive) {
+			ErrorJSON(w, http.StatusTooManyRequests, "COOLDOWN_ACTIVE", err.Error(), nil)
+			return
+		}
+		if errors.Is(err, service.ErrRateLimitExceeded) {
+			ErrorJSON(w, http.StatusTooManyRequests, "RATE_LIMIT_EXCEEDED", err.Error(), nil)
+			return
+		}
+		if errors.Is(err, service.ErrInvalidEmail) {
+			ErrorJSON(w, http.StatusBadRequest, "INVALID_EMAIL", err.Error(), nil)
+			return
+		}
+		ErrorJSON(w, http.StatusBadGateway, "EMAIL_DELIVERY_FAILED", "Email delivery provider rejected message. Please check the address or try again.", nil)
+		return
+	}
+
+	JSON(w, http.StatusOK, res)
 }
 
 type ExtendedLoginResponse struct {

@@ -85,10 +85,25 @@ export default function RegisterPage() {
         accept_rules: true,
       };
 
-      const res = await apiRequest("/auth/register", {
+      const res = await apiRequest<{
+        user_id: string;
+        membership_reference: string;
+        status: string;
+        message: string;
+        delivery_status?: string;
+        _dev_verification_url?: string;
+        _dev_verification_code?: string;
+      }>("/auth/register", {
         method: "POST",
         body: JSON.stringify(payload),
       });
+
+      if (email) {
+        const queryEmail = encodeURIComponent(email.trim());
+        const deliveryStatus = encodeURIComponent(res.delivery_status || "sent");
+        router.push(`/check-email?email=${queryEmail}&status=${deliveryStatus}`);
+        return;
+      }
 
       if (res._dev_verification_code) {
         setDevCodeHint(res._dev_verification_code);

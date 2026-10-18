@@ -52,12 +52,48 @@ func main() {
 
 	repo := repository.NewRepository(pool)
 	isProduction := strings.ToLower(cfg.Environment) == "production" || strings.ToLower(os.Getenv("APP_ENV")) == "production"
-	devDelivery := delivery.NewDevSafeDeliveryAdapter(isProduction)
+	
+	var emailDelivery delivery.DeliveryAdapter
+	switch cfg.EmailProvider {
+	case "brevo":
+		if cfg.BrevoAPIKey != "" && cfg.EmailFromAddress != "" {
+			emailDelivery = delivery.NewBrevoDeliveryAdapter(cfg.BrevoAPIKey, cfg.EmailFromName, cfg.EmailFromAddress)
+			log.Printf("Email delivery adapter configured via Brevo HTTPS API (sender: %s <%s>)\n", cfg.EmailFromName, cfg.EmailFromAddress)
+		} else if !isProduction && cfg.DevSafeDelivery {
+			emailDelivery = delivery.NewDevSafeDeliveryAdapter(false)
+			log.Println("Brevo credentials missing; falling back to development safe sandbox mode.")
+		} else {
+			emailDelivery = delivery.NewProductionUnconfiguredAdapter()
+			log.Println("WARNING: Brevo credentials (BREVO_API_KEY or EMAIL_FROM_ADDRESS) missing; verification emails will fail.")
+		}
+	case "resend":
+		if cfg.ResendAPIKey != "" {
+			emailDelivery = delivery.NewResendDeliveryAdapter(cfg.ResendAPIKey, cfg.EmailFrom)
+			log.Printf("Email delivery adapter configured via Resend HTTPS API (sender: %s)\n", cfg.EmailFrom)
+		} else if !isProduction && cfg.DevSafeDelivery {
+			emailDelivery = delivery.NewDevSafeDeliveryAdapter(false)
+			log.Println("Resend credentials missing; falling back to development safe sandbox mode.")
+		} else {
+			emailDelivery = delivery.NewProductionUnconfiguredAdapter()
+			log.Println("WARNING: Resend credentials (RESEND_API_KEY) missing; verification emails will fail.")
+		}
+	case "dev":
+		emailDelivery = delivery.NewDevSafeDeliveryAdapter(false)
+		log.Println("Email delivery running in development safe sandbox mode (no external dispatch).")
+	default:
+		if !isProduction && cfg.DevSafeDelivery {
+			emailDelivery = delivery.NewDevSafeDeliveryAdapter(false)
+			log.Println("Email delivery running in development safe sandbox mode (no external dispatch).")
+		} else {
+			emailDelivery = delivery.NewProductionUnconfiguredAdapter()
+			log.Println("WARNING: No email delivery provider configured; external verification emails will be rejected.")
+		}
+	}
 
 	// Services
 	auditService := service.NewAuditService(repo)
 	geoService := service.NewGeographyService(repo)
-	authService := service.NewAuthService(repo, cfg, devDelivery, auditService)
+	authService := service.NewAuthService(repo, cfg, emailDelivery, auditService)
 	leadService := service.NewLeadershipService(repo, auditService)
 	cleanupService := service.NewCleanupService(repo, auditService)
 	partService := service.NewParticipationService(repo, auditService)

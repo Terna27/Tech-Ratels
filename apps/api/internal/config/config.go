@@ -23,6 +23,13 @@ type Config struct {
 	DevSafeDelivery           bool
 	FoundationProvisionalName string
 	AllowedOrigins            []string
+	EmailProvider             string // "brevo", "resend", "dev"
+	BrevoAPIKey               string
+	ResendAPIKey              string
+	EmailFromName             string
+	EmailFromAddress          string
+	EmailFrom                 string
+	FrontendBaseURL           string
 }
 
 func Load() *Config {
@@ -94,6 +101,58 @@ func Load() *Config {
 		}
 	}
 
+	emailProvider := strings.ToLower(strings.TrimSpace(os.Getenv("EMAIL_PROVIDER")))
+	brevoAPIKey := strings.TrimSpace(os.Getenv("BREVO_API_KEY"))
+	resendAPIKey := strings.TrimSpace(os.Getenv("RESEND_API_KEY"))
+
+	emailFromName := strings.TrimSpace(os.Getenv("EMAIL_FROM_NAME"))
+	if emailFromName == "" {
+		emailFromName = "Nigerian Ratels"
+	}
+
+	emailFromAddress := strings.TrimSpace(os.Getenv("EMAIL_FROM_ADDRESS"))
+	emailFrom := strings.TrimSpace(os.Getenv("EMAIL_FROM"))
+
+	if emailFromAddress != "" && emailFrom == "" {
+		emailFrom = fmt.Sprintf("%s <%s>", emailFromName, emailFromAddress)
+	} else if emailFrom != "" && emailFromAddress == "" {
+		if strings.Contains(emailFrom, "<") && strings.Contains(emailFrom, ">") {
+			parts := strings.Split(emailFrom, "<")
+			emailFromAddress = strings.Trim(parts[1], "> \t")
+			namePart := strings.TrimSpace(parts[0])
+			if namePart != "" && emailFromName == "Nigerian Ratels" {
+				emailFromName = namePart
+			}
+		} else {
+			emailFromAddress = emailFrom
+		}
+	} else if emailFrom == "" && emailFromAddress == "" {
+		emailFromAddress = "onboarding@resend.dev"
+		emailFrom = fmt.Sprintf("%s <%s>", emailFromName, emailFromAddress)
+	}
+
+	if emailProvider == "" {
+		if brevoAPIKey != "" {
+			emailProvider = "brevo"
+		} else if resendAPIKey != "" {
+			emailProvider = "resend"
+		} else if isProduction {
+			emailProvider = "unconfigured"
+		} else {
+			emailProvider = "dev"
+		}
+	}
+
+	frontendBaseURL := strings.TrimSpace(os.Getenv("FRONTEND_BASE_URL"))
+	if frontendBaseURL == "" {
+		if isProduction && len(allowedOrigins) > 0 {
+			frontendBaseURL = allowedOrigins[0]
+		} else {
+			frontendBaseURL = "http://localhost:3000"
+		}
+	}
+	frontendBaseURL = strings.TrimRight(frontendBaseURL, "/")
+
 	return &Config{
 		DatabaseURL:               dbURL,
 		Port:                      port,
@@ -103,12 +162,27 @@ func Load() *Config {
 		DevSafeDelivery:           devDelivery,
 		FoundationProvisionalName: foundationName,
 		AllowedOrigins:            allowedOrigins,
+		EmailProvider:             emailProvider,
+		BrevoAPIKey:               brevoAPIKey,
+		ResendAPIKey:              resendAPIKey,
+		EmailFromName:             emailFromName,
+		EmailFromAddress:          emailFromAddress,
+		EmailFrom:                 emailFrom,
+		FrontendBaseURL:           frontendBaseURL,
 	}
 }
 
 // Validate verifies production requirements and safety invariants.
 func (c *Config) Validate() error {
 	isProduction := strings.ToLower(c.Environment) == "production"
+
+	switch c.EmailProvider {
+	case "brevo", "resend", "dev", "unconfigured", "":
+		// Allowed provider identifiers
+	default:
+		return fmt.Errorf("unsupported EMAIL_PROVIDER: %q; supported providers are 'brevo', 'resend', and 'dev'", c.EmailProvider)
+	}
+
 	if isProduction {
 		if strings.TrimSpace(c.DatabaseURL) == "" {
 			return errors.New("DATABASE_URL is required in production environment; no connection string provided")
@@ -132,6 +206,27 @@ func (c *Config) Validate() error {
 			if strings.Contains(o, "*") {
 				return fmt.Errorf("wildcard origin %q is prohibited in production; specify explicit frontend origins", o)
 			}
+		}
+		if strings.Contains(c.FrontendBaseURL, "localhost") || strings.Contains(c.FrontendBaseURL, "127.0.0.1") {
+			return fmt.Errorf("FRONTEND_BASE_URL cannot point to localhost in production; current value: %q", c.FrontendBaseURL)
+		}
+
+		if c.EmailProvider == "brevo" {
+			if c.BrevoAPIKey == "" {
+				return errors.New("BREVO_API_KEY is required in production when EMAIL_PROVIDER is set to brevo")
+			}
+			if c.EmailFromAddress == "" || !strings.Contains(c.EmailFromAddress, "@") {
+				return errors.New("EMAIL_FROM_ADDRESS must be a valid email address in production when EMAIL_PROVIDER is set to brevo")
+			}
+		} else if c.EmailProvider == "resend" {
+			if c.ResendAPIKey == "" {
+				return errors.New("RESEND_API_KEY is required in production when EMAIL_PROVIDER is set to resend")
+			}
+			if c.EmailFrom == "" {
+				return errors.New("EMAIL_FROM is required in production when EMAIL_PROVIDER is set to resend")
+			}
+		} else if c.EmailProvider == "dev" {
+			return errors.New("EMAIL_PROVIDER cannot be set to 'dev' in production; configure 'brevo' or 'resend'")
 		}
 	}
 	return nil

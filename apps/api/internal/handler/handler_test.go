@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"os"
 	"testing"
 	"time"
@@ -214,3 +215,149 @@ func TestHTTPAuthFlow(t *testing.T) {
 		t.Fatalf("Expected 401 Unauthorized, got %d", rr.Code)
 	}
 }
+
+func TestHTTPEmailVerificationFlow(t *testing.T) {
+	router, del, cleanup := setupTestRouter(t)
+	defer cleanup()
+
+	// 1. Register via HTTP
+	userEmail := fmt.Sprintf("http_email_member_%d@example.com", time.Now().UnixNano())
+	regPayload := map[string]string{
+		"email":        userEmail,
+		"password":     "HttpEmailPassword123!",
+		"display_name": "HTTP Email Volunteer",
+	}
+	regBytes, _ := json.Marshal(regPayload)
+	req, _ := http.NewRequest("POST", "/api/v1/auth/register", bytes.NewBuffer(regBytes))
+	req.Header.Set("Content-Type", "application/json")
+	rr := httptest.NewRecorder()
+	router.ServeHTTP(rr, req)
+
+	if rr.Code != http.StatusCreated {
+		t.Fatalf("Register HTTP failed: code %d, body: %s", rr.Code, rr.Body.String())
+	}
+
+	// 2. Login should be rejected because account is unverified -> 403 Forbidden
+	loginPayload := map[string]string{
+		"username": userEmail,
+		"password": "HttpEmailPassword123!",
+	}
+	loginBytes, _ := json.Marshal(loginPayload)
+	req, _ = http.NewRequest("POST", "/api/v1/auth/login", bytes.NewBuffer(loginBytes))
+	req.Header.Set("Content-Type", "application/json")
+	rr = httptest.NewRecorder()
+	router.ServeHTTP(rr, req)
+
+	if rr.Code != http.StatusForbidden {
+		t.Fatalf("Expected 403 Forbidden for unverified user login, got %d, body: %s", rr.Code, rr.Body.String())
+	}
+
+	// 3. Extract token from dev delivery URL
+	rawURL := del.GetLastVerificationURL(userEmail)
+	if rawURL == "" {
+		t.Fatalf("Expected verification URL dispatched, got empty string")
+	}
+	u, err := url.Parse(rawURL)
+	if err != nil {
+		t.Fatalf("Failed to parse verification URL: %v", err)
+	}
+	token := u.Query().Get("token")
+	if token == "" {
+		t.Fatalf("No token found in verification URL: %s", rawURL)
+	}
+
+	// 4. Verify email via POST /api/v1/auth/verify-email
+	verifyPayload := map[string]string{
+		"token": token,
+	}
+	verBytes, _ := json.Marshal(verifyPayload)
+	req, _ = http.NewRequest("POST", "/api/v1/auth/verify-email", bytes.NewBuffer(verBytes))
+	req.Header.Set("Content-Type", "application/json")
+	rr = httptest.NewRecorder()
+	router.ServeHTTP(rr, req)
+
+	if rr.Code != http.StatusOK {
+		t.Fatalf("Verify Email HTTP failed: code %d, body: %s", rr.Code, rr.Body.String())
+	}
+
+	var verResp map[string]interface{}
+	_ = json.Unmarshal(rr.Body.Bytes(), &verResp)
+	if verResp["is_verified"] != true {
+		t.Errorf("Expected is_verified=true, got %v", verResp["is_verified"])
+	}
+
+	// 5. Login now succeeds
+	req, _ = http.NewRequest("POST", "/api/v1/auth/login", bytes.NewBuffer(loginBytes))
+	req.Header.Set("Content-Type", "application/json")
+	rr = httptest.NewRecorder()
+	router.ServeHTTP(rr, req)
+
+	if rr.Code != http.StatusOK {
+		t.Fatalf("Login HTTP failed after verification: code %d, body: %s", rr.Code, rr.Body.String())
+	}
+
+	var loginResp map[string]interface{}
+	_ = json.Unmarshal(rr.Body.Bytes(), &loginResp)
+	accessToken := loginResp["access_token"].(string)
+
+	// 6. Access protected endpoint
+	req, _ = http.NewRequest("GET", "/api/v1/members/me", nil)
+	req.Header.Set("Authorization", "Bearer "+accessToken)
+	rr = httptest.NewRecorder()
+	router.ServeHTTP(rr, req)
+
+	if rr.Code != http.StatusOK {
+		t.Fatalf("Protected GET /members/me failed: code %d, body: %s", rr.Code, rr.Body.String())
+	}
+}
+
+func TestHTTPResendVerificationCooldown(t *testing.T) {
+	h := setupTestHarness(t)
+	defer h.Cleanup()
+
+	// 1. Register user
+	userEmail := fmt.Sprintf("http_resend_%d@example.com", time.Now().UnixNano())
+	regPayload := map[string]string{
+		"email":        userEmail,
+		"password":     "HttpResendPassword123!",
+		"display_name": "HTTP Resend Volunteer",
+	}
+	regBytes, _ := json.Marshal(regPayload)
+	req, _ := http.NewRequest("POST", "/api/v1/auth/register", bytes.NewBuffer(regBytes))
+	req.Header.Set("Content-Type", "application/json")
+	rr := httptest.NewRecorder()
+	h.Router.ServeHTTP(rr, req)
+
+	if rr.Code != http.StatusCreated {
+		t.Fatalf("Register failed: code %d", rr.Code)
+	}
+
+	// 2. Resend immediately -> 429 Too Many Requests (cooldown active)
+	resendPayload := map[string]string{
+		"email": userEmail,
+	}
+	resendBytes, _ := json.Marshal(resendPayload)
+	req, _ = http.NewRequest("POST", "/api/v1/auth/resend-verification", bytes.NewBuffer(resendBytes))
+	req.Header.Set("Content-Type", "application/json")
+	rr = httptest.NewRecorder()
+	h.Router.ServeHTTP(rr, req)
+
+	if rr.Code != http.StatusTooManyRequests {
+		t.Fatalf("Expected 429 Too Many Requests on immediate resend, got %d, body: %s", rr.Code, rr.Body.String())
+	}
+
+	// 3. Clear rate limits in database to simulate passage of 60 seconds
+	ctx := context.Background()
+	_, _ = h.Pool.Exec(ctx, "DELETE FROM email_verification_rate_limits WHERE identifier = $1", userEmail)
+
+	// 4. Resend should now succeed -> 200 OK
+	req, _ = http.NewRequest("POST", "/api/v1/auth/resend-verification", bytes.NewBuffer(resendBytes))
+	req.Header.Set("Content-Type", "application/json")
+	rr = httptest.NewRecorder()
+	h.Router.ServeHTTP(rr, req)
+
+	if rr.Code != http.StatusOK {
+		t.Fatalf("Expected 200 OK after cooldown, got %d, body: %s", rr.Code, rr.Body.String())
+	}
+}
+

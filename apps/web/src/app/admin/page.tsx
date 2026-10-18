@@ -59,6 +59,14 @@ export default function AdminOverviewPage() {
   if (isLoading || loading) return <Spinner text="Loading administration workspace..." />;
   if (!user || !overview) return null;
 
+  const unverifiedQueue = overview.unverified_participations_queue ?? (overview as any).pending_reviews ?? 0;
+  const draftQueue = overview.draft_venues_review_queue ?? 0;
+  const appealsQueue = overview.pending_appeals_queue ?? 0;
+  const totalMembers = overview.total_members ?? 0;
+  const pendingVerifications = overview.pending_member_verifications ?? 0;
+  const activeCoordinators = overview.active_coordinators ?? (overview as any).active_appointments ?? 0;
+  const publishedVenues = overview.published_activities ?? (overview as any).published_cleanups ?? 0;
+
   return (
     <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-10 space-y-8">
       {/* Role & Geographic Jurisdiction Context Banner */}
@@ -69,12 +77,17 @@ export default function AdminOverviewPage() {
               Administrative Context
             </span>
             <Badge variant="primary" size="sm">
-              {overview.current_role.replace("_", " ").toUpperCase()}
+              {(overview.current_role || user.primary_role || "ADMIN")
+                .replace(/_/g, " ")
+                .toUpperCase()}
             </Badge>
           </div>
           <h1 className="text-2xl sm:text-3xl font-extrabold flex items-center gap-2">
             <MapPin className="w-6 h-6 text-emerald-400" />
-            {overview.current_jurisdiction_name}
+            {overview.current_jurisdiction_name ||
+              (user.primary_role === "super_admin"
+                ? "National Command (All Nigeria)"
+                : "National Jurisdiction")}
           </h1>
           <p className="text-xs text-emerald-200">
             Coordinator: {user.display_name} ({user.membership_reference})
@@ -92,7 +105,7 @@ export default function AdminOverviewPage() {
             href="/admin/reviews"
             className="px-4 py-2 bg-emerald-400 hover:bg-emerald-300 text-emerald-950 text-xs font-bold rounded-lg transition"
           >
-            Review Queue ({overview.unverified_participations_queue})
+            Review Queue ({unverifiedQueue})
           </Link>
         </div>
       </div>
@@ -112,12 +125,12 @@ export default function AdminOverviewPage() {
               <span className="text-xs text-gray-500 font-semibold uppercase">
                 Participation Queue
               </span>
-              <Badge variant={overview.unverified_participations_queue > 0 ? "warning" : "neutral"}>
-                {overview.unverified_participations_queue} pending
+              <Badge variant={unverifiedQueue > 0 ? "warning" : "neutral"}>
+                {unverifiedQueue} pending
               </Badge>
             </div>
             <div className="text-2xl font-black text-gray-900">
-              {overview.unverified_participations_queue}
+              {unverifiedQueue}
             </div>
             <p className="text-xs text-gray-600">
               Volunteer activity attendance submissions awaiting coordinator review.
@@ -136,12 +149,12 @@ export default function AdminOverviewPage() {
               <span className="text-xs text-gray-500 font-semibold uppercase">
                 Draft Cleanup Venues
               </span>
-              <Badge variant={overview.draft_venues_review_queue > 0 ? "warning" : "neutral"}>
-                {overview.draft_venues_review_queue} drafts
+              <Badge variant={draftQueue > 0 ? "warning" : "neutral"}>
+                {draftQueue} drafts
               </Badge>
             </div>
             <div className="text-2xl font-black text-gray-900">
-              {overview.draft_venues_review_queue}
+              {draftQueue}
             </div>
             <p className="text-xs text-gray-600">
               Proposed local sanitation venues awaiting review and publication.
@@ -160,12 +173,12 @@ export default function AdminOverviewPage() {
               <span className="text-xs text-gray-500 font-semibold uppercase">
                 Appeals Queue
               </span>
-              <Badge variant={overview.pending_appeals_queue > 0 ? "danger" : "neutral"}>
-                {overview.pending_appeals_queue} appeals
+              <Badge variant={appealsQueue > 0 ? "danger" : "neutral"}>
+                {appealsQueue} appeals
               </Badge>
             </div>
             <div className="text-2xl font-black text-gray-900">
-              {overview.pending_appeals_queue}
+              {appealsQueue}
             </div>
             <p className="text-xs text-gray-600">
               Rejected attendance claims appealed by members.
@@ -191,25 +204,25 @@ export default function AdminOverviewPage() {
         <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
           <div className="bg-white p-4 rounded-xl border border-gray-200 shadow-sm text-xs space-y-1">
             <span className="text-gray-500">Registered Members</span>
-            <div className="text-xl font-bold text-gray-900">{overview.total_members}</div>
+            <div className="text-xl font-bold text-gray-900">{totalMembers}</div>
             <span className="text-[10px] text-gray-400">Total movement members</span>
           </div>
 
           <div className="bg-white p-4 rounded-xl border border-gray-200 shadow-sm text-xs space-y-1">
             <span className="text-gray-500">Pending Verification</span>
-            <div className="text-xl font-bold text-gray-900">{overview.pending_member_verifications}</div>
+            <div className="text-xl font-bold text-gray-900">{pendingVerifications}</div>
             <span className="text-[10px] text-gray-400">Awaiting contact verify</span>
           </div>
 
           <div className="bg-white p-4 rounded-xl border border-gray-200 shadow-sm text-xs space-y-1">
             <span className="text-gray-500">Active Coordinators</span>
-            <div className="text-xl font-bold text-gray-900">{overview.active_coordinators}</div>
+            <div className="text-xl font-bold text-gray-900">{activeCoordinators}</div>
             <span className="text-[10px] text-gray-400">Authorized appointments</span>
           </div>
 
           <div className="bg-white p-4 rounded-xl border border-gray-200 shadow-sm text-xs space-y-1">
             <span className="text-gray-500">Published Venues</span>
-            <div className="text-xl font-bold text-gray-900">{overview.published_activities}</div>
+            <div className="text-xl font-bold text-gray-900">{publishedVenues}</div>
             <span className="text-[10px] text-gray-400">Confirmed activities</span>
           </div>
         </div>

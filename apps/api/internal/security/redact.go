@@ -13,8 +13,14 @@ var (
 	uriCredentialsRegex = regexp.MustCompile(`([a-zA-Z][a-zA-Z0-9+.-]*://[^:\s@/]+):([^@\s/]+)(@)`)
 
 	// kvCredentialsRegex matches key-value connection parameters or config keys
-	// e.g. password=secret, pwd=secret, secret=secret, token=secret
-	kvCredentialsRegex = regexp.MustCompile(`(?i)\b(password|pwd|secret|token)\s*=\s*['"]?([^\s'";]+)['"]?`)
+	// e.g. password=secret, pwd=secret, secret=secret, token=secret, api_key=secret, brevo_api_key=secret
+	kvCredentialsRegex = regexp.MustCompile(`(?i)\b(password|pwd|secret|token|api_key|apikey|api-key|brevo_api_key|resend_api_key|x-sib-api-key)\s*[:=]\s*['"]?([^\s'";]+)['"]?`)
+
+	// urlTokenRegex redacts raw verification tokens in URLs or query strings
+	urlTokenRegex = regexp.MustCompile(`(?i)([?&]token=)[a-zA-Z0-9_\-]+`)
+
+	// fullVerificationLinkRegex redacts entire verification links from logs
+	fullVerificationLinkRegex = regexp.MustCompile(`https?://[^\s/]+/verify-email\?token=[a-zA-Z0-9_\-]+`)
 )
 
 // RedactString sanitizes a string to remove database passwords, tokens, and URIs containing credentials.
@@ -28,6 +34,12 @@ func RedactString(s string, knownSecrets ...string) string {
 
 	// 2. Redact key-value pairs
 	redacted = kvCredentialsRegex.ReplaceAllString(redacted, "${1}=[REDACTED]")
+
+	// 3. Redact URL token query params
+	redacted = urlTokenRegex.ReplaceAllString(redacted, "${1}[REDACTED]")
+
+	// 4. Redact full verification URLs if present
+	redacted = fullVerificationLinkRegex.ReplaceAllString(redacted, "[REDACTED_VERIFICATION_LINK]")
 
 	// 3. Redact any known secrets if provided
 	for _, sec := range knownSecrets {

@@ -3,6 +3,7 @@ package handler
 import (
 	"encoding/json"
 	"net/http"
+	"strconv"
 
 	"ratels-api/internal/service"
 )
@@ -59,4 +60,28 @@ func (h *MemberHandler) UpdateProfile(w http.ResponseWriter, r *http.Request) {
 	}
 
 	JSON(w, http.StatusOK, profile)
+}
+
+func (h *MemberHandler) ListMembers(w http.ResponseWriter, r *http.Request) {
+	limit := int32(50)
+	if lStr := r.URL.Query().Get("limit"); lStr != "" {
+		if val, err := strconv.Atoi(lStr); err == nil && val > 0 {
+			limit = int32(val)
+		}
+	}
+
+	page := int32(1)
+	if pStr := r.URL.Query().Get("page"); pStr != "" {
+		if val, err := strconv.Atoi(pStr); err == nil && val > 0 {
+			page = int32(val)
+		}
+	}
+
+	members, err := h.authService.ListMembers(r.Context(), page, limit)
+	if err != nil {
+		ErrorJSON(w, http.StatusInternalServerError, "INTERNAL_ERROR", err.Error(), nil)
+		return
+	}
+
+	JSON(w, http.StatusOK, members)
 }

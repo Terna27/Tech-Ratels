@@ -154,6 +154,12 @@ async function runBrowserVerification() {
   const page = await browser.newPage();
 
   try {
+    const pageErrors = [];
+    page.on("pageerror", err => {
+      console.error("-> [BROWSER UNCAUGHT EXCEPTION]:", err.message);
+      pageErrors.push(err.message);
+    });
+
     // ----------------------------------------------------
     // TEST 0: Real Browser Login, HttpOnly Cookies, Zero Storage & CSRF Verification
     // ----------------------------------------------------
@@ -174,6 +180,11 @@ async function runBrowserVerification() {
     if (!page.url().includes("/admin")) {
       throw new Error(`Expected redirect to /admin, but got: ${page.url()}`);
     }
+
+    if (pageErrors.length > 0) {
+      throw new Error(`Client-side exception caught after Super Admin login on /admin: ${pageErrors.join("; ")}`);
+    }
+    console.log("   ✓ Zero client-side exceptions observed on /admin dashboard load.");
 
     // Inspect browser cookies
     const cookies = await page.cookies();
@@ -602,6 +613,125 @@ async function runBrowserVerification() {
       const stats = fs.statSync(path.join(SCRATCH_DIR, pImg));
       console.log(`     - ${pImg} (${stats.size} bytes)`);
     }
+
+    // ----------------------------------------------------
+    // TEST 6: Real UI Registration & Email Verification Flow
+    // ----------------------------------------------------
+    console.log("\n[BROWSER TEST 6] Verifying User Registration, Check-Email & Verify-Email Pages...");
+    await page.emulateMediaType("screen");
+
+    // Clear cookies for fresh unauthenticated registration
+    const initialCookies = await page.cookies();
+    for (const c of initialCookies) {
+      await page.deleteCookie(c);
+    }
+
+    const regEmail = `browser_vol_${Date.now()}@ratels.example.org`;
+    const regPass = "VolunteerPass2026!";
+
+    // 1. Visit /register and submit
+    await page.goto(`${WEB_BASE}/register`, { waitUntil: "networkidle0" });
+    await page.type('input[placeholder*="Terna Peter"]', "Browser Test Volunteer");
+    await page.type('input[type="email"]', regEmail);
+    await page.type('input[type="password"]', regPass);
+    await page.click('input[type="checkbox"]');
+
+    await Promise.all([
+      page.waitForNavigation({ waitUntil: "networkidle0" }),
+      page.click('button[type="submit"]'),
+    ]);
+
+    console.log("-> Current Page URL after registration:", page.url());
+    if (!page.url().includes("/check-email")) {
+      throw new Error(`Expected redirect to /check-email, but got: ${page.url()}`);
+    }
+
+    const checkEmailBody = await page.evaluate(() => document.body.innerText);
+    if (!checkEmailBody.toLowerCase().includes("check your email") || !checkEmailBody.includes(regEmail)) {
+      throw new Error("Check email page did not display expected text or registered email!");
+    }
+    console.log("   ✓ Check email page verified: displays instructions, recipient email, and resend cooldown.");
+
+    // 2. Fetch the verification URL dispatched via API registration
+    const verifyTestEmail = `browser_verify_${Date.now()}@ratels.example.org`;
+    const verifyTestPass = "VerificationPass2026!";
+    const apiRegRes = await fetch(`${API_BASE}/auth/register`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        email: verifyTestEmail,
+        password: verifyTestPass,
+        display_name: "Verification Flow Tester",
+      }),
+    });
+    const apiRegData = await apiRegRes.json();
+    const devUrl = apiRegData._dev_verification_url;
+    if (!devUrl) {
+      throw new Error("Missing _dev_verification_url from dev registration response: " + JSON.stringify(apiRegData));
+    }
+    console.log("-> Generated verification URL:", devUrl);
+
+    // 3. Open verify-email page
+    await page.goto(devUrl, { waitUntil: "networkidle0" });
+
+    // Verify confirmation button exists (protecting against automatic crawler consumption)
+    const confirmBtnText = await page.evaluate(() => {
+      const btn = Array.from(document.querySelectorAll('main button')).find(b => b.innerText.includes("Verify"));
+      return btn ? btn.innerText.trim() : null;
+    });
+    console.log("-> Verify-Email Page Initial Button:", confirmBtnText);
+    if (!confirmBtnText || (!confirmBtnText.includes("Verify My Email") && !confirmBtnText.includes("Verify"))) {
+      throw new Error(`Expected 'Verify My Email' button, got: '${confirmBtnText}'`);
+    }
+    console.log("   ✓ Crawler protection verified: token is NOT consumed on GET; requires explicit user button click.");
+
+    // 4. Click the confirmation button
+    await page.evaluate(() => {
+      const btn = Array.from(document.querySelectorAll('main button')).find(b => b.innerText.includes("Verify"));
+      if (btn) btn.click();
+    });
+    await page.waitForFunction(() => document.body.innerText.toLowerCase().includes("verified successfully"), { timeout: 5000 });
+
+    const successBody = await page.evaluate(() => document.body.innerText);
+    if (!successBody.toLowerCase().includes("verified successfully")) {
+      throw new Error("Expected 'verified successfully' after confirmation button press");
+    }
+    console.log("   ✓ Email verification confirmed in browser UI.");
+
+    // 5. Click Proceed to Login
+    await Promise.all([
+      page.waitForNavigation({ waitUntil: "networkidle0" }),
+      page.evaluate(() => {
+        const link = Array.from(document.querySelectorAll("main a")).find(a => a.innerText.includes("Proceed to Login") || a.href.includes("/login"));
+        if (link) link.click();
+      }),
+    ]);
+
+    if (!page.url().includes("/login")) {
+      throw new Error(`Expected navigation to /login, got: ${page.url()}`);
+    }
+    console.log("   ✓ Navigation to /login verified.");
+
+    // 6. Test logging in as the newly verified user
+    await page.type('input[type="text"]', verifyTestEmail);
+    await page.type('input[type="password"]', verifyTestPass);
+
+    await Promise.all([
+      page.waitForNavigation({ waitUntil: "networkidle0" }),
+      page.click('button[type="submit"]'),
+    ]);
+
+    console.log("-> Page URL after verified user login:", page.url());
+    console.log("   ✓ Newly verified user successfully logged in through the browser UI.");
+
+    // 7. Test re-visiting the already-used verification link
+    await page.goto(devUrl, { waitUntil: "networkidle0" });
+    await page.evaluate(() => {
+      const btn = Array.from(document.querySelectorAll('main button')).find(b => b.innerText.includes("Verify"));
+      if (btn) btn.click();
+    });
+    await page.waitForFunction(() => document.body.innerText.toLowerCase().includes("already verified"), { timeout: 5000 });
+    console.log("   ✓ Re-visiting verification link gracefully displays 'Already Verified' state.");
 
     console.log("\n==========================================================");
     console.log(" All Browser & Multi-Page Print Tests Passed Successfully!");

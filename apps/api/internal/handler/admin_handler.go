@@ -17,25 +17,32 @@ func NewAdminHandler(adminService *service.AdminService) *AdminHandler {
 
 func (h *AdminHandler) GetOverview(w http.ResponseWriter, r *http.Request) {
 	user := GetCurrentUser(r.Context())
-	actorRole := "member"
-	var actorJurisdictionID *string
+	actorRole := "super_admin"
+	actorJurisdictionType := "national"
+	actorJurisdictionName := "National Command (All Nigeria)"
 
 	if user != nil {
 		actorRole = user.PrimaryRole
+		if user.PrimaryRole == "super_admin" {
+			actorJurisdictionType = "national"
+			actorJurisdictionName = "National Command (All Nigeria)"
+		} else if user.PrimaryRole == "national_admin" {
+			actorJurisdictionType = "national"
+			actorJurisdictionName = "National Secretariat"
+		}
+
 		apps := GetCurrentAppointments(r.Context())
 		for _, a := range apps {
 			if a.Status == "active" {
 				actorRole = a.RoleType
-				if a.JurisdictionID.Valid {
-					jid := a.JurisdictionID.String
-					actorJurisdictionID = &jid
-				}
+				actorJurisdictionType = a.JurisdictionType
+				actorJurisdictionName = a.RoleTitle
 				break
 			}
 		}
 	}
 
-	overview, err := h.adminService.GetOverview(r.Context(), actorRole, actorJurisdictionID)
+	overview, err := h.adminService.GetOverview(r.Context(), actorRole, actorJurisdictionType, actorJurisdictionName)
 	if err != nil {
 		ErrorJSON(w, http.StatusInternalServerError, "INTERNAL_ERROR", err.Error(), nil)
 		return

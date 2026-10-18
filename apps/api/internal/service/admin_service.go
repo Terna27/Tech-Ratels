@@ -16,11 +16,21 @@ func NewAdminService(repo *repository.Repository) *AdminService {
 }
 
 type AdminOverviewResponse struct {
-	TotalMembers       int64 `json:"total_members"`
+	CurrentRole                   string `json:"current_role"`
+	CurrentJurisdictionType       string `json:"current_jurisdiction_type"`
+	CurrentJurisdictionName       string `json:"current_jurisdiction_name"`
+	TotalMembers                  int64  `json:"total_members"`
+	PendingMemberVerifications    int64  `json:"pending_member_verifications"`
+	ActiveCoordinators            int64  `json:"active_coordinators"`
+	PublishedActivities           int64  `json:"published_activities"`
+	DraftVenuesReviewQueue        int64  `json:"draft_venues_review_queue"`
+	UnverifiedParticipationsQueue int64  `json:"unverified_participations_queue"`
+	PendingAppealsQueue           int64  `json:"pending_appeals_queue"`
+	TotalRegistrations            int64  `json:"total_registrations"`
+	// Backward compatibility fields
 	ActiveAppointments int64 `json:"active_appointments"`
 	PublishedCleanups  int64 `json:"published_cleanups"`
 	PendingReviews     int64 `json:"pending_reviews"`
-	TotalRegistrations int64 `json:"total_registrations"`
 }
 
 type PaginatedAuditLogsResponse struct {
@@ -30,19 +40,41 @@ type PaginatedAuditLogsResponse struct {
 	Limit int32           `json:"limit"`
 }
 
-func (s *AdminService) GetOverview(ctx context.Context, actorRole string, actorJurisdictionID *string) (*AdminOverviewResponse, error) {
+func (s *AdminService) GetOverview(ctx context.Context, actorRole, actorJurisdictionType, actorJurisdictionName string) (*AdminOverviewResponse, error) {
 	totalMembers, _ := s.repo.Queries().CountUsers(ctx)
+	pendingVerif, _ := s.repo.Queries().CountPendingVerificationUsers(ctx)
 	activeApps, _ := s.repo.Queries().CountActiveAppointments(ctx)
 	pubCleanups, _ := s.repo.Queries().CountPublishedEvents(ctx)
+	draftEvents, _ := s.repo.Queries().CountDraftEvents(ctx)
 	pendingReviews, _ := s.repo.Queries().CountPendingClaims(ctx)
+	pendingAppeals, _ := s.repo.Queries().CountPendingAppeals(ctx)
 	totalRegs, _ := s.repo.Queries().CountTotalRegistrations(ctx)
 
+	if actorRole == "" {
+		actorRole = "super_admin"
+	}
+	if actorJurisdictionType == "" {
+		actorJurisdictionType = "national"
+	}
+	if actorJurisdictionName == "" {
+		actorJurisdictionName = "National Command (All Nigeria)"
+	}
+
 	return &AdminOverviewResponse{
-		TotalMembers:       totalMembers,
-		ActiveAppointments: activeApps,
-		PublishedCleanups:  pubCleanups,
-		PendingReviews:     pendingReviews,
-		TotalRegistrations: totalRegs,
+		CurrentRole:                   actorRole,
+		CurrentJurisdictionType:       actorJurisdictionType,
+		CurrentJurisdictionName:       actorJurisdictionName,
+		TotalMembers:                  totalMembers,
+		PendingMemberVerifications:    pendingVerif,
+		ActiveCoordinators:            activeApps,
+		PublishedActivities:           pubCleanups,
+		DraftVenuesReviewQueue:        draftEvents,
+		UnverifiedParticipationsQueue: pendingReviews,
+		PendingAppealsQueue:           pendingAppeals,
+		TotalRegistrations:            totalRegs,
+		ActiveAppointments:            activeApps,
+		PublishedCleanups:             pubCleanups,
+		PendingReviews:                pendingReviews,
 	}, nil
 }
 

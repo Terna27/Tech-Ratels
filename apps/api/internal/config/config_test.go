@@ -205,3 +205,122 @@ func TestConfig_AllowedOrigins(t *testing.T) {
 		t.Errorf("expected parsed custom origins in cfg.AllowedOrigins, got: %v", cfg.AllowedOrigins)
 	}
 }
+
+func TestConfig_EmailProviderConfiguration(t *testing.T) {
+	t.Run("Explicit EMAIL_PROVIDER=brevo with valid settings passes validation", func(t *testing.T) {
+		os.Setenv("APP_ENV", "production")
+		os.Setenv("DATABASE_URL", "postgres://user:pass@ep-production-host.neon.tech/dbname?sslmode=require")
+		os.Setenv("JWT_SECRET", "super-secret-jwt-production-key-minimum-32-chars-long!")
+		os.Setenv("ALLOWED_ORIGINS", "https://ratels-web.onrender.com")
+		os.Setenv("EMAIL_PROVIDER", "brevo")
+		os.Setenv("BREVO_API_KEY", "xkeysib-mocktestkey")
+		os.Setenv("EMAIL_FROM_NAME", "Nigerian Ratels")
+		os.Setenv("EMAIL_FROM_ADDRESS", "info@ratels.org.ng")
+		defer func() {
+			os.Unsetenv("APP_ENV")
+			os.Unsetenv("DATABASE_URL")
+			os.Unsetenv("JWT_SECRET")
+			os.Unsetenv("ALLOWED_ORIGINS")
+			os.Unsetenv("EMAIL_PROVIDER")
+			os.Unsetenv("BREVO_API_KEY")
+			os.Unsetenv("EMAIL_FROM_NAME")
+			os.Unsetenv("EMAIL_FROM_ADDRESS")
+		}()
+
+		cfg, err := LoadAndValidate()
+		if err != nil {
+			t.Fatalf("expected valid brevo config to pass, got err: %v", err)
+		}
+		if cfg.EmailProvider != "brevo" {
+			t.Errorf("expected EmailProvider 'brevo', got %q", cfg.EmailProvider)
+		}
+		if cfg.EmailFromName != "Nigerian Ratels" {
+			t.Errorf("expected EmailFromName 'Nigerian Ratels', got %q", cfg.EmailFromName)
+		}
+		if cfg.EmailFromAddress != "info@ratels.org.ng" {
+			t.Errorf("expected EmailFromAddress 'info@ratels.org.ng', got %q", cfg.EmailFromAddress)
+		}
+	})
+
+	t.Run("Production with EMAIL_PROVIDER=brevo requires BREVO_API_KEY", func(t *testing.T) {
+		os.Setenv("APP_ENV", "production")
+		os.Setenv("DATABASE_URL", "postgres://user:pass@ep-production-host.neon.tech/dbname?sslmode=require")
+		os.Setenv("JWT_SECRET", "super-secret-jwt-production-key-minimum-32-chars-long!")
+		os.Setenv("ALLOWED_ORIGINS", "https://ratels-web.onrender.com")
+		os.Setenv("EMAIL_PROVIDER", "brevo")
+		os.Unsetenv("BREVO_API_KEY")
+		os.Setenv("EMAIL_FROM_ADDRESS", "info@ratels.org.ng")
+		defer func() {
+			os.Unsetenv("APP_ENV")
+			os.Unsetenv("DATABASE_URL")
+			os.Unsetenv("JWT_SECRET")
+			os.Unsetenv("ALLOWED_ORIGINS")
+			os.Unsetenv("EMAIL_PROVIDER")
+			os.Unsetenv("EMAIL_FROM_ADDRESS")
+		}()
+
+		cfg := Load()
+		err := cfg.Validate()
+		if err == nil || !strings.Contains(err.Error(), "BREVO_API_KEY is required") {
+			t.Errorf("expected error for missing BREVO_API_KEY, got: %v", err)
+		}
+	})
+
+	t.Run("Production with EMAIL_PROVIDER=brevo requires valid EMAIL_FROM_ADDRESS", func(t *testing.T) {
+		os.Setenv("APP_ENV", "production")
+		os.Setenv("DATABASE_URL", "postgres://user:pass@ep-production-host.neon.tech/dbname?sslmode=require")
+		os.Setenv("JWT_SECRET", "super-secret-jwt-production-key-minimum-32-chars-long!")
+		os.Setenv("ALLOWED_ORIGINS", "https://ratels-web.onrender.com")
+		os.Setenv("EMAIL_PROVIDER", "brevo")
+		os.Setenv("BREVO_API_KEY", "xkeysib-mocktestkey")
+		os.Setenv("EMAIL_FROM_ADDRESS", "invalid-no-at-sign")
+		defer func() {
+			os.Unsetenv("APP_ENV")
+			os.Unsetenv("DATABASE_URL")
+			os.Unsetenv("JWT_SECRET")
+			os.Unsetenv("ALLOWED_ORIGINS")
+			os.Unsetenv("EMAIL_PROVIDER")
+			os.Unsetenv("BREVO_API_KEY")
+			os.Unsetenv("EMAIL_FROM_ADDRESS")
+		}()
+
+		cfg := Load()
+		err := cfg.Validate()
+		if err == nil || !strings.Contains(err.Error(), "EMAIL_FROM_ADDRESS must be a valid email") {
+			t.Errorf("expected error for invalid EMAIL_FROM_ADDRESS, got: %v", err)
+		}
+	})
+
+	t.Run("Production rejects EMAIL_PROVIDER=dev", func(t *testing.T) {
+		os.Setenv("APP_ENV", "production")
+		os.Setenv("DATABASE_URL", "postgres://user:pass@ep-production-host.neon.tech/dbname?sslmode=require")
+		os.Setenv("JWT_SECRET", "super-secret-jwt-production-key-minimum-32-chars-long!")
+		os.Setenv("ALLOWED_ORIGINS", "https://ratels-web.onrender.com")
+		os.Setenv("EMAIL_PROVIDER", "dev")
+		defer func() {
+			os.Unsetenv("APP_ENV")
+			os.Unsetenv("DATABASE_URL")
+			os.Unsetenv("JWT_SECRET")
+			os.Unsetenv("ALLOWED_ORIGINS")
+			os.Unsetenv("EMAIL_PROVIDER")
+		}()
+
+		cfg := Load()
+		err := cfg.Validate()
+		if err == nil || !strings.Contains(err.Error(), "cannot be set to 'dev' in production") {
+			t.Errorf("expected error for dev provider in production, got: %v", err)
+		}
+	})
+
+	t.Run("Rejects unknown EMAIL_PROVIDER", func(t *testing.T) {
+		os.Setenv("EMAIL_PROVIDER", "unknown_smtp_service")
+		defer os.Unsetenv("EMAIL_PROVIDER")
+
+		cfg := Load()
+		err := cfg.Validate()
+		if err == nil || !strings.Contains(err.Error(), "unsupported EMAIL_PROVIDER") {
+			t.Errorf("expected error for unsupported EMAIL_PROVIDER, got: %v", err)
+		}
+	})
+}
+

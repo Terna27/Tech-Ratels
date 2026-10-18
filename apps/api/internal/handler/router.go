@@ -61,6 +61,8 @@ func NewRouter(p RouterParams) http.Handler {
 		api.Route("/auth", func(auth chi.Router) {
 			auth.Post("/register", p.AuthHandler.Register)
 			auth.Post("/verify-contact", p.AuthHandler.VerifyContact)
+			auth.Post("/verify-email", p.AuthHandler.VerifyEmail)
+			auth.Post("/resend-verification", p.AuthHandler.ResendVerification)
 			auth.Post("/login", p.AuthHandler.Login)
 			auth.Get("/csrf", p.AuthHandler.GetCSRF)
 			auth.With(RequireAuth).Post("/logout", p.AuthHandler.Logout)
@@ -70,6 +72,7 @@ func NewRouter(p RouterParams) http.Handler {
 		api.Route("/members", func(members chi.Router) {
 			members.With(RequireAuth).Get("/me", p.MemberHandler.GetMe)
 			members.With(RequireAuth).Put("/me/profile", p.MemberHandler.UpdateProfile)
+			members.With(RequireRole("national_admin", "super_admin")).Get("/", p.MemberHandler.ListMembers)
 		})
 
 		// Geography

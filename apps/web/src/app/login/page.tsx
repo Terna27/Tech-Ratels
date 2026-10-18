@@ -20,10 +20,12 @@ function LoginForm() {
   const [password, setPassword] = useState("");
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [isUnverified, setIsUnverified] = useState(false);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setError(null);
+    setIsUnverified(false);
     setLoading(true);
 
     try {
@@ -46,7 +48,15 @@ function LoginForm() {
         router.push("/member");
       }
     } catch (err: any) {
-      setError(err.message || "Invalid login credentials. Please check and try again.");
+      const msg = err.message || "Invalid login credentials. Please check and try again.";
+      setError(msg);
+      if (
+        msg.toLowerCase().includes("pending") ||
+        msg.toLowerCase().includes("verification") ||
+        msg.toLowerCase().includes("unverified")
+      ) {
+        setIsUnverified(true);
+      }
     } finally {
       setLoading(false);
     }
@@ -69,6 +79,18 @@ function LoginForm() {
       </div>
 
       {error && <Alert type="error">{error}</Alert>}
+
+      {isUnverified && (
+        <div className="bg-amber-50 border border-amber-200 rounded-xl p-4 text-xs sm:text-sm text-amber-950 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-2 shadow-sm">
+          <span>Need to activate your account or get a new link?</span>
+          <Link
+            href={`/check-email?email=${encodeURIComponent(identifier)}`}
+            className="font-bold underline text-amber-900 hover:text-amber-950 inline-flex items-center gap-1 shrink-0"
+          >
+            Check Email / Resend &rarr;
+          </Link>
+        </div>
+      )}
 
       <div className="bg-white p-6 sm:p-8 rounded-2xl border border-gray-200 shadow-sm space-y-6">
         <form onSubmit={handleSubmit} className="space-y-4">

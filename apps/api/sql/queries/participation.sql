@@ -100,3 +100,7 @@ WHERE user_id = $1 AND status = 'verified';
 -- name: CountPendingClaims :one
 SELECT COUNT(*) FROM participation_claims
 WHERE status = 'pending';
+
+-- name: CountPendingAppeals :one
+SELECT COUNT(*) FROM participation_appeals
+WHERE status = 'pending';

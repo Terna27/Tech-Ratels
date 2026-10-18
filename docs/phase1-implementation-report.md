@@ -342,4 +342,224 @@ bash scripts/start_dev.sh
   - Verified logout clears cookies and subsequent requests return HTTP 401 Unauthorized.
   - Verified unauthorized users visiting `/admin/finance` are blocked in DOM and cannot export CSV or view statements.
 
+---
+
+## 11. Email Verification Implementation & Client-Side Exception Resolution
+
+### Investigation & Fix of Super Admin Login Client-Side Exception
+- **Symptom**: Upon logging in as Super Admin and navigating to `/admin`, the browser threw an uncaught React error: `TypeError: Cannot read properties of undefined (reading 'replace')`.
+- **Root Cause**:
+  1. In `apps/web/src/app/admin/page.tsx:72`, the component attempted to format `overview.current_role` using `.replace("_", " ").toUpperCase()`.
+  2. However, the backend Go handler `GetOverview` (`apps/api/internal/service/admin_service.go`) returned only 5 aggregate count fields in `AdminOverviewResponse`, omitting `current_role`, `current_jurisdiction_type`, `current_jurisdiction_name`, and pending queue counts.
+  3. Consequently, `overview.current_role` was `undefined`, triggering an uncaught runtime exception in the browser.
+- **Backend Fix**:
+  - In `apps/api/internal/service/admin_service.go` and `apps/api/internal/handler/admin_handler.go`, expanded `AdminOverviewResponse` and `GetOverview` to load and return the user's active appointment role, jurisdiction type/name, and queue statistics (`pending_member_verifications`, `active_coordinators`, `published_activities`, `draft_venues_review_queue`, `unverified_participations_queue`, and `pending_appeals_queue`).
+  - Added `GET /api/v1/members` in `apps/api/internal/handler/member_handler.go` and `router.go` restricted to `national_admin` and `super_admin` to prevent 404 errors when administrative tables load member lists.
+- **Frontend Hardening**:
+  - In `apps/web/src/app/admin/page.tsx`, added defensive fallbacks: `(overview.current_role || user.primary_role || "ADMIN")` and null coalescing for jurisdiction and queue metrics.
+- **Real Browser Verification**:
+  - In `scripts/browser_verification.js` (TEST 0), added active `page.on("pageerror")` listeners during real Super Admin login and `/admin` navigation. Confirmed **zero client-side exceptions** on dashboard load.
+
+---
+
+### Email Verification Architecture & Security Invariants
+
+#### 1. Registration Flow & Anti-Privilege Invariant
+- Public registration accepts `display_name`, `email`, and `password` via `POST /api/v1/auth/register`.
+- **Anti-Privilege Enforcement**: All public registrations strictly force `primary_role = "member"`, `is_verified = false`, and `status = "pending_verification"`. Self-selecting administrative or coordinator roles is permanently rejected with `ErrPrivilegedRoleRefused` (HTTP 403).
+- **Existing User Preservation**: Existing verified users (including the CLI-created Super Admin) are completely preserved (`is_verified = true`, `status = "active"`).
+
+#### 2. Cryptographic Token Generation & Hashing
+- Verification tokens are generated using 32 cryptographically secure random bytes from `crypto/rand` (encoded as 64 hex characters) via `security.GenerateSecureToken()`.
+- **Database Security**: Raw verification tokens are **never stored** in PostgreSQL. Only the SHA-256 hash (`security.HashToken(rawToken)`) is persisted in `email_verification_tokens.token_hash`.
+- **Token Lifetime**: 24 hours from creation (`expires_at = NOW() + INTERVAL '24 hours'`).
+- **Isolation**: Verification tokens are completely decoupled from login sessions and JWTs.
+
+#### 3. Anti-Scanner & Crawler Protection (Explicit Human Action)
+- Automated email protection gateways (Microsoft Defender Safe Links, Proofpoint, Google Workspace Safe Browsing) send automated HTTP GET requests to incoming email links to scan for malware.
+- If tokens were consumed on HTTP GET, incoming links would be consumed before the user ever opens their inbox.
+- Our frontend `/verify-email?token=<token>` serves a clean confirmation page that requires an **explicit human button press** ("Verify My Email"), which executes `POST /api/v1/auth/verify-email`. Automated crawlers and prefetchers never consume tokens.
+- Upon confirmation, token consumption and account activation occur **atomically** in PostgreSQL within a database transaction:
+  - Token marked `is_used = true` and `used_at = CURRENT_TIMESTAMP`.
+  - All other pending verification tokens for the user are invalidated.
+  - User status is updated to `status = 'active'` and `is_verified = true`.
+
+#### 4. Anti-Enumeration & Rate Limiting Safeguards
+- **Anti-Enumeration on Registration**: Attempting to register an already verified email returns a neutral success message ("Registration initiated. If this email is eligible, a verification link has been sent.") without disclosing account existence. Existing user credentials and status remain untouched.
+- **Anti-Enumeration on Resend**: Resend requests for non-existent emails return neutral success without leaking registration status.
+- **Unverified Re-registration**: Attempting to register an existing unverified email invalidates the previous pending token, issues a fresh token, and resends the link.
+- **Cooldown & Rate Limits**: Persisted in table `email_verification_rate_limits`:
+  - **Account Cooldown**: 60 seconds between resend requests per email address (`ErrResendCooldownActive`).
+  - **Account Hourly Limit**: Maximum 5 resends per hour per email (`ErrRateLimitExceeded`).
+  - **IP Hourly Limit**: Maximum 10 resends per hour per client IP (`ErrRateLimitExceeded`).
+- **Resend Invalidation**: Requesting a resend marks previous tokens as used/invalidated. Submitting an older token returns `ErrTokenAlreadyUsed`.
+
+#### 5. Email Delivery Adapter & Production Safety
+- **Resend HTTP API Client**: Implemented in `apps/api/internal/delivery/resend.go`. Dispatches branded HTML emails with plain-text fallbacks via `POST https://api.resend.com/emails`.
+- **Zero Credentials on Frontend**: Resend API keys are kept exclusively on the Go backend.
+- **Production Guard (`APP_ENV=production`)**: Fake delivery is strictly disallowed. If `RESEND_API_KEY` is omitted in production, the server binds `ProductionUnconfiguredAdapter`, rejecting fake delivery and logging structured warnings.
+- **Development Sandbox**: In development/testing, `DevSafeDeliveryAdapter` captures verification URLs in memory and logs them to console without external dispatch.
+- **Logging Redaction**: API keys and URL token query parameters (`?token=...`) are scrubbed by `security.RedactString`.
+- **Referrer Protection**: The frontend page `<meta name="referrer" content="no-referrer" />` prevents verification tokens from leaking to external analytics or referrer headers.
+
+---
+
+### Database Migration: 20261018000004_email_verification_tokens.sql
+
+A dedicated forward-only migration was added and applied cleanly across local databases:
+```sql
+-- Migration: 20261018000004_email_verification_tokens.sql
+CREATE TABLE IF NOT EXISTS email_verification_tokens (
+    id VARCHAR(36) PRIMARY KEY,
+    user_id VARCHAR(36) NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    email VARCHAR(255) NOT NULL,
+    token_hash VARCHAR(64) NOT NULL UNIQUE,
+    expires_at TIMESTAMPTZ NOT NULL,
+    is_used BOOLEAN NOT NULL DEFAULT false,
+    used_at TIMESTAMPTZ,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE INDEX IF NOT EXISTS idx_email_verification_tokens_user ON email_verification_tokens(user_id);
+CREATE INDEX IF NOT EXISTS idx_email_verification_tokens_hash ON email_verification_tokens(token_hash);
+
+CREATE TABLE IF NOT EXISTS email_verification_rate_limits (
+    id VARCHAR(36) PRIMARY KEY,
+    identifier VARCHAR(255) NOT NULL,
+    action VARCHAR(64) NOT NULL,
+    request_count INT NOT NULL DEFAULT 1,
+    first_requested_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    last_requested_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    CONSTRAINT uq_email_rate_limit_identifier_action UNIQUE (identifier, action)
+);
+```
+
+---
+
+### Comprehensive Automated Test Results
+
+#### 1. Backend Service Unit Tests (`apps/api/internal/service/auth_test.go`)
+- `TestAuthAndAntiPrivilegeRegistration`: Anti-privilege rejection for coordinator roles & registration (PASS)
+- `TestEmailVerificationLifecycle`: Registration, unverified login rejection, token consumption, account activation, verified login (PASS)
+- `TestEmailVerificationExpiredToken`: Token expired after 24h lifetime rejected with `ErrTokenExpired`, account remains unverified (PASS)
+- `TestEmailVerificationTokenReuse`: Re-using verified token gracefully returns `AlreadyVerified: true` (PASS)
+- `TestEmailVerificationResendInvalidation`: Resend invalidates old token; old token rejected (`ErrTokenAlreadyUsed`), new token succeeds (PASS)
+- `TestEmailVerificationDuplicateRegistration`: Duplicate verified registration does not overwrite credentials; unverified re-registration refreshes token (PASS)
+- `TestEmailVerificationProviderFailure`: Delivery failure creates unverified user with `delivery_status="failed"` and permits resend (PASS)
+- `TestEmailVerificationCooldownAndRateLimits`: 60s cooldown enforced; IP rate limit (>10/hr) returns `ErrRateLimitExceeded` (PASS)
+- `TestEmailVerificationAntiEnumeration`: Resend on non-existent account returns neutral success (PASS)
+
+#### 2. HTTP Integration Tests (`apps/api/internal/handler/handler_test.go` & `apps/api/internal/delivery/brevo_test.go`)
+- `TestHTTPEmailVerificationFlow`: Full HTTP lifecycle via `POST /api/v1/auth/register` & `POST /api/v1/auth/verify-email` (PASS)
+- `TestHTTPResendVerificationCooldown`: `POST /api/v1/auth/resend-verification` returns HTTP 429 `COOLDOWN_ACTIVE` when invoked within 60s (PASS)
+- `TestBrevoDeliveryAdapter_SendVerificationEmail`:
+  - `Success 201 Created`: sends correct payload (sender, to, subject, htmlContent, textContent) with `api-key` header (PASS)
+  - `HTTP 401 Unauthorized`: returns descriptive error and verifies API key never leaks in logs/errors (PASS)
+  - `HTTP 403 Forbidden`: catches unverified sender domain or account restrictions (PASS)
+  - `HTTP 429 Too Many Requests`: catches rate limits (PASS)
+  - `HTTP 400 Bad Request`: catches parameter errors (PASS)
+  - `HTTP 500 Server Error`: catches upstream provider failures (PASS)
+  - `Timeout handling`: 10s context deadline properly catches slow networks (PASS)
+  - `Unconfigured adapter`: returns `ErrBrevoNotConfigured` cleanly (PASS)
+- `TestConfig_EmailProviderConfiguration`:
+  - Validates `EMAIL_PROVIDER=brevo` with valid credentials in production (PASS)
+  - Rejects missing `BREVO_API_KEY` when provider is brevo (PASS)
+  - Rejects invalid `EMAIL_FROM_ADDRESS` when provider is brevo (PASS)
+  - Rejects `EMAIL_PROVIDER=dev` in production (PASS)
+  - Rejects unknown provider identifiers (PASS)
+
+#### 3. Test Suites & Verification Execution
+- `scripts/run_tests.sh`: Full Go automated test suite (PASS)
+- `scripts/test_service_restart_persistence.sh`: Cold restart persistence with transaction retries and reversals (PASS)
+- `scripts/run_browser_verification.sh`: Chrome Headless verification suite (PASS, all browser and multi-page print tests passing)
+- Backend production build: `GOTOOLCHAIN=auto go build -tags netgo -ldflags="-s -w" -o app ./cmd/server` (PASS, 12MB binary compiled)
+- Frontend production build: `npm install --include=dev && npm run build` (PASS, all 22 static and dynamic routes compiled)
+
+---
+
+### Brevo Email Delivery Adapter Specification
+
+The backend provides a native HTTPS transactional email delivery adapter for Brevo (formerly Sendinblue):
+- **API Endpoint**: `POST https://api.brevo.com/v3/smtp/email`
+- **Authentication**: `api-key: <BREVO_API_KEY>` header.
+- **Provider Protocol**: Uses Brevo's HTTPS REST API; SMTP is not used.
+- **Transactional Scope**: Sends only direct transactional verification emails. Registration users are **never** added to marketing lists or contact lists.
+- **Independence**: Completely isolated from Salemx; no modifications to Salemx codebase or configuration.
+- **Dual Provider Support**: Both Brevo and Resend are available and selected explicitly via `EMAIL_PROVIDER`.
+- **Acceptance vs Delivery**: Brevo's HTTP `201 Created` response contains a `messageId` confirming provider acceptance and queueing. The system explicitly logs this distinction and notes that provider acceptance does not guarantee final mailbox delivery if recipient MX bounces or filters the email.
+- **Secret Redaction**: API keys (`BREVO_API_KEY`, `RESEND_API_KEY`, `x-sib-api-key`) and raw verification tokens/URLs are automatically stripped by `security.RedactString()` from all error logs and HTTP responses.
+
+---
+
+### Exact Render Deployment Settings
+
+#### 1. Go Backend Web Service (`https://ratels.onrender.com`)
+- **Service Name**: `ratels-api`
+- **Environment**: Go (or Docker using `infra/Dockerfile.api`)
+- **Root Directory**: `apps/api`
+- **Build Command**: `GOTOOLCHAIN=auto go build -tags netgo -ldflags="-s -w" -o app ./cmd/server`
+- **Start Command**: `./app`
+- **Health Check Path**: `/api/v1/health`
+- **Required Environment Variables**:
+  | Variable | Value / Description | Sensitive |
+  | :--- | :--- | :--- |
+  | `APP_ENV` | `production` | No |
+  | `PORT` | Dynamic Render Port (e.g. `8000` or assigned by Render) | No |
+  | `DATABASE_URL` | Neon PostgreSQL production connection string with SSL | **Yes** |
+  | `JWT_SECRET` | Cryptographically random string (min 32 characters) | **Yes** |
+  | `ALLOWED_ORIGINS` | `https://ratels-web.onrender.com` (exact frontend URL) | No |
+  | `FRONTEND_BASE_URL` | `https://ratels-web.onrender.com` (used in email links) | No |
+  | `EMAIL_PROVIDER` | `brevo` (or `resend` for fallback) | No |
+  | `BREVO_API_KEY` | Private Brevo API Key (`xkeysib-...`) | **Yes** |
+  | `EMAIL_FROM_NAME` | `Nigerian Ratels` | No |
+  | `EMAIL_FROM_ADDRESS` | Verified Brevo sender email (e.g. `info@ratels.org.ng`) | No |
+
+#### 2. Next.js Frontend Web Service (`https://ratels-web.onrender.com`)
+- **Service Name**: `ratels-web`
+- **Environment**: Node.js
+- **Root Directory**: `apps/web`
+- **Build Command**: `npm install --include=dev && npm run build`
+- **Start Command**: `npm run start`
+- **Health Check Path**: `/`
+- **Required Environment Variables**:
+  | Variable | Value / Description | Sensitive |
+  | :--- | :--- | :--- |
+  | `NODE_ENV` | `production` | No |
+  | `API_URL` | `https://ratels.onrender.com` (Next.js server-side API proxy) | No |
+  | `NEXT_PUBLIC_API_URL` | `/api/v1` (relative same-origin requests) | No |
+
+---
+
+### Migration & Deployment Steps
+
+#### Step 1: Verify & Apply Migration 4 to Neon PostgreSQL
+Migration `20261018000004_email_verification_tokens.sql` adds the `email_verification_tokens` and `email_verification_rate_limits` tables without touching or deleting any existing accounts, Super Admin credentials, or financial transactions.
+
+Check status against Neon:
+```bash
+goose -dir apps/api/migrations postgres "$DATABASE_URL" status
+```
+If migration `20261018000004` shows `Pending`, apply it:
+```bash
+goose -dir apps/api/migrations postgres "$DATABASE_URL" up
+```
+*(Never run `goose reset` or execute demo seeds on Neon).*
+
+#### Step 2: Configure Render Backend Environment Variables
+In the Render Dashboard for `ratels-api` (`https://ratels.onrender.com`), configure:
+- `EMAIL_PROVIDER`: `brevo`
+- `BREVO_API_KEY`: `<your private Brevo API key>`
+- `EMAIL_FROM_NAME`: `Nigerian Ratels`
+- `EMAIL_FROM_ADDRESS`: `<your verified Brevo sender email>`
+- `FRONTEND_BASE_URL`: `https://ratels-web.onrender.com`
+
+#### Step 3: Deploy Backend & Verify Health
+- Trigger deploy with build command: `GOTOOLCHAIN=auto go build -tags netgo -ldflags="-s -w" -o app ./cmd/server` and start command: `./app`.
+- Verify `GET https://ratels.onrender.com/api/v1/health` returns `{"status":"ok"}`.
+
+#### Step 4: Deploy Frontend
+- Trigger deploy with build command: `npm install --include=dev && npm run build` and start command: `npm run start`.
+- Test public registration at `https://ratels-web.onrender.com/register`. Ensure it receives the Brevo-dispatched verification link and activates the member account upon confirmation.
+
+
 

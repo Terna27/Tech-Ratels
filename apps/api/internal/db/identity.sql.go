@@ -22,6 +22,17 @@ func (q *Queries) CountActiveUsers(ctx context.Context) (int64, error) {
 	return count, err
 }
 
+const countPendingVerificationUsers = `-- name: CountPendingVerificationUsers :one
+SELECT COUNT(*) FROM users WHERE status = 'pending_verification' OR is_verified = false
+`
+
+func (q *Queries) CountPendingVerificationUsers(ctx context.Context) (int64, error) {
+	row := q.db.QueryRow(ctx, countPendingVerificationUsers)
+	var count int64
+	err := row.Scan(&count)
+	return count, err
+}
+
 const countUsers = `-- name: CountUsers :one
 SELECT COUNT(*) FROM users
 `
@@ -74,6 +85,44 @@ func (q *Queries) CreateContactVerification(ctx context.Context, arg CreateConta
 		&i.CreatedAt,
 		&i.UpdatedAt,
 		&i.Version,
+	)
+	return i, err
+}
+
+const createEmailVerificationToken = `-- name: CreateEmailVerificationToken :one
+INSERT INTO email_verification_tokens (
+    id, user_id, email, token_hash, expires_at, is_used, created_at
+) VALUES (
+    $1, $2, $3, $4, $5, false, CURRENT_TIMESTAMP
+) RETURNING id, user_id, email, token_hash, expires_at, is_used, used_at, created_at
+`
+
+type CreateEmailVerificationTokenParams struct {
+	ID        string             `json:"id"`
+	UserID    string             `json:"user_id"`
+	Email     string             `json:"email"`
+	TokenHash string             `json:"token_hash"`
+	ExpiresAt pgtype.Timestamptz `json:"expires_at"`
+}
+
+func (q *Queries) CreateEmailVerificationToken(ctx context.Context, arg CreateEmailVerificationTokenParams) (EmailVerificationToken, error) {
+	row := q.db.QueryRow(ctx, createEmailVerificationToken,
+		arg.ID,
+		arg.UserID,
+		arg.Email,
+		arg.TokenHash,
+		arg.ExpiresAt,
+	)
+	var i EmailVerificationToken
+	err := row.Scan(
+		&i.ID,
+		&i.UserID,
+		&i.Email,
+		&i.TokenHash,
+		&i.ExpiresAt,
+		&i.IsUsed,
+		&i.UsedAt,
+		&i.CreatedAt,
 	)
 	return i, err
 }
@@ -252,6 +301,28 @@ func (q *Queries) GetActiveVerification(ctx context.Context, arg GetActiveVerifi
 	return i, err
 }
 
+const getEmailVerificationTokenByHash = `-- name: GetEmailVerificationTokenByHash :one
+SELECT id, user_id, email, token_hash, expires_at, is_used, used_at, created_at FROM email_verification_tokens
+WHERE token_hash = $1
+LIMIT 1
+`
+
+func (q *Queries) GetEmailVerificationTokenByHash(ctx context.Context, tokenHash string) (EmailVerificationToken, error) {
+	row := q.db.QueryRow(ctx, getEmailVerificationTokenByHash, tokenHash)
+	var i EmailVerificationToken
+	err := row.Scan(
+		&i.ID,
+		&i.UserID,
+		&i.Email,
+		&i.TokenHash,
+		&i.ExpiresAt,
+		&i.IsUsed,
+		&i.UsedAt,
+		&i.CreatedAt,
+	)
+	return i, err
+}
+
 const getMemberProfileByUserID = `-- name: GetMemberProfileByUserID :one
 SELECT id, user_id, home_state_id, home_lga_id, address, bio, avatar_url, is_public_badges, created_at, updated_at, version FROM member_profiles WHERE user_id = $1
 `
@@ -394,6 +465,31 @@ func (q *Queries) GetUserSession(ctx context.Context, tokenJti string) (UserSess
 	return i, err
 }
 
+const getVerificationRateLimit = `-- name: GetVerificationRateLimit :one
+SELECT id, identifier, action, request_count, first_requested_at, last_requested_at FROM email_verification_rate_limits
+WHERE identifier = $1 AND action = $2
+LIMIT 1
+`
+
+type GetVerificationRateLimitParams struct {
+	Identifier string `json:"identifier"`
+	Action     string `json:"action"`
+}
+
+func (q *Queries) GetVerificationRateLimit(ctx context.Context, arg GetVerificationRateLimitParams) (EmailVerificationRateLimit, error) {
+	row := q.db.QueryRow(ctx, getVerificationRateLimit, arg.Identifier, arg.Action)
+	var i EmailVerificationRateLimit
+	err := row.Scan(
+		&i.ID,
+		&i.Identifier,
+		&i.Action,
+		&i.RequestCount,
+		&i.FirstRequestedAt,
+		&i.LastRequestedAt,
+	)
+	return i, err
+}
+
 const incrementVerificationAttempt = `-- name: IncrementVerificationAttempt :one
 UPDATE contact_verifications
 SET attempt_count = attempt_count + 1, updated_at = CURRENT_TIMESTAMP
@@ -417,6 +513,17 @@ func (q *Queries) IncrementVerificationAttempt(ctx context.Context, id string) (
 		&i.Version,
 	)
 	return i, err
+}
+
+const invalidatePendingEmailVerificationTokens = `-- name: InvalidatePendingEmailVerificationTokens :exec
+UPDATE email_verification_tokens
+SET is_used = true, used_at = CURRENT_TIMESTAMP
+WHERE user_id = $1 AND is_used = false
+`
+
+func (q *Queries) InvalidatePendingEmailVerificationTokens(ctx context.Context, userID string) error {
+	_, err := q.db.Exec(ctx, invalidatePendingEmailVerificationTokens, userID)
+	return err
 }
 
 const listUsers = `-- name: ListUsers :many
@@ -461,6 +568,29 @@ func (q *Queries) ListUsers(ctx context.Context, arg ListUsersParams) ([]User, e
 	return items, nil
 }
 
+const markEmailVerificationTokenUsed = `-- name: MarkEmailVerificationTokenUsed :one
+UPDATE email_verification_tokens
+SET is_used = true, used_at = CURRENT_TIMESTAMP
+WHERE id = $1
+RETURNING id, user_id, email, token_hash, expires_at, is_used, used_at, created_at
+`
+
+func (q *Queries) MarkEmailVerificationTokenUsed(ctx context.Context, id string) (EmailVerificationToken, error) {
+	row := q.db.QueryRow(ctx, markEmailVerificationTokenUsed, id)
+	var i EmailVerificationToken
+	err := row.Scan(
+		&i.ID,
+		&i.UserID,
+		&i.Email,
+		&i.TokenHash,
+		&i.ExpiresAt,
+		&i.IsUsed,
+		&i.UsedAt,
+		&i.CreatedAt,
+	)
+	return i, err
+}
+
 const markVerificationUsed = `-- name: MarkVerificationUsed :one
 UPDATE contact_verifications
 SET is_used = true, updated_at = CURRENT_TIMESTAMP
@@ -482,6 +612,32 @@ func (q *Queries) MarkVerificationUsed(ctx context.Context, id string) (ContactV
 		&i.CreatedAt,
 		&i.UpdatedAt,
 		&i.Version,
+	)
+	return i, err
+}
+
+const resetVerificationRateLimit = `-- name: ResetVerificationRateLimit :one
+UPDATE email_verification_rate_limits
+SET request_count = 1, first_requested_at = CURRENT_TIMESTAMP, last_requested_at = CURRENT_TIMESTAMP
+WHERE identifier = $1 AND action = $2
+RETURNING id, identifier, action, request_count, first_requested_at, last_requested_at
+`
+
+type ResetVerificationRateLimitParams struct {
+	Identifier string `json:"identifier"`
+	Action     string `json:"action"`
+}
+
+func (q *Queries) ResetVerificationRateLimit(ctx context.Context, arg ResetVerificationRateLimitParams) (EmailVerificationRateLimit, error) {
+	row := q.db.QueryRow(ctx, resetVerificationRateLimit, arg.Identifier, arg.Action)
+	var i EmailVerificationRateLimit
+	err := row.Scan(
+		&i.ID,
+		&i.Identifier,
+		&i.Action,
+		&i.RequestCount,
+		&i.FirstRequestedAt,
+		&i.LastRequestedAt,
 	)
 	return i, err
 }
@@ -611,6 +767,38 @@ func (q *Queries) UpdateUserStatus(ctx context.Context, arg UpdateUserStatusPara
 		&i.CreatedAt,
 		&i.UpdatedAt,
 		&i.Version,
+	)
+	return i, err
+}
+
+const upsertVerificationRateLimit = `-- name: UpsertVerificationRateLimit :one
+INSERT INTO email_verification_rate_limits (
+    id, identifier, action, request_count, first_requested_at, last_requested_at
+) VALUES (
+    $1, $2, $3, 1, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP
+)
+ON CONFLICT (identifier, action) DO UPDATE
+SET request_count = email_verification_rate_limits.request_count + 1,
+    last_requested_at = CURRENT_TIMESTAMP
+RETURNING id, identifier, action, request_count, first_requested_at, last_requested_at
+`
+
+type UpsertVerificationRateLimitParams struct {
+	ID         string `json:"id"`
+	Identifier string `json:"identifier"`
+	Action     string `json:"action"`
+}
+
+func (q *Queries) UpsertVerificationRateLimit(ctx context.Context, arg UpsertVerificationRateLimitParams) (EmailVerificationRateLimit, error) {
+	row := q.db.QueryRow(ctx, upsertVerificationRateLimit, arg.ID, arg.Identifier, arg.Action)
+	var i EmailVerificationRateLimit
+	err := row.Scan(
+		&i.ID,
+		&i.Identifier,
+		&i.Action,
+		&i.RequestCount,
+		&i.FirstRequestedAt,
+		&i.LastRequestedAt,
 	)
 	return i, err
 }

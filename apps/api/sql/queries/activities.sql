@@ -128,3 +128,6 @@ SELECT COUNT(*) FROM event_instances WHERE status = 'published';
 
 -- name: CountTotalRegistrations :one
 SELECT COUNT(*) FROM event_registrations WHERE status = 'registered';
+
+-- name: CountDraftEvents :one
+SELECT COUNT(*) FROM event_instances WHERE status = 'draft';

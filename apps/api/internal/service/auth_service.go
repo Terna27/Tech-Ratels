@@ -21,6 +21,12 @@ var (
 	ErrAccountInactive         = errors.New("user account is suspended or inactive")
 	ErrInvalidVerificationCode = errors.New("invalid or expired verification code")
 	ErrPrivilegedRoleRefused   = errors.New("privileged roles cannot be self-selected during registration")
+	ErrInvalidToken            = errors.New("invalid or malformed verification link")
+	ErrTokenExpired            = errors.New("this verification link has expired. Please request a new one")
+	ErrTokenAlreadyUsed        = errors.New("this verification link has already been used")
+	ErrResendCooldownActive    = errors.New("please wait before requesting another verification email")
+	ErrRateLimitExceeded       = errors.New("too many verification requests. Please try again later")
+	ErrInvalidEmail            = errors.New("a valid email address is required")
 )
 
 type AuthService struct {
@@ -54,12 +60,35 @@ type RegisterResponse struct {
 	MembershipReference string `json:"membership_reference"`
 	Status              string `json:"status"`
 	Message             string `json:"message"`
+	DeliveryStatus      string `json:"delivery_status"`
+	DevVerificationURL  string `json:"_dev_verification_url,omitempty"`
+	DevVerificationCode string `json:"_dev_verification_code,omitempty"`
 }
 
 type VerifyContactRequest struct {
 	UserID     string `json:"user_id"`
 	Identifier string `json:"identifier"`
 	Code       string `json:"code"`
+}
+
+type VerifyEmailRequest struct {
+	Token string `json:"token"`
+}
+
+type VerifyEmailResponse struct {
+	Message         string `json:"message"`
+	IsVerified      bool   `json:"is_verified"`
+	AlreadyVerified bool   `json:"already_verified"`
+}
+
+type ResendVerificationRequest struct {
+	Email string `json:"email"`
+}
+
+type ResendVerificationResponse struct {
+	Message         string `json:"message"`
+	Sent            bool   `json:"sent"`
+	AlreadyVerified bool   `json:"already_verified,omitempty"`
 }
 
 type LoginRequest struct {
@@ -113,10 +142,62 @@ func (s *AuthService) Register(ctx context.Context, req RegisterRequest) (*Regis
 		return nil, errors.New("password must be at least 8 characters")
 	}
 
-	// Check existing user
+	// Check existing user: Avoid revealing whether an email is already registered (anti-enumeration)
 	if email != "" {
 		if existing, _ := s.repo.Queries().GetUserByEmail(ctx, TextFromString(email)); existing.ID != "" {
-			return nil, ErrUserAlreadyExists
+			if existing.IsVerified && existing.Status == "active" {
+				return &RegisterResponse{
+					UserID:              existing.ID,
+					MembershipReference: existing.MembershipReference,
+					Status:              "pending_verification",
+					Message:             "Registration initiated. If this email is eligible, a verification link has been sent.",
+					DeliveryStatus:      "sent",
+				}, nil
+			}
+
+			// User is unverified: refresh verification token and resend verification link
+			rawToken, err := security.GenerateSecureToken()
+			if err != nil {
+				return nil, err
+			}
+			tokenHash := security.HashToken(rawToken)
+
+			_ = s.repo.WithTx(ctx, func(q *db.Queries) error {
+				_ = q.InvalidatePendingEmailVerificationTokens(ctx, existing.ID)
+				_, err := q.CreateEmailVerificationToken(ctx, db.CreateEmailVerificationTokenParams{
+					ID:        security.GenerateUUID(),
+					UserID:    existing.ID,
+					Email:     email,
+					TokenHash: tokenHash,
+					ExpiresAt: TimestamptzFromTime(time.Now().Add(24 * time.Hour)),
+				})
+				_, _ = q.UpsertVerificationRateLimit(ctx, db.UpsertVerificationRateLimitParams{
+					ID:         security.GenerateUUID(),
+					Identifier: email,
+					Action:     "resend_email",
+				})
+				return err
+			})
+
+			verificationURL := fmt.Sprintf("%s/verify-email?token=%s", s.cfg.FrontendBaseURL, rawToken)
+			deliveryErr := s.delivery.SendVerificationEmail(email, existing.DisplayName, verificationURL)
+
+			deliveryStatus := "sent"
+			msg := "Registration initiated. A verification link has been sent to your email."
+			if deliveryErr != nil {
+				deliveryStatus = "failed"
+				msg = "Registration initiated, but verification email could not be delivered. Please use the resend option."
+			}
+
+			return &RegisterResponse{
+				UserID:              existing.ID,
+				MembershipReference: existing.MembershipReference,
+				Status:              "pending_verification",
+				Message:             msg,
+				DeliveryStatus:      deliveryStatus,
+				DevVerificationURL:  verificationURL,
+				DevVerificationCode: s.delivery.GetLastCode(email),
+			}, nil
 		}
 	}
 	if phone != "" {
@@ -132,8 +213,18 @@ func (s *AuthService) Register(ctx context.Context, req RegisterRequest) (*Regis
 
 	userID := security.GenerateUUID()
 	var createdUser db.User
+	var rawEmailToken string
+	var verificationURL string
+
 	for attempt := 0; attempt < 5; attempt++ {
 		memRef := security.GenerateMembershipReference()
+		rawToken, tokenGenErr := security.GenerateSecureToken()
+		if tokenGenErr != nil {
+			return nil, tokenGenErr
+		}
+		rawEmailToken = rawToken
+		tokenHash := security.HashToken(rawToken)
+
 		err = s.repo.WithTx(ctx, func(q *db.Queries) error {
 			u, err := q.CreateUser(ctx, db.CreateUserParams{
 				ID:                  userID,
@@ -163,7 +254,28 @@ func (s *AuthService) Register(ctx context.Context, req RegisterRequest) (*Regis
 				return err
 			}
 
-			// Generate 6-digit OTP
+			// Store email verification token with 24-hour expiry if email provided
+			if email != "" {
+				_, err = q.CreateEmailVerificationToken(ctx, db.CreateEmailVerificationTokenParams{
+					ID:        security.GenerateUUID(),
+					UserID:    userID,
+					Email:     email,
+					TokenHash: tokenHash,
+					ExpiresAt: TimestamptzFromTime(time.Now().Add(24 * time.Hour)),
+				})
+				if err != nil {
+					return err
+				}
+
+				// Initialize rate limit record so cooldown applies immediately
+				_, _ = q.UpsertVerificationRateLimit(ctx, db.UpsertVerificationRateLimitParams{
+					ID:         security.GenerateUUID(),
+					Identifier: email,
+					Action:     "resend_email",
+				})
+			}
+
+			// Generate 6-digit OTP in contact_verifications for backward compatibility
 			otpCode := security.GenerateVerificationCode()
 			identifier := email
 			if identifier == "" {
@@ -175,14 +287,14 @@ func (s *AuthService) Register(ctx context.Context, req RegisterRequest) (*Regis
 				UserID:     userID,
 				Identifier: identifier,
 				Code:       otpCode,
-				ExpiresAt:  TimestamptzFromTime(time.Now().Add(15 * time.Minute)),
+				ExpiresAt:  TimestamptzFromTime(time.Now().Add(24 * time.Hour)),
 				IsUsed:     false,
 			})
 			if err != nil {
 				return err
 			}
 
-			// Dispatch via safe adapter
+			// Dispatch verification code via adapter
 			_ = s.delivery.SendVerificationCode(identifier, otpCode)
 			return nil
 		})
@@ -199,11 +311,26 @@ func (s *AuthService) Register(ctx context.Context, req RegisterRequest) (*Regis
 		return nil, err
 	}
 
+	deliveryStatus := "sent"
+	msg := "Registration successful! Please check your email to verify your account."
+
+	if email != "" {
+		verificationURL = fmt.Sprintf("%s/verify-email?token=%s", s.cfg.FrontendBaseURL, rawEmailToken)
+		deliveryErr := s.delivery.SendVerificationEmail(email, req.DisplayName, verificationURL)
+		if deliveryErr != nil {
+			deliveryStatus = "failed"
+			msg = "Account registered, but verification email could not be dispatched. Please use the resend option."
+		}
+	}
+
 	return &RegisterResponse{
 		UserID:              createdUser.ID,
 		MembershipReference: createdUser.MembershipReference,
 		Status:              createdUser.Status,
-		Message:             "Registration initiated. Verification code dispatched via development adapter.",
+		Message:             msg,
+		DeliveryStatus:      deliveryStatus,
+		DevVerificationURL:  verificationURL,
+		DevVerificationCode: s.delivery.GetLastCode(email),
 	}, nil
 }
 
@@ -242,6 +369,213 @@ func (s *AuthService) VerifyContact(ctx context.Context, req VerifyContactReques
 	return true, nil
 }
 
+// VerifyEmailToken validates a single-use token, activates the account, and consumes the token atomically.
+func (s *AuthService) VerifyEmailToken(ctx context.Context, rawToken string) (*VerifyEmailResponse, error) {
+	rawToken = strings.TrimSpace(rawToken)
+	if rawToken == "" || len(rawToken) < 16 {
+		return nil, ErrInvalidToken
+	}
+
+	tokenHash := security.HashToken(rawToken)
+
+	record, err := s.repo.Queries().GetEmailVerificationTokenByHash(ctx, tokenHash)
+	if err != nil || record.ID == "" {
+		return nil, ErrInvalidToken
+	}
+
+	// If token was already used, check whether the user is already verified
+	if record.IsUsed {
+		user, uErr := s.repo.Queries().GetUserByID(ctx, record.UserID)
+		if uErr == nil && user.IsVerified && user.Status == "active" {
+			return &VerifyEmailResponse{
+				Message:         "Email already verified. Your account is active. Please proceed to login.",
+				IsVerified:      true,
+				AlreadyVerified: true,
+			}, nil
+		}
+		return nil, ErrTokenAlreadyUsed
+	}
+
+	// Check expiry (24-hour lifetime)
+	if record.ExpiresAt.Time.Before(time.Now()) {
+		return nil, ErrTokenExpired
+	}
+
+	// Atomic consumption of token and user activation
+	err = s.repo.WithTx(ctx, func(q *db.Queries) error {
+		// Mark this token used
+		if _, err := q.MarkEmailVerificationTokenUsed(ctx, record.ID); err != nil {
+			return err
+		}
+		// Invalidate any other pending tokens for this user
+		if err := q.InvalidatePendingEmailVerificationTokens(ctx, record.UserID); err != nil {
+			return err
+		}
+		// Mark user verified and active
+		if _, err := q.UpdateUserStatus(ctx, db.UpdateUserStatusParams{
+			ID:         record.UserID,
+			Status:     "active",
+			IsVerified: true,
+		}); err != nil {
+			return err
+		}
+		return nil
+	})
+	if err != nil {
+		return nil, fmt.Errorf("failed to complete email verification: %w", err)
+	}
+
+	return &VerifyEmailResponse{
+		Message:         "Email verified successfully. Your account is active. You may now log in.",
+		IsVerified:      true,
+		AlreadyVerified: false,
+	}, nil
+}
+
+const (
+	ResendCooldownDuration = 60 * time.Second
+	MaxResendsPerHourEmail = 5
+	MaxResendsPerHourIP    = 10
+)
+
+func (s *AuthService) checkAndEnforceRateLimits(ctx context.Context, email, ip string) error {
+	now := time.Now()
+
+	// 1. Check IP rate limit
+	if ip != "" {
+		lim, err := s.repo.Queries().GetVerificationRateLimit(ctx, db.GetVerificationRateLimitParams{
+			Identifier: ip,
+			Action:     "resend_email",
+		})
+		if err == nil && lim.ID != "" {
+			if now.Sub(lim.FirstRequestedAt.Time) < time.Hour {
+				if lim.RequestCount >= MaxResendsPerHourIP {
+					return ErrRateLimitExceeded
+				}
+			} else {
+				_, _ = s.repo.Queries().ResetVerificationRateLimit(ctx, db.ResetVerificationRateLimitParams{
+					Identifier: ip,
+					Action:     "resend_email",
+				})
+			}
+		}
+	}
+
+	// 2. Check Email cooldown and rate limit
+	if email != "" {
+		lim, err := s.repo.Queries().GetVerificationRateLimit(ctx, db.GetVerificationRateLimitParams{
+			Identifier: email,
+			Action:     "resend_email",
+		})
+		if err == nil && lim.ID != "" {
+			timeSinceLast := now.Sub(lim.LastRequestedAt.Time)
+			if timeSinceLast < ResendCooldownDuration {
+				secondsRemaining := int((ResendCooldownDuration - timeSinceLast).Seconds())
+				if secondsRemaining < 1 {
+					secondsRemaining = 1
+				}
+				return fmt.Errorf("%w: please wait %d seconds before requesting another email", ErrResendCooldownActive, secondsRemaining)
+			}
+
+			if now.Sub(lim.FirstRequestedAt.Time) < time.Hour {
+				if lim.RequestCount >= MaxResendsPerHourEmail {
+					return ErrRateLimitExceeded
+				}
+			} else {
+				_, _ = s.repo.Queries().ResetVerificationRateLimit(ctx, db.ResetVerificationRateLimitParams{
+					Identifier: email,
+					Action:     "resend_email",
+				})
+			}
+		}
+	}
+
+	// Record request in rate limit table for both IP and email
+	if ip != "" {
+		_, _ = s.repo.Queries().UpsertVerificationRateLimit(ctx, db.UpsertVerificationRateLimitParams{
+			ID:         security.GenerateUUID(),
+			Identifier: ip,
+			Action:     "resend_email",
+		})
+	}
+	if email != "" {
+		_, _ = s.repo.Queries().UpsertVerificationRateLimit(ctx, db.UpsertVerificationRateLimitParams{
+			ID:         security.GenerateUUID(),
+			Identifier: email,
+			Action:     "resend_email",
+		})
+	}
+
+	return nil
+}
+
+// ResendVerificationEmail applies rate limiting/cooldown, invalidates older tokens, generates a fresh token, and dispatches an email.
+func (s *AuthService) ResendVerificationEmail(ctx context.Context, email, ip string) (*ResendVerificationResponse, error) {
+	email = strings.TrimSpace(strings.ToLower(email))
+	if email == "" || !strings.Contains(email, "@") {
+		return nil, ErrInvalidEmail
+	}
+
+	// Check rate limits & cooldown
+	if err := s.checkAndEnforceRateLimits(ctx, email, ip); err != nil {
+		return nil, err
+	}
+
+	user, err := s.repo.Queries().GetUserByEmail(ctx, TextFromString(email))
+	if err != nil || user.ID == "" {
+		// Neutral response: Do not disclose whether email exists (anti-enumeration)
+		return &ResendVerificationResponse{
+			Message: "If an unverified account with this email exists, a new verification link has been sent.",
+			Sent:    true,
+		}, nil
+	}
+
+	if user.IsVerified && user.Status == "active" {
+		return &ResendVerificationResponse{
+			Message:         "This email address is already verified. Please proceed to login.",
+			AlreadyVerified: true,
+			Sent:            false,
+		}, nil
+	}
+
+	// Generate fresh token
+	rawToken, err := security.GenerateSecureToken()
+	if err != nil {
+		return nil, fmt.Errorf("failed to generate verification token: %w", err)
+	}
+	tokenHash := security.HashToken(rawToken)
+
+	// Atomically invalidate old tokens and create new token
+	err = s.repo.WithTx(ctx, func(q *db.Queries) error {
+		if err := q.InvalidatePendingEmailVerificationTokens(ctx, user.ID); err != nil {
+			return err
+		}
+		_, err := q.CreateEmailVerificationToken(ctx, db.CreateEmailVerificationTokenParams{
+			ID:        security.GenerateUUID(),
+			UserID:    user.ID,
+			Email:     email,
+			TokenHash: tokenHash,
+			ExpiresAt: TimestamptzFromTime(time.Now().Add(24 * time.Hour)),
+		})
+		return err
+	})
+	if err != nil {
+		return nil, fmt.Errorf("failed to store verification token: %w", err)
+	}
+
+	verificationURL := fmt.Sprintf("%s/verify-email?token=%s", s.cfg.FrontendBaseURL, rawToken)
+
+	deliveryErr := s.delivery.SendVerificationEmail(email, user.DisplayName, verificationURL)
+	if deliveryErr != nil {
+		return nil, deliveryErr
+	}
+
+	return &ResendVerificationResponse{
+		Message: "A new verification link has been sent to your email address.",
+		Sent:    true,
+	}, nil
+}
+
 func (s *AuthService) Login(ctx context.Context, req LoginRequest, ip, userAgent string) (*LoginResponse, error) {
 	username := strings.TrimSpace(req.Username)
 	if username == "" {
@@ -268,7 +602,7 @@ func (s *AuthService) Login(ctx context.Context, req LoginRequest, ip, userAgent
 		return nil, ErrInvalidCredentials
 	}
 
-	if user.Status == "pending_verification" {
+	if user.Status == "pending_verification" || !user.IsVerified {
 		return nil, ErrUserNotVerified
 	}
 	if user.Status != "active" {
@@ -364,4 +698,38 @@ func (s *AuthService) UpdateProfile(ctx context.Context, userID string, homeStat
 		return nil, err
 	}
 	return &p, nil
+}
+
+// ListMembers returns a paginated list of members for administrative overview, appointments, and authorizations.
+func (s *AuthService) ListMembers(ctx context.Context, page, limit int32) ([]UserSummary, error) {
+	if limit <= 0 || limit > 100 {
+		limit = 50
+	}
+	if page <= 0 {
+		page = 1
+	}
+	offset := (page - 1) * limit
+
+	users, err := s.repo.Queries().ListUsers(ctx, db.ListUsersParams{
+		Limit:  limit,
+		Offset: offset,
+	})
+	if err != nil {
+		return nil, err
+	}
+
+	res := make([]UserSummary, 0, len(users))
+	for _, u := range users {
+		res = append(res, UserSummary{
+			ID:                  u.ID,
+			Email:               StringFromText(u.Email),
+			Phone:               StringFromText(u.Phone),
+			DisplayName:         u.DisplayName,
+			MembershipReference: u.MembershipReference,
+			Status:              u.Status,
+			PrimaryRole:         u.PrimaryRole,
+			IsVerified:          u.IsVerified,
+		})
+	}
+	return res, nil
 }
