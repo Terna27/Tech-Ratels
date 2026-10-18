@@ -1,6 +1,8 @@
 package service
 
 import (
+	"fmt"
+	"strings"
 	"time"
 
 	"github.com/jackc/pgx/v5/pgtype"
@@ -92,4 +94,34 @@ func Int8Val(i pgtype.Int8) *int64 {
 		return nil
 	}
 	return &i.Int64
+}
+
+func DateFromTime(t *time.Time) pgtype.Date {
+	if t == nil || t.IsZero() {
+		return pgtype.Date{Valid: false}
+	}
+	return pgtype.Date{Time: *t, Valid: true}
+}
+
+func TimeFromDate(d pgtype.Date) *time.Time {
+	if !d.Valid {
+		return nil
+	}
+	return &d.Time
+}
+
+func ParseFlexibleDate(s string) (*time.Time, error) {
+	s = strings.TrimSpace(s)
+	if s == "" || s == "null" {
+		return nil, nil
+	}
+	// Try RFC3339
+	if t, err := time.Parse(time.RFC3339, s); err == nil {
+		return &t, nil
+	}
+	// Try ISO date YYYY-MM-DD
+	if t, err := time.Parse("2006-01-02", s); err == nil {
+		return &t, nil
+	}
+	return nil, fmt.Errorf("invalid date format %q: expected YYYY-MM-DD or RFC3339", s)
 }

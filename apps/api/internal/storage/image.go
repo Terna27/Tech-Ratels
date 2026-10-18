@@ -19,7 +19,9 @@ import (
 const (
 	MaxProductImageSize    = 5 * 1024 * 1024 // 5 MB
 	MaxImagesPerProduct    = 5
-	MarketplaceImagePrefix = "marketplace/products/"
+	MarketplaceImagePrefix      = "marketplace/products/"
+	CommunityRequestImagePrefix = "community/requests/"
+	CommunityProjectImagePrefix = "community/projects/"
 )
 
 var (
@@ -162,4 +164,26 @@ func ValidateKeyBelongsToBusiness(key, businessID string) bool {
 	cleanKey := strings.TrimPrefix(key, "/")
 	expectedPrefix := fmt.Sprintf("%s%s/", MarketplaceImagePrefix, businessID)
 	return strings.HasPrefix(cleanKey, expectedPrefix)
+}
+
+// GenerateCommunityRequestImageKey constructs an isolated, unique server-controlled object key for request evidence.
+// Pattern: community/requests/<request_id>/<uuid>.<ext>
+func GenerateCommunityRequestImageKey(requestID, ext string) string {
+	cleanExt := strings.TrimPrefix(ext, ".")
+	if cleanExt == "jpeg" {
+		cleanExt = "jpg"
+	}
+	uniqueID := strings.ReplaceAll(uuid.New().String(), "-", "")
+	return fmt.Sprintf("%s%s/%s.%s", CommunityRequestImagePrefix, requestID, uniqueID, cleanExt)
+}
+
+// GenerateCommunityProjectImageKey constructs an isolated, unique server-controlled object key for project evidence/milestones.
+// Pattern: community/projects/<project_id>/<uuid>.<ext>
+func GenerateCommunityProjectImageKey(projectID, ext string) string {
+	cleanExt := strings.TrimPrefix(ext, ".")
+	if cleanExt == "jpeg" {
+		cleanExt = "jpg"
+	}
+	uniqueID := strings.ReplaceAll(uuid.New().String(), "-", "")
+	return fmt.Sprintf("%s%s/%s.%s", CommunityProjectImagePrefix, projectID, uniqueID, cleanExt)
 }

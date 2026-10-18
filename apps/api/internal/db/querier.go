@@ -19,16 +19,20 @@ type Querier interface {
 	CalculateFundBalanceBeforeDate(ctx context.Context, arg CalculateFundBalanceBeforeDateParams) (int64, error)
 	CountActiveAppointments(ctx context.Context) (int64, error)
 	CountActiveUsers(ctx context.Context) (int64, error)
+	CountAdminCommunityProjects(ctx context.Context, arg CountAdminCommunityProjectsParams) (int64, error)
+	CountAdminCommunityRequests(ctx context.Context, arg CountAdminCommunityRequestsParams) (int64, error)
 	CountAuditEvents(ctx context.Context) (int64, error)
 	CountDraftEvents(ctx context.Context) (int64, error)
 	CountLGAs(ctx context.Context) (int64, error)
 	CountPendingAppeals(ctx context.Context) (int64, error)
 	CountPendingClaims(ctx context.Context) (int64, error)
 	CountPendingVerificationUsers(ctx context.Context) (int64, error)
+	CountPublicCommunityProjects(ctx context.Context, arg CountPublicCommunityProjectsParams) (int64, error)
 	CountPublishedEvents(ctx context.Context) (int64, error)
 	CountStates(ctx context.Context) (int64, error)
 	CountStockLedgerEntries(ctx context.Context, arg CountStockLedgerEntriesParams) (int64, error)
 	CountTotalRegistrations(ctx context.Context) (int64, error)
+	CountUnverifiedCompletedMilestones(ctx context.Context, projectID string) (int64, error)
 	CountUsers(ctx context.Context) (int64, error)
 	CountVerifiedParticipationsByUser(ctx context.Context, userID string) (int64, error)
 	CountZones(ctx context.Context) (int64, error)
@@ -64,6 +68,14 @@ type Querier interface {
 	// -------------------------------------------------------------
 	CreateCareersJob(ctx context.Context, arg CreateCareersJobParams) (CareersJob, error)
 	CreateCleanupCampaign(ctx context.Context, arg CreateCleanupCampaignParams) (CleanupCampaign, error)
+	// -------------------------------------------------------------
+	// Community Projects
+	// -------------------------------------------------------------
+	CreateCommunityProject(ctx context.Context, arg CreateCommunityProjectParams) (CommunityProject, error)
+	// -------------------------------------------------------------
+	// Community Requests
+	// -------------------------------------------------------------
+	CreateCommunityRequest(ctx context.Context, arg CreateCommunityRequestParams) (CommunityRequest, error)
 	CreateContactVerification(ctx context.Context, arg CreateContactVerificationParams) (ContactVerification, error)
 	CreateEmailVerificationToken(ctx context.Context, arg CreateEmailVerificationTokenParams) (EmailVerificationToken, error)
 	CreateEventInstance(ctx context.Context, arg CreateEventInstanceParams) (EventInstance, error)
@@ -112,6 +124,14 @@ type Querier interface {
 	CreateMemberProfile(ctx context.Context, arg CreateMemberProfileParams) (MemberProfile, error)
 	CreateParticipationAppeal(ctx context.Context, arg CreateParticipationAppealParams) (ParticipationAppeal, error)
 	CreateParticipationClaim(ctx context.Context, arg CreateParticipationClaimParams) (ParticipationClaim, error)
+	// -------------------------------------------------------------
+	// Milestones
+	// -------------------------------------------------------------
+	CreateProjectMilestone(ctx context.Context, arg CreateProjectMilestoneParams) (CommunityProjectMilestone, error)
+	// -------------------------------------------------------------
+	// Project Updates
+	// -------------------------------------------------------------
+	CreateProjectUpdate(ctx context.Context, arg CreateProjectUpdateParams) (CommunityProjectUpdate, error)
 	CreateState(ctx context.Context, arg CreateStateParams) (State, error)
 	CreateStockLedgerEntry(ctx context.Context, arg CreateStockLedgerEntryParams) (StockLedgerEntry, error)
 	CreateStockReservation(ctx context.Context, arg CreateStockReservationParams) (StockReservation, error)
@@ -129,6 +149,7 @@ type Querier interface {
 	DeleteHeroMedia(ctx context.Context, id string) error
 	DeleteLGA(ctx context.Context, id string) error
 	DeleteMarketplaceProduct(ctx context.Context, id string) error
+	DeleteProjectMilestone(ctx context.Context, id string) error
 	GetActiveAppointmentByJurisdiction(ctx context.Context, arg GetActiveAppointmentByJurisdictionParams) (Appointment, error)
 	GetActiveFinancialAuthorization(ctx context.Context, userID string) (FinancialAuthorization, error)
 	GetActiveHeroMedia(ctx context.Context) (HomepageHeroMedium, error)
@@ -156,6 +177,14 @@ type Querier interface {
 	GetCareersRecruiter(ctx context.Context, arg GetCareersRecruiterParams) (GetCareersRecruiterRow, error)
 	GetCleanupCampaignByID(ctx context.Context, id string) (CleanupCampaign, error)
 	GetCleanupCampaignByYearMonth(ctx context.Context, arg GetCleanupCampaignByYearMonthParams) (CleanupCampaign, error)
+	GetCommunityProjectByID(ctx context.Context, id string) (GetCommunityProjectByIDRow, error)
+	GetCommunityProjectByReference(ctx context.Context, reference string) (GetCommunityProjectByReferenceRow, error)
+	// -------------------------------------------------------------
+	// Overview Statistics
+	// -------------------------------------------------------------
+	GetCommunityProjectsOverviewStats(ctx context.Context) (GetCommunityProjectsOverviewStatsRow, error)
+	GetCommunityRequestByID(ctx context.Context, id string) (GetCommunityRequestByIDRow, error)
+	GetCommunityRequestByReference(ctx context.Context, reference string) (GetCommunityRequestByReferenceRow, error)
 	GetEmailVerificationTokenByHash(ctx context.Context, tokenHash string) (EmailVerificationToken, error)
 	GetEventInstanceByID(ctx context.Context, id string) (EventInstance, error)
 	GetEventInstanceForUpdate(ctx context.Context, id string) (EventInstance, error)
@@ -198,6 +227,7 @@ type Querier interface {
 	GetParticipationAppealByID(ctx context.Context, id string) (ParticipationAppeal, error)
 	GetParticipationClaimByEventAndUser(ctx context.Context, arg GetParticipationClaimByEventAndUserParams) (ParticipationClaim, error)
 	GetParticipationClaimByID(ctx context.Context, id string) (ParticipationClaim, error)
+	GetProjectMilestoneByID(ctx context.Context, id string) (GetProjectMilestoneByIDRow, error)
 	GetStateByCode(ctx context.Context, code string) (State, error)
 	GetStateByID(ctx context.Context, id string) (State, error)
 	GetStockBalance(ctx context.Context, arg GetStockBalanceParams) (StockBalance, error)
@@ -220,11 +250,14 @@ type Querier interface {
 	IncrementVerificationAttempt(ctx context.Context, id string) (ContactVerification, error)
 	InvalidatePendingEmailVerificationTokens(ctx context.Context, userID string) error
 	ListActiveAppointmentsByUser(ctx context.Context, userID string) ([]Appointment, error)
+	ListAdminCommunityProjects(ctx context.Context, arg ListAdminCommunityProjectsParams) ([]ListAdminCommunityProjectsRow, error)
+	ListAdminCommunityRequests(ctx context.Context, arg ListAdminCommunityRequestsParams) ([]ListAdminCommunityRequestsRow, error)
 	ListAllCareersJobsAdmin(ctx context.Context, arg ListAllCareersJobsAdminParams) ([]ListAllCareersJobsAdminRow, error)
 	ListAllEvents(ctx context.Context) ([]ListAllEventsRow, error)
 	ListAllMarketplaceDisputes(ctx context.Context, dollar_1 string) ([]ListAllMarketplaceDisputesRow, error)
 	ListAllMarketplaceOrders(ctx context.Context, arg ListAllMarketplaceOrdersParams) ([]ListAllMarketplaceOrdersRow, error)
 	ListAllStockBalances(ctx context.Context, arg ListAllStockBalancesParams) ([]ListAllStockBalancesRow, error)
+	ListAllUpdatesByProjectID(ctx context.Context, projectID string) ([]ListAllUpdatesByProjectIDRow, error)
 	ListAppointmentHistory(ctx context.Context, appointmentID string) ([]ListAppointmentHistoryRow, error)
 	ListAppointments(ctx context.Context) ([]ListAppointmentsRow, error)
 	ListAuditEvents(ctx context.Context, arg ListAuditEventsParams) ([]AuditEvent, error)
@@ -244,6 +277,7 @@ type Querier interface {
 	ListCareersRecruitersByEmployer(ctx context.Context, employerID string) ([]ListCareersRecruitersByEmployerRow, error)
 	ListClaimsByUser(ctx context.Context, userID string) ([]ListClaimsByUserRow, error)
 	ListCleanupCampaigns(ctx context.Context) ([]CleanupCampaign, error)
+	ListCommunityRequestsByRequester(ctx context.Context, requesterID string) ([]ListCommunityRequestsByRequesterRow, error)
 	ListEventsByState(ctx context.Context, stateID string) ([]ListEventsByStateRow, error)
 	ListFinancialAuthorizations(ctx context.Context) ([]ListFinancialAuthorizationsRow, error)
 	ListFinancialFunds(ctx context.Context) ([]FinancialFund, error)
@@ -266,10 +300,13 @@ type Querier interface {
 	ListMaterialRequests(ctx context.Context, arg ListMaterialRequestsParams) ([]ListMaterialRequestsRow, error)
 	ListMaterialTransferItemsByTransfer(ctx context.Context, transferID string) ([]ListMaterialTransferItemsByTransferRow, error)
 	ListMaterialTransfers(ctx context.Context, arg ListMaterialTransfersParams) ([]ListMaterialTransfersRow, error)
+	ListMilestonesByProjectID(ctx context.Context, projectID string) ([]ListMilestonesByProjectIDRow, error)
 	ListPendingClaims(ctx context.Context) ([]ListPendingClaimsRow, error)
 	ListPendingClaimsByState(ctx context.Context, stateID string) ([]ListPendingClaimsByStateRow, error)
 	ListPublicCareersJobs(ctx context.Context, arg ListPublicCareersJobsParams) ([]ListPublicCareersJobsRow, error)
+	ListPublicCommunityProjects(ctx context.Context, arg ListPublicCommunityProjectsParams) ([]ListPublicCommunityProjectsRow, error)
 	ListPublicLeadershipDirectory(ctx context.Context) ([]ListPublicLeadershipDirectoryRow, error)
+	ListPublicUpdatesByProjectID(ctx context.Context, projectID string) ([]ListPublicUpdatesByProjectIDRow, error)
 	ListPublishedEvents(ctx context.Context) ([]ListPublishedEventsRow, error)
 	ListPublishedEventsByState(ctx context.Context, stateID string) ([]ListPublishedEventsByStateRow, error)
 	ListRegistrationsByUser(ctx context.Context, userID string) ([]ListRegistrationsByUserRow, error)
@@ -283,6 +320,7 @@ type Querier interface {
 	ListUsers(ctx context.Context, arg ListUsersParams) ([]User, error)
 	ListVerifiedBankAccountVersions(ctx context.Context) ([]VerifiedBankAccountVersion, error)
 	ListZones(ctx context.Context) ([]Zone, error)
+	MarkCommunityRequestConverted(ctx context.Context, arg MarkCommunityRequestConvertedParams) (CommunityRequest, error)
 	MarkEmailVerificationTokenUsed(ctx context.Context, id string) (EmailVerificationToken, error)
 	MarkMaterialTransferDispatched(ctx context.Context, arg MarkMaterialTransferDispatchedParams) (MaterialTransfer, error)
 	MarkMaterialTransferReceived(ctx context.Context, arg MarkMaterialTransferReceivedParams) (MaterialTransfer, error)
@@ -294,6 +332,8 @@ type Querier interface {
 	ResetVerificationRateLimit(ctx context.Context, arg ResetVerificationRateLimitParams) (EmailVerificationRateLimit, error)
 	ResolveMarketplaceDispute(ctx context.Context, arg ResolveMarketplaceDisputeParams) (MarketplaceDispute, error)
 	ResolveTransferDiscrepancy(ctx context.Context, arg ResolveTransferDiscrepancyParams) (TransferDiscrepancy, error)
+	ResubmitCommunityRequest(ctx context.Context, arg ResubmitCommunityRequestParams) (CommunityRequest, error)
+	ReviewCommunityRequest(ctx context.Context, arg ReviewCommunityRequestParams) (CommunityRequest, error)
 	ReviewParticipationClaim(ctx context.Context, arg ReviewParticipationClaimParams) (ParticipationClaim, error)
 	RevokeAllUserSessions(ctx context.Context, userID string) error
 	RevokeFinancialAuthorization(ctx context.Context, id string) (FinancialAuthorization, error)
@@ -311,6 +351,9 @@ type Querier interface {
 	UpdateCareersInterviewStatus(ctx context.Context, arg UpdateCareersInterviewStatusParams) (CareersInterview, error)
 	UpdateCareersJob(ctx context.Context, arg UpdateCareersJobParams) (CareersJob, error)
 	UpdateCareersJobStatus(ctx context.Context, arg UpdateCareersJobStatusParams) (CareersJob, error)
+	UpdateCommunityProjectDetails(ctx context.Context, arg UpdateCommunityProjectDetailsParams) (CommunityProject, error)
+	UpdateCommunityProjectExecution(ctx context.Context, arg UpdateCommunityProjectExecutionParams) (CommunityProject, error)
+	UpdateCommunityProjectFinances(ctx context.Context, arg UpdateCommunityProjectFinancesParams) (CommunityProject, error)
 	UpdateEventRegistrationStatus(ctx context.Context, arg UpdateEventRegistrationStatusParams) (EventRegistration, error)
 	UpdateEventStatus(ctx context.Context, arg UpdateEventStatusParams) (EventInstance, error)
 	UpdateFinancialTransactionStatus(ctx context.Context, arg UpdateFinancialTransactionStatusParams) (FinancialTransaction, error)
@@ -330,6 +373,7 @@ type Querier interface {
 	UpdateMaterialRequestReview(ctx context.Context, arg UpdateMaterialRequestReviewParams) (MaterialRequest, error)
 	UpdateMaterialTransferItemReceipt(ctx context.Context, arg UpdateMaterialTransferItemReceiptParams) (MaterialTransferItem, error)
 	UpdateMemberProfile(ctx context.Context, arg UpdateMemberProfileParams) (MemberProfile, error)
+	UpdateProjectMilestone(ctx context.Context, arg UpdateProjectMilestoneParams) (CommunityProjectMilestone, error)
 	UpdateState(ctx context.Context, arg UpdateStateParams) (State, error)
 	UpdateStockReservationStatus(ctx context.Context, arg UpdateStockReservationStatusParams) (StockReservation, error)
 	UpdateStorageLocation(ctx context.Context, arg UpdateStorageLocationParams) (StorageLocation, error)
@@ -342,6 +386,8 @@ type Querier interface {
 	UpsertCandidateProfile(ctx context.Context, arg UpsertCandidateProfileParams) (CareersCandidateProfile, error)
 	UpsertStockBalance(ctx context.Context, arg UpsertStockBalanceParams) (StockBalance, error)
 	UpsertVerificationRateLimit(ctx context.Context, arg UpsertVerificationRateLimitParams) (EmailVerificationRateLimit, error)
+	VerifyCommunityProjectCompletion(ctx context.Context, arg VerifyCommunityProjectCompletionParams) (CommunityProject, error)
+	VerifyProjectMilestone(ctx context.Context, arg VerifyProjectMilestoneParams) (CommunityProjectMilestone, error)
 }
 
 var _ Querier = (*Queries)(nil)

@@ -25,8 +25,9 @@ type RouterParams struct {
 	FinanceHandler       *FinanceHandler
 	InventoryHandler     *InventoryHandler
 	MarketplaceHandler   *MarketplaceHandler
-	CareersHandler       *CareersHandler
-	HeroMediaHandler     *HeroMediaHandler
+	CareersHandler          *CareersHandler
+	HeroMediaHandler        *HeroMediaHandler
+	CommunityProjectHandler *CommunityProjectHandler
 }
 
 func NewRouter(p RouterParams) http.Handler {
@@ -310,6 +311,26 @@ func NewRouter(p RouterParams) http.Handler {
 			home.Get("/hero-media", p.HeroMediaHandler.GetActiveHeroMedia)
 		})
 
+		// Community Projects & Requests (Blueprint Section 10)
+		api.Route("/community", func(comm chi.Router) {
+			// Public project discovery & details
+			comm.Get("/projects", p.CommunityProjectHandler.ListPublicProjects)
+			comm.Get("/projects/{id}", p.CommunityProjectHandler.GetPublicProject)
+			comm.Get("/projects/categories", p.CommunityProjectHandler.GetCategories)
+			comm.Get("/projects/stats", p.CommunityProjectHandler.GetOverviewStats)
+
+			// Member request submissions & tracking
+			comm.Route("/requests", func(reqRouter chi.Router) {
+				reqRouter.Use(RequireAuth)
+				reqRouter.Post("/", p.CommunityProjectHandler.CreateCommunityRequest)
+				reqRouter.Get("/mine", p.CommunityProjectHandler.ListMyCommunityRequests)
+				reqRouter.Get("/{id}", p.CommunityProjectHandler.GetCommunityRequest)
+				reqRouter.Post("/{id}/resubmit", p.CommunityProjectHandler.ResubmitCommunityRequest)
+				reqRouter.Post("/presign", p.CommunityProjectHandler.PresignRequestUpload)
+				reqRouter.Post("/upload", p.CommunityProjectHandler.UploadRequestImageDirect)
+			})
+		})
+
 		// Admin Workspace
 		api.Route("/admin", func(adm chi.Router) {
 			adm.With(RequireRole("national_admin", "state_coordinator", "zonal_coordinator", "lga_representative")).Get("/overview", p.AdminHandler.GetOverview)
@@ -326,6 +347,29 @@ func NewRouter(p RouterParams) http.Handler {
 				admHero.Patch("/toggle", p.HeroMediaHandler.ToggleHeroMedia)
 				admHero.Post("/{id}/poster", p.HeroMediaHandler.UploadHeroPoster)
 				admHero.Delete("/{id}", p.HeroMediaHandler.DeleteHeroMedia)
+			})
+
+			// Community Projects & Requests Administration
+			adm.Route("/community", func(admComm chi.Router) {
+				admComm.Use(RequireRole("national_admin", "super_admin", "zonal_coordinator", "state_coordinator", "lga_representative"))
+				admComm.Get("/overview", p.CommunityProjectHandler.GetOverviewStats)
+				admComm.Get("/requests", p.CommunityProjectHandler.ListAdminRequests)
+				admComm.Post("/requests/{id}/review", p.CommunityProjectHandler.ReviewCommunityRequest)
+				admComm.Post("/requests/{id}/convert", p.CommunityProjectHandler.ConvertCommunityRequest)
+				admComm.Get("/projects", p.CommunityProjectHandler.ListAdminProjects)
+				admComm.Post("/projects", p.CommunityProjectHandler.CreateCommunityProject)
+				admComm.Get("/projects/{id}", p.CommunityProjectHandler.GetAdminProject)
+				admComm.Patch("/projects/{id}", p.CommunityProjectHandler.UpdateProjectDetails)
+				admComm.Patch("/projects/{id}/execution", p.CommunityProjectHandler.UpdateProjectExecution)
+				admComm.Patch("/projects/{id}/status", p.CommunityProjectHandler.UpdateProjectExecution)
+				admComm.Post("/projects/{id}/milestones", p.CommunityProjectHandler.AddMilestone)
+				admComm.Patch("/projects/{id}/milestones/{milestone_id}", p.CommunityProjectHandler.UpdateMilestone)
+				admComm.Post("/projects/{id}/milestones/{milestone_id}/verify", p.CommunityProjectHandler.VerifyMilestone)
+				admComm.Delete("/projects/{id}/milestones/{milestone_id}", p.CommunityProjectHandler.DeleteMilestone)
+				admComm.Post("/projects/{id}/funding", p.CommunityProjectHandler.RecordProjectFunding)
+				admComm.Post("/projects/{id}/updates", p.CommunityProjectHandler.CreateProjectUpdate)
+				admComm.Post("/projects/{id}/presign", p.CommunityProjectHandler.PresignProjectUpload)
+				admComm.Post("/projects/{id}/upload", p.CommunityProjectHandler.UploadProjectImageDirect)
 			})
 		})
 	})

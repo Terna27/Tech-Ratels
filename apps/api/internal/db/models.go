@@ -242,6 +242,103 @@ type CleanupCampaign struct {
 	Version       int32              `json:"version"`
 }
 
+type CommunityProject struct {
+	ID                     string             `json:"id"`
+	Reference              string             `json:"reference"`
+	Title                  string             `json:"title"`
+	Description            string             `json:"description"`
+	CommunityRequestID     pgtype.Text        `json:"community_request_id"`
+	Category               string             `json:"category"`
+	StateID                string             `json:"state_id"`
+	LgaID                  string             `json:"lga_id"`
+	CommunityWard          string             `json:"community_ward"`
+	LocationDetails        string             `json:"location_details"`
+	ResponsibleOfficerID   pgtype.Text        `json:"responsible_officer_id"`
+	ResponsibleDepartment  string             `json:"responsible_department"`
+	StartDate              pgtype.Date        `json:"start_date"`
+	TargetCompletionDate   pgtype.Date        `json:"target_completion_date"`
+	ActualCompletionDate   pgtype.Date        `json:"actual_completion_date"`
+	ProposedBudget         int64              `json:"proposed_budget"`
+	ApprovedBudget         int64              `json:"approved_budget"`
+	AllocatedFunding       int64              `json:"allocated_funding"`
+	RecordedExpenditure    int64              `json:"recorded_expenditure"`
+	OutstandingCommitments int64              `json:"outstanding_commitments"`
+	FundingStatus          string             `json:"funding_status"`
+	ExecutionStatus        string             `json:"execution_status"`
+	ProgressPercentage     int32              `json:"progress_percentage"`
+	PauseOrCancelReason    pgtype.Text        `json:"pause_or_cancel_reason"`
+	SupportingDocuments    json.RawMessage    `json:"supporting_documents"`
+	CompletionEvidenceUrls json.RawMessage    `json:"completion_evidence_urls"`
+	VerifiedByUserID       pgtype.Text        `json:"verified_by_user_id"`
+	VerifiedAt             pgtype.Timestamptz `json:"verified_at"`
+	VerificationNotes      pgtype.Text        `json:"verification_notes"`
+	IsPublic               bool               `json:"is_public"`
+	CreatedByUserID        string             `json:"created_by_user_id"`
+	CreatedAt              pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt              pgtype.Timestamptz `json:"updated_at"`
+	Version                int32              `json:"version"`
+}
+
+type CommunityProjectMilestone struct {
+	ID                 string             `json:"id"`
+	ProjectID          string             `json:"project_id"`
+	SequenceOrder      int32              `json:"sequence_order"`
+	Title              string             `json:"title"`
+	Description        string             `json:"description"`
+	TargetDate         pgtype.Date        `json:"target_date"`
+	CompletionDate     pgtype.Date        `json:"completion_date"`
+	AssignedPersonName pgtype.Text        `json:"assigned_person_name"`
+	AssignedPersonID   pgtype.Text        `json:"assigned_person_id"`
+	Status             string             `json:"status"`
+	ProgressNotes      pgtype.Text        `json:"progress_notes"`
+	EvidencePhotoUrls  json.RawMessage    `json:"evidence_photo_urls"`
+	VerificationStatus string             `json:"verification_status"`
+	VerifiedByUserID   pgtype.Text        `json:"verified_by_user_id"`
+	VerifiedAt         pgtype.Timestamptz `json:"verified_at"`
+	VerificationNotes  pgtype.Text        `json:"verification_notes"`
+	CreatedAt          pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt          pgtype.Timestamptz `json:"updated_at"`
+}
+
+type CommunityProjectUpdate struct {
+	ID                 string             `json:"id"`
+	ProjectID          string             `json:"project_id"`
+	MilestoneID        pgtype.Text        `json:"milestone_id"`
+	AuthorID           string             `json:"author_id"`
+	Title              string             `json:"title"`
+	Content            string             `json:"content"`
+	PhotoUrls          json.RawMessage    `json:"photo_urls"`
+	ProgressPercentage pgtype.Int4        `json:"progress_percentage"`
+	IsPublic           bool               `json:"is_public"`
+	CreatedAt          pgtype.Timestamptz `json:"created_at"`
+}
+
+type CommunityRequest struct {
+	ID                   string             `json:"id"`
+	Reference            string             `json:"reference"`
+	Title                string             `json:"title"`
+	Description          string             `json:"description"`
+	Category             string             `json:"category"`
+	StateID              string             `json:"state_id"`
+	LgaID                string             `json:"lga_id"`
+	CommunityWard        string             `json:"community_ward"`
+	LocationDetails      string             `json:"location_details"`
+	EstimatedUrgency     string             `json:"estimated_urgency"`
+	EvidenceImageUrls    json.RawMessage    `json:"evidence_image_urls"`
+	RequesterID          string             `json:"requester_id"`
+	Status               string             `json:"status"`
+	ReviewedByUserID     pgtype.Text        `json:"reviewed_by_user_id"`
+	ReviewedAt           pgtype.Timestamptz `json:"reviewed_at"`
+	ReviewNotes          pgtype.Text        `json:"review_notes"`
+	RejectionReason      pgtype.Text        `json:"rejection_reason"`
+	InfoRequestNotes     pgtype.Text        `json:"info_request_notes"`
+	EscalationLevel      pgtype.Text        `json:"escalation_level"`
+	ConvertedToProjectID pgtype.Text        `json:"converted_to_project_id"`
+	CreatedAt            pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt            pgtype.Timestamptz `json:"updated_at"`
+	Version              int32              `json:"version"`
+}
+
 type ContactVerification struct {
 	ID           string             `json:"id"`
 	UserID       string             `json:"user_id"`

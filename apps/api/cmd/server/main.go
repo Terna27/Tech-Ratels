@@ -152,6 +152,7 @@ func main() {
 	marketplaceService := service.NewMarketplaceService(repo, auditService, paymentGateway, storageService)
 	careersService := service.NewCareersService(repo, auditService, emailDelivery)
 	heroMediaService := service.NewHeroMediaService(repo, auditService, storageService)
+	communityProjectService := service.NewCommunityProjectService(repo, auditService, storageService, financeService)
 
 	// Handlers
 	healthH := handler.NewHealthHandler(repo)
@@ -168,24 +169,26 @@ func main() {
 	marketplaceH := handler.NewMarketplaceHandler(marketplaceService)
 	careersH := handler.NewCareersHandler(careersService)
 	heroMediaH := handler.NewHeroMediaHandler(heroMediaService)
+	communityProjectH := handler.NewCommunityProjectHandler(communityProjectService)
 
 	router := handler.NewRouter(handler.RouterParams{
-		Config:               cfg,
-		Repo:                 repo,
-		HealthHandler:        healthH,
-		AuthHandler:          authH,
-		MemberHandler:        memberH,
-		GeographyHandler:     geoH,
-		LeadershipHandler:    leadH,
-		ActivityHandler:      activityH,
-		ParticipationHandler: partH,
-		FoundationHandler:    foundH,
-		AdminHandler:         adminH,
-		FinanceHandler:       financeH,
-		InventoryHandler:     inventoryH,
-		MarketplaceHandler:   marketplaceH,
-		CareersHandler:       careersH,
-		HeroMediaHandler:     heroMediaH,
+		Config:                  cfg,
+		Repo:                    repo,
+		HealthHandler:           healthH,
+		AuthHandler:             authH,
+		MemberHandler:           memberH,
+		GeographyHandler:        geoH,
+		LeadershipHandler:       leadH,
+		ActivityHandler:         activityH,
+		ParticipationHandler:    partH,
+		FoundationHandler:       foundH,
+		AdminHandler:            adminH,
+		FinanceHandler:          financeH,
+		InventoryHandler:        inventoryH,
+		MarketplaceHandler:      marketplaceH,
+		CareersHandler:          careersH,
+		HeroMediaHandler:        heroMediaH,
+		CommunityProjectHandler: communityProjectH,
 	})
 
 	srv := &http.Server{

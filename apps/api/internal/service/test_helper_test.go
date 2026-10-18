@@ -31,7 +31,8 @@ type TestEnv struct {
 	InventoryService *service.InventoryService
 	MarketplaceService *service.MarketplaceService
 	CareersService     *service.CareersService
-	HeroMediaService   *service.HeroMediaService
+	HeroMediaService        *service.HeroMediaService
+	CommunityProjectService *service.CommunityProjectService
 }
 
 func setupTestEnv(t *testing.T) *TestEnv {
@@ -67,24 +68,26 @@ func setupTestEnv(t *testing.T) *TestEnv {
 	careersSvc := service.NewCareersService(repo, auditSvc, del)
 	mockStorage := storage.NewDevSandboxStorageService("http://localhost:3000")
 	heroSvc := service.NewHeroMediaService(repo, auditSvc, mockStorage)
+	communitySvc := service.NewCommunityProjectService(repo, auditSvc, mockStorage, finSvc)
 
 	return &TestEnv{
-		Pool:               pool,
-		Repo:               repo,
-		Config:             cfg,
-		Delivery:           del,
-		AuditService:       auditSvc,
-		GeoService:         geoSvc,
-		AuthService:        authSvc,
-		LeadService:        leadSvc,
-		CleanupService:     cleanupSvc,
-		PartService:        partSvc,
-		FoundService:       foundSvc,
-		AdminService:       adminSvc,
-		FinanceService:     finSvc,
-		InventoryService:   invSvc,
-		MarketplaceService: mktSvc,
-		CareersService:     careersSvc,
-		HeroMediaService:   heroSvc,
+		Pool:                    pool,
+		Repo:                    repo,
+		Config:                  cfg,
+		Delivery:                del,
+		AuditService:            auditSvc,
+		GeoService:              geoSvc,
+		AuthService:             authSvc,
+		LeadService:             leadSvc,
+		CleanupService:          cleanupSvc,
+		PartService:             partSvc,
+		FoundService:            foundSvc,
+		AdminService:            adminSvc,
+		FinanceService:          finSvc,
+		InventoryService:        invSvc,
+		MarketplaceService:      mktSvc,
+		CareersService:          careersSvc,
+		HeroMediaService:        heroSvc,
+		CommunityProjectService: communitySvc,
 	}
 }

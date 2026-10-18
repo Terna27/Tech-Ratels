@@ -1094,3 +1094,165 @@ export interface ToggleHeroMediaResponse {
   media?: HeroMedia;
 }
 
+// -------------------------------------------------------------
+// Community Projects & Requests Types (Blueprint Section 10)
+// -------------------------------------------------------------
+
+export interface CommunityRequest {
+  id: string;
+  reference: string;
+  title: string;
+  description: string;
+  category: string;
+  state_id: string;
+  lga_id: string;
+  state_name?: string;
+  lga_name?: string;
+  community_ward: string;
+  location_details: string;
+  estimated_urgency: "low" | "medium" | "high" | "critical";
+  evidence_image_urls: string[] | any;
+  requester_id: string;
+  requester_name?: string;
+  requester_email?: string;
+  requester_phone?: string;
+  requester_membership_reference?: string;
+  status: "submitted" | "under_review" | "info_requested" | "verified" | "approved" | "rejected";
+  reviewed_by_user_id?: string;
+  reviewed_at?: string;
+  reviewer_name?: string;
+  review_notes?: string;
+  rejection_reason?: string;
+  info_request_notes?: string;
+  escalation_level?: string;
+  converted_to_project_id?: string;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface CommunityProject {
+  id: string;
+  reference: string;
+  title: string;
+  description: string;
+  community_request_id?: string;
+  request_reference?: string;
+  request_title?: string;
+  category: string;
+  state_id: string;
+  lga_id: string;
+  state_name?: string;
+  lga_name?: string;
+  community_ward: string;
+  location_details: string;
+  responsible_officer_id?: string;
+  responsible_officer_name?: string;
+  responsible_officer_email?: string;
+  responsible_department: string;
+  start_date?: string;
+  target_completion_date?: string;
+  actual_completion_date?: string;
+  proposed_budget: number;
+  approved_budget: number;
+  allocated_funding: number;
+  recorded_expenditure: number;
+  outstanding_commitments: number;
+  funding_status: "unfunded" | "partially_funded" | "fully_funded";
+  execution_status: "planned" | "in_progress" | "awaiting_verification" | "completed" | "paused" | "cancelled";
+  progress_percentage: number;
+  pause_or_cancel_reason?: string;
+  supporting_documents?: any;
+  completion_evidence_urls?: string[] | any;
+  verified_by_user_id?: string;
+  verified_by_name?: string;
+  verified_at?: string;
+  verification_notes?: string;
+  is_public: boolean;
+  created_by_user_id: string;
+  created_by_name?: string;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface ProjectMilestone {
+  id: string;
+  project_id: string;
+  sequence_order: number;
+  title: string;
+  description: string;
+  target_date: string;
+  completion_date?: string;
+  assigned_person_name?: string;
+  assigned_person_id?: string;
+  assigned_person_user_name?: string;
+  status: "planned" | "in_progress" | "awaiting_verification" | "completed";
+  progress_notes?: string;
+  evidence_photo_urls?: string[] | any;
+  verification_status: "unverified" | "verified" | "rejected";
+  verified_by_user_id?: string;
+  verified_by_name?: string;
+  verified_at?: string;
+  verification_notes?: string;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface ProjectUpdate {
+  id: string;
+  project_id: string;
+  milestone_id?: string;
+  milestone_title?: string;
+  author_id: string;
+  author_name?: string;
+  title: string;
+  content: string;
+  photo_urls?: string[] | any;
+  progress_percentage?: number;
+  is_public: boolean;
+  created_at: string;
+}
+
+export interface PublicProjectFinancialSummary {
+  approved_budget_kobo: number;
+  allocated_funding_kobo: number;
+  recorded_expenditure_kobo: number;
+  available_balance_kobo: number;
+  funding_status: string;
+}
+
+export interface AdminProjectFinancialSummary {
+  proposed_budget_kobo: number;
+  approved_budget_kobo: number;
+  allocated_funding_kobo: number;
+  recorded_expenditure_kobo: number;
+  outstanding_commitments_kobo: number;
+  available_balance_kobo: number;
+  funding_status: string;
+}
+
+export interface PublicProjectResponse {
+  project: CommunityProject;
+  financial_summary: PublicProjectFinancialSummary;
+  milestones: ProjectMilestone[];
+  updates: ProjectUpdate[];
+}
+
+export interface AdminProjectDetailResponse {
+  project: CommunityProject;
+  financial_summary: AdminProjectFinancialSummary;
+  milestones: ProjectMilestone[];
+  updates: ProjectUpdate[];
+}
+
+export interface CommunityProjectsOverviewStats {
+  total_requests: number;
+  pending_requests: number;
+  approved_requests: number;
+  active_projects: number;
+  completed_projects: number;
+  total_approved_budget: number;
+  total_allocated_funding: number;
+  total_recorded_expenditure: number;
+}
+
+
