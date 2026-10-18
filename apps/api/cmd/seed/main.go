@@ -414,6 +414,11 @@ func SeedReferenceData(ctx context.Context, pool *pgxpool.Pool, q *db.Queries) e
 
 	log.Printf("Geographic reference data verified: %d zones, %d states/territories, %d LGAs / Area Councils.", zoneCount, stateCount, lgaCount)
 
+	// Seed baseline marketplace enterprise and products
+	if err := seedMarketplaceReferenceData(ctx, qtx); err != nil {
+		log.Printf("Warning: Marketplace seeding notice: %v\n", err)
+	}
+
 	if tx != nil {
 		if err := tx.Commit(ctx); err != nil {
 			return fmt.Errorf("failed to commit reference data transaction: %w", err)
@@ -421,6 +426,209 @@ func SeedReferenceData(ctx context.Context, pool *pgxpool.Pool, q *db.Queries) e
 		tx = nil
 	}
 
+	return nil
+}
+
+func seedMarketplaceReferenceData(ctx context.Context, qtx *db.Queries) error {
+	log.Println("Checking and populating baseline verified marketplace enterprise and products...")
+
+	// 1. Check if business already exists
+	bizSlug := "ratels-movement-merchandise"
+	existingBiz, err := qtx.GetMarketplaceBusinessBySlug(ctx, bizSlug)
+	if err == nil && existingBiz.ID != "" {
+		log.Println("Baseline marketplace store exists; preserving current inventory.")
+		return nil
+	}
+
+	// 2. Identify an administrative user to serve as default business owner
+	var ownerID string
+	superAdmin, err := qtx.GetUserByEmail(ctx, "superadmin@ratels.org.ng")
+	if err == nil && superAdmin.ID != "" {
+		ownerID = superAdmin.ID
+	} else {
+		users, err := qtx.ListUsers(ctx, db.ListUsersParams{Limit: 1, Offset: 0})
+		if err == nil && len(users) > 0 {
+			ownerID = users[0].ID
+		}
+	}
+
+	if ownerID == "" {
+		log.Println("Notice: No user account found yet; skipping initial marketplace merchandise seeding.")
+		return nil
+	}
+
+	// 3. Find FCT and Lagos States
+	fctState, err := qtx.GetStateByCode(ctx, "FC")
+	if err != nil {
+		log.Printf("Notice: FCT state not found (%v); skipping marketplace branches.", err)
+		return nil
+	}
+	lagosState, err := qtx.GetStateByCode(ctx, "LA")
+	if err != nil {
+		log.Printf("Notice: Lagos state not found (%v); skipping marketplace branches.", err)
+		return nil
+	}
+
+	// 4. Create Business
+	bizID := security.GenerateUUID()
+	biz, err := qtx.CreateMarketplaceBusiness(ctx, db.CreateMarketplaceBusinessParams{
+		ID:                      bizID,
+		OwnerUserID:             ownerID,
+		Name:                    "Ratels Movement Commercial & Sanitation Supplies",
+		Slug:                    bizSlug,
+		Description:             "Official verified commercial outlet and logistics enterprise of the Nigerian Ratels Movement. Supplies field gear, protective kits, and community sanitation tools.",
+		Category:                "sanitation_supplies",
+		OwnershipType:           "movement_owned",
+		Status:                  "approved",
+		ContactEmail:            "marketplace@ratels.org.ng",
+		ContactPhone:            "+23480000RATEL",
+		LogoUrl:                 text("/images/ratels-logo.png"),
+		BannerUrl:               text("/images/marketplace-banner.jpg"),
+		SettlementBankName:      text("Access Bank Plc"),
+		SettlementAccountNumber: text("0123456789"),
+		SettlementAccountName:   text("Ratels Movement Commercial"),
+		IsVerified:              true,
+		VerifiedByUserID:        text(ownerID),
+		VerifiedAt:              timestamptz(time.Now()),
+	})
+	if err != nil {
+		return fmt.Errorf("failed to create baseline marketplace business: %w", err)
+	}
+	log.Printf("Marketplace business created: %s (%s)\n", biz.Name, biz.ID)
+
+	// 5. Create Branches
+	br1ID := security.GenerateUUID()
+	_, _ = qtx.CreateBusinessBranch(ctx, db.CreateBusinessBranchParams{
+		ID:             br1ID,
+		BusinessID:     biz.ID,
+		BranchName:     "Abuja National Logistics Hub (HQ)",
+		StateID:        fctState.ID,
+		LgaID:          text(""),
+		Address:        "Plot 101 Central Business District, Abuja, FCT",
+		ContactPhone:   "+2348000000001",
+		ManagerName:    text("National Warehouse Director"),
+		IsHeadquarters: true,
+		IsActive:       true,
+	})
+
+	br2ID := security.GenerateUUID()
+	_, _ = qtx.CreateBusinessBranch(ctx, db.CreateBusinessBranchParams{
+		ID:             br2ID,
+		BusinessID:     biz.ID,
+		BranchName:     "Lagos Zonal Distribution Center",
+		StateID:        lagosState.ID,
+		LgaID:          text(""),
+		Address:        "Plot 42 Commercial Avenue, Yaba, Lagos",
+		ContactPhone:   "+2348000000002",
+		ManagerName:    text("South West Logistics Manager"),
+		IsHeadquarters: false,
+		IsActive:       true,
+	})
+
+	// 6. Create Verified Products
+	type prodSpec struct {
+		title       string
+		slug        string
+		category    string
+		sku         string
+		priceKobo   int64
+		compKobo    int64
+		stock       int32
+		description string
+	}
+
+	prods := []prodSpec{
+		{
+			title:       "Ratels Official Movement T-Shirt",
+			slug:        "ratels-official-movement-tshirt",
+			category:    "apparel_merch",
+			sku:         "RAT-APP-TSHIRT-01",
+			priceKobo:   450000,
+			compKobo:    600000,
+			stock:       150,
+			description: "100% premium combed cotton t-shirt with official Nigerian Ratels emblem and reflective sleeve print.",
+		},
+		{
+			title:       "Ratels High-Visibility Safety Jacket",
+			slug:        "ratels-high-vis-safety-jacket",
+			category:    "safety_gear",
+			sku:         "RAT-PPE-VEST-01",
+			priceKobo:   650000,
+			compKobo:    800000,
+			stock:       80,
+			description: "EN ISO 20471 certified high-visibility reflective sanitation waistcoat with heavy-duty zipper and multi-pocket front.",
+		},
+		{
+			title:       "Heavy-Duty Environmental Sanitation Gloves (Pack of 12)",
+			slug:        "heavy-duty-sanitation-gloves-12pack",
+			category:    "sanitation_supplies",
+			sku:         "RAT-SAN-GLOV-12",
+			priceKobo:   300000,
+			compKobo:    400000,
+			stock:       200,
+			description: "Puncture and tear resistant rubberized work gloves for roadside, drainage, and market sanitation cleanups.",
+		},
+		{
+			title:       "Industrial Reinforced Waste Sacks (Roll of 50)",
+			slug:        "industrial-reinforced-waste-sacks-50",
+			category:    "sanitation_supplies",
+			sku:         "RAT-SAN-SACK-50",
+			priceKobo:   250000,
+			compKobo:    350000,
+			stock:       350,
+			description: "Heavy-gauge biodegradeable 100-liter waste bags designed for community cleanups and bulk refuse sorting.",
+		},
+		{
+			title:       "Grassroots Sanitation Steel Rake & Hoe Set",
+			slug:        "grassroots-sanitation-steel-rake-hoe-set",
+			category:    "tools_hardware",
+			sku:         "RAT-TLS-RAKEHOE-01",
+			priceKobo:   800000,
+			compKobo:    1000000,
+			stock:       60,
+			description: "Hardened carbon steel dual-tool set for clearing silt, choked gutters, and dense roadside vegetation.",
+		},
+		{
+			title:       "Community First Aid Trauma Kit",
+			slug:        "community-first-aid-trauma-kit",
+			category:    "health_firstaid",
+			sku:         "RAT-MED-FAID-01",
+			priceKobo:   1200000,
+			compKobo:    1500000,
+			stock:       40,
+			description: "Comprehensive emergency trauma kit equipped with sterile bandages, antiseptic, burn gel, and splints.",
+		},
+	}
+
+	for _, ps := range prods {
+		compPrice := pgtype.Int8{Int64: ps.compKobo, Valid: true}
+		imagesJSON := []byte(`["/images/placeholder-product.png"]`)
+		_, err = qtx.CreateMarketplaceProduct(ctx, db.CreateMarketplaceProductParams{
+			ID:                   security.GenerateUUID(),
+			BusinessID:           biz.ID,
+			BranchID:             text(br1ID),
+			Title:                ps.title,
+			Slug:                 ps.slug,
+			Description:          ps.description,
+			Category:             ps.category,
+			Sku:                  ps.sku,
+			PriceKobo:            ps.priceKobo,
+			CompareAtPriceKobo:   compPrice,
+			StockQuantity:        ps.stock,
+			LowStockThreshold:    5,
+			Images:               imagesJSON,
+			WeightGrams:          pgtype.Int4{Int32: 500, Valid: true},
+			DeliveryRestrictions: text("Nationwide delivery across all 36 States and the FCT"),
+			ReturnPolicy:         text("7-day return policy for unopened and unused sanitation gear"),
+			Status:               "published",
+			IsFeatured:           true,
+		})
+		if err != nil {
+			return fmt.Errorf("failed to create product %s: %w", ps.title, err)
+		}
+	}
+
+	log.Printf("Successfully seeded %d baseline marketplace products under %s.\n", len(prods), biz.Name)
 	return nil
 }
 

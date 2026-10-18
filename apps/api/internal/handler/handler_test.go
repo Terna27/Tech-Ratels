@@ -16,25 +16,27 @@ import (
 	"ratels-api/internal/config"
 	"ratels-api/internal/delivery"
 	"ratels-api/internal/handler"
+	"ratels-api/internal/payment"
 	"ratels-api/internal/repository"
 	"ratels-api/internal/service"
 )
 
 type TestHarness struct {
-	Router         http.Handler
-	Pool           *pgxpool.Pool
-	Repo           *repository.Repository
-	Config         *config.Config
-	Delivery       *delivery.DevSafeDeliveryAdapter
-	AuthService    *service.AuthService
-	LeadService    *service.LeadershipService
-	CleanupService *service.CleanupService
-	PartService    *service.ParticipationService
-	FoundService   *service.FoundationService
-	GeoService     *service.GeographyService
-	AdminService   *service.AdminService
+	Router           http.Handler
+	Pool             *pgxpool.Pool
+	Repo             *repository.Repository
+	Config           *config.Config
+	Delivery         *delivery.DevSafeDeliveryAdapter
+	AuthService      *service.AuthService
+	LeadService      *service.LeadershipService
+	CleanupService   *service.CleanupService
+	PartService      *service.ParticipationService
+	FoundService     *service.FoundationService
+	GeoService       *service.GeographyService
+	AdminService     *service.AdminService
 	FinanceService   *service.FinanceService
 	InventoryService *service.InventoryService
+	MarketplaceService *service.MarketplaceService
 	Cleanup          func()
 }
 
@@ -66,6 +68,8 @@ func setupTestHarness(t *testing.T) *TestHarness {
 	adminSvc := service.NewAdminService(repo)
 	financeSvc := service.NewFinanceService(repo, auditSvc)
 	inventorySvc := service.NewInventoryService(repo, auditSvc)
+	paymentGw := payment.NewSandboxGateway(cfg.FrontendBaseURL)
+	marketplaceSvc := service.NewMarketplaceService(repo, auditSvc, paymentGw)
 
 	healthH := handler.NewHealthHandler(repo)
 	authH := handler.NewAuthHandler(authSvc, cfg)
@@ -78,6 +82,7 @@ func setupTestHarness(t *testing.T) *TestHarness {
 	adminH := handler.NewAdminHandler(adminSvc)
 	financeH := handler.NewFinanceHandler(financeSvc)
 	inventoryH := handler.NewInventoryHandler(inventorySvc)
+	marketplaceH := handler.NewMarketplaceHandler(marketplaceSvc)
 
 	router := handler.NewRouter(handler.RouterParams{
 		Config:               cfg,
@@ -93,23 +98,25 @@ func setupTestHarness(t *testing.T) *TestHarness {
 		AdminHandler:         adminH,
 		FinanceHandler:       financeH,
 		InventoryHandler:     inventoryH,
+		MarketplaceHandler:   marketplaceH,
 	})
 
 	return &TestHarness{
-		Router:         router,
-		Pool:           pool,
-		Repo:           repo,
-		Config:         cfg,
-		Delivery:       del,
-		AuthService:    authSvc,
-		LeadService:    leadSvc,
-		CleanupService: cleanupSvc,
-		PartService:    partSvc,
-		FoundService:   foundSvc,
-		GeoService:     geoSvc,
-		AdminService:   adminSvc,
-		FinanceService: financeSvc,
+		Router:           router,
+		Pool:             pool,
+		Repo:             repo,
+		Config:           cfg,
+		Delivery:         del,
+		AuthService:      authSvc,
+		LeadService:      leadSvc,
+		CleanupService:   cleanupSvc,
+		PartService:      partSvc,
+		FoundService:     foundSvc,
+		GeoService:       geoSvc,
+		AdminService:     adminSvc,
+		FinanceService:   financeSvc,
 		InventoryService: inventorySvc,
+		MarketplaceService: marketplaceSvc,
 		Cleanup: func() {
 			pool.Close()
 		},

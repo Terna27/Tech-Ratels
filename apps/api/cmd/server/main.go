@@ -15,6 +15,7 @@ import (
 	"ratels-api/internal/config"
 	"ratels-api/internal/delivery"
 	"ratels-api/internal/handler"
+	"ratels-api/internal/migrator"
 	"ratels-api/internal/payment"
 	"ratels-api/internal/repository"
 	"ratels-api/internal/security"
@@ -50,6 +51,11 @@ func main() {
 		log.Fatalf("Database ping failed: %v\n", security.RedactError(err, cfg.DatabaseURL))
 	}
 	log.Println("PostgreSQL connection established successfully.")
+
+	// Execute any unapplied database migrations
+	if err := migrator.RunMigrations(ctx, pool); err != nil {
+		log.Fatalf("Database migration failed: %v\n", err)
+	}
 
 	repo := repository.NewRepository(pool)
 	isProduction := strings.ToLower(cfg.Environment) == "production" || strings.ToLower(os.Getenv("APP_ENV")) == "production"

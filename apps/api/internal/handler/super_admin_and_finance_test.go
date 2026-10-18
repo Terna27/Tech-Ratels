@@ -399,7 +399,11 @@ func TestFinancialStatement_ReconciliationAndCSV(t *testing.T) {
 	if stmt.ClosingBalance != expectedClosing {
 		t.Errorf("Balance reconciliation mismatch! Expected %d, got %d", expectedClosing, stmt.ClosingBalance)
 	}
-	if stmt.AvailableToSpend != stmt.CashBalance-stmt.Commitments {
+	expectedAvailable := stmt.CashBalance - stmt.Commitments
+	if expectedAvailable < 0 {
+		expectedAvailable = 0
+	}
+	if stmt.AvailableToSpend != expectedAvailable {
 		t.Errorf("AvailableToSpend mismatch! Cash (%d) - Commitments (%d) != Available (%d)", stmt.CashBalance, stmt.Commitments, stmt.AvailableToSpend)
 	}
 

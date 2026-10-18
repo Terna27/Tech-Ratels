@@ -913,7 +913,19 @@ func TestMarketplaceService_AdminRefundAndOverpaymentRejection(t *testing.T) {
 		t.Fatal("Expected error when refund amount exceeds total order amount, got nil")
 	}
 
-	// 2. Full refund processed
+	// 2. Partial refund processed (300,000 kobo of 1,000,000 kobo)
+	partialOrder, err := env.MarketplaceService.InitiateRefund(ctx, admin, orderRes.Order.ID, service.RefundOrderInput{
+		AmountKobo: 300000,
+		Reason:     "Partial goodwill concession",
+	})
+	if err != nil {
+		t.Fatalf("InitiateRefund (partial) failed: %v", err)
+	}
+	if partialOrder.PaymentStatus != "partially_refunded" {
+		t.Errorf("Expected payment_status 'partially_refunded', got %s", partialOrder.PaymentStatus)
+	}
+
+	// 3. Full refund processed
 	refundedOrder, err := env.MarketplaceService.InitiateRefund(ctx, admin, orderRes.Order.ID, service.RefundOrderInput{
 		AmountKobo: 1000000,
 		Reason:     "Defective batch recalled",

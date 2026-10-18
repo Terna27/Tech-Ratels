@@ -1516,7 +1516,7 @@ func (s *MarketplaceService) InitiateRefund(ctx context.Context, admin *db.User,
 		return nil, ErrOrderNotFound
 	}
 
-	if order.PaymentStatus != "paid" {
+	if order.PaymentStatus != "paid" && order.PaymentStatus != "partially_refunded" {
 		return nil, fmt.Errorf("cannot refund an order with payment status '%s'", order.PaymentStatus)
 	}
 
