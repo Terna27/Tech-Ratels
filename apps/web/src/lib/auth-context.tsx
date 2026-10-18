@@ -55,21 +55,44 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     }
   };
 
-  const isSuperAdmin = Boolean(user && user.primary_role === "super_admin");
+  const isSuperAdmin = Boolean(
+    user && (
+      user.primary_role === "super_admin" ||
+      user.appointments?.some((a) => a.status === "active" && a.role_type === "super_admin")
+    )
+  );
 
   const isAdmin = Boolean(
-    user && (user.primary_role === "national_admin" || user.primary_role === "super_admin")
+    user && (
+      user.primary_role === "national_admin" ||
+      user.primary_role === "super_admin" ||
+      user.appointments?.some(
+        (a) => a.status === "active" && (a.role_type === "national_admin" || a.role_type === "super_admin")
+      )
+    )
   );
 
   const isCoordinator = Boolean(
-    user &&
+    user && (
       [
         "super_admin",
         "national_admin",
         "zonal_coordinator",
         "state_coordinator",
         "lga_representative",
-      ].includes(user.primary_role)
+      ].includes(user.primary_role) ||
+      user.appointments?.some(
+        (a) =>
+          a.status === "active" &&
+          [
+            "super_admin",
+            "national_admin",
+            "zonal_coordinator",
+            "state_coordinator",
+            "lga_representative",
+          ].includes(a.role_type)
+      )
+    )
   );
 
   return (

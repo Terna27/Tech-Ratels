@@ -2,13 +2,13 @@
 SELECT * FROM users WHERE id = $1;
 
 -- name: GetUserByEmail :one
-SELECT * FROM users WHERE email = $1;
+SELECT * FROM users WHERE LOWER(TRIM(email)) = LOWER(TRIM(@email::text));
 
 -- name: GetUserByPhone :one
-SELECT * FROM users WHERE phone = $1;
+SELECT * FROM users WHERE phone = @phone::text;
 
 -- name: GetUserByMembershipReference :one
-SELECT * FROM users WHERE membership_reference = $1;
+SELECT * FROM users WHERE UPPER(TRIM(membership_reference)) = UPPER(TRIM(@membership_reference::text));
 
 -- name: CreateUser :one
 INSERT INTO users (

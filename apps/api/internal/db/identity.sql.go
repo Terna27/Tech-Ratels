@@ -347,10 +347,10 @@ func (q *Queries) GetMemberProfileByUserID(ctx context.Context, userID string) (
 }
 
 const getUserByEmail = `-- name: GetUserByEmail :one
-SELECT id, email, phone, password_hash, display_name, membership_reference, status, primary_role, is_verified, created_at, updated_at, version FROM users WHERE email = $1
+SELECT id, email, phone, password_hash, display_name, membership_reference, status, primary_role, is_verified, created_at, updated_at, version FROM users WHERE LOWER(TRIM(email)) = LOWER(TRIM($1::text))
 `
 
-func (q *Queries) GetUserByEmail(ctx context.Context, email pgtype.Text) (User, error) {
+func (q *Queries) GetUserByEmail(ctx context.Context, email string) (User, error) {
 	row := q.db.QueryRow(ctx, getUserByEmail, email)
 	var i User
 	err := row.Scan(
@@ -395,7 +395,7 @@ func (q *Queries) GetUserByID(ctx context.Context, id string) (User, error) {
 }
 
 const getUserByMembershipReference = `-- name: GetUserByMembershipReference :one
-SELECT id, email, phone, password_hash, display_name, membership_reference, status, primary_role, is_verified, created_at, updated_at, version FROM users WHERE membership_reference = $1
+SELECT id, email, phone, password_hash, display_name, membership_reference, status, primary_role, is_verified, created_at, updated_at, version FROM users WHERE UPPER(TRIM(membership_reference)) = UPPER(TRIM($1::text))
 `
 
 func (q *Queries) GetUserByMembershipReference(ctx context.Context, membershipReference string) (User, error) {
@@ -419,10 +419,10 @@ func (q *Queries) GetUserByMembershipReference(ctx context.Context, membershipRe
 }
 
 const getUserByPhone = `-- name: GetUserByPhone :one
-SELECT id, email, phone, password_hash, display_name, membership_reference, status, primary_role, is_verified, created_at, updated_at, version FROM users WHERE phone = $1
+SELECT id, email, phone, password_hash, display_name, membership_reference, status, primary_role, is_verified, created_at, updated_at, version FROM users WHERE phone = $1::text
 `
 
-func (q *Queries) GetUserByPhone(ctx context.Context, phone pgtype.Text) (User, error) {
+func (q *Queries) GetUserByPhone(ctx context.Context, phone string) (User, error) {
 	row := q.db.QueryRow(ctx, getUserByPhone, phone)
 	var i User
 	err := row.Scan(

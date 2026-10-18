@@ -144,7 +144,7 @@ func (s *AuthService) Register(ctx context.Context, req RegisterRequest) (*Regis
 
 	// Check existing user: Avoid revealing whether an email is already registered (anti-enumeration)
 	if email != "" {
-		if existing, _ := s.repo.Queries().GetUserByEmail(ctx, TextFromString(email)); existing.ID != "" {
+		if existing, _ := s.repo.Queries().GetUserByEmail(ctx, email); existing.ID != "" {
 			if existing.IsVerified && existing.Status == "active" {
 				return &RegisterResponse{
 					UserID:              existing.ID,
@@ -201,7 +201,7 @@ func (s *AuthService) Register(ctx context.Context, req RegisterRequest) (*Regis
 		}
 	}
 	if phone != "" {
-		if existing, _ := s.repo.Queries().GetUserByPhone(ctx, TextFromString(phone)); existing.ID != "" {
+		if existing, _ := s.repo.Queries().GetUserByPhone(ctx, phone); existing.ID != "" {
 			return nil, ErrUserAlreadyExists
 		}
 	}
@@ -521,7 +521,7 @@ func (s *AuthService) ResendVerificationEmail(ctx context.Context, email, ip str
 		return nil, err
 	}
 
-	user, err := s.repo.Queries().GetUserByEmail(ctx, TextFromString(email))
+	user, err := s.repo.Queries().GetUserByEmail(ctx, email)
 	if err != nil || user.ID == "" {
 		// Neutral response: Do not disclose whether email exists (anti-enumeration)
 		return &ResendVerificationResponse{
@@ -586,10 +586,32 @@ func (s *AuthService) Login(ctx context.Context, req LoginRequest, ip, userAgent
 
 	if strings.Contains(username, "@") {
 		email := strings.ToLower(username)
-		user, err = s.repo.Queries().GetUserByEmail(ctx, TextFromString(email))
+		user, err = s.repo.Queries().GetUserByEmail(ctx, email)
+		// Check alias between example.org and org.ng for seamless demo logins
+		if err != nil || user.ID == "" {
+			if strings.HasSuffix(email, "@ratels.example.org") {
+				altEmail := strings.TrimSuffix(email, "@ratels.example.org") + "@ratels.org.ng"
+				user, err = s.repo.Queries().GetUserByEmail(ctx, altEmail)
+			} else if strings.HasSuffix(email, "@ratels.org.ng") {
+				altEmail := strings.TrimSuffix(email, "@ratels.org.ng") + "@ratels.example.org"
+				user, err = s.repo.Queries().GetUserByEmail(ctx, altEmail)
+			}
+		}
 	} else {
-		user, err = s.repo.Queries().GetUserByPhone(ctx, TextFromString(username))
-		if err != nil {
+		// Clean phone input (strip spaces, dashes)
+		cleanPhone := strings.ReplaceAll(strings.ReplaceAll(username, " ", ""), "-", "")
+		user, err = s.repo.Queries().GetUserByPhone(ctx, cleanPhone)
+		if (err != nil || user.ID == "") && strings.HasPrefix(cleanPhone, "+234") && len(cleanPhone) == 14 {
+			// Try 0-prefixed local format
+			localPhone := "0" + cleanPhone[4:]
+			user, err = s.repo.Queries().GetUserByPhone(ctx, localPhone)
+		} else if (err != nil || user.ID == "") && strings.HasPrefix(cleanPhone, "0") && len(cleanPhone) == 11 {
+			// Try +234-prefixed international format
+			intlPhone := "+234" + cleanPhone[1:]
+			user, err = s.repo.Queries().GetUserByPhone(ctx, intlPhone)
+		}
+		// If phone lookup still didn't find the user, try membership reference
+		if err != nil || user.ID == "" {
 			user, err = s.repo.Queries().GetUserByMembershipReference(ctx, username)
 		}
 	}
@@ -602,9 +624,36 @@ func (s *AuthService) Login(ctx context.Context, req LoginRequest, ip, userAgent
 		return nil, ErrInvalidCredentials
 	}
 
-	if user.Status == "pending_verification" || !user.IsVerified {
+	// Super Admin always passes verification requirement
+	if user.PrimaryRole == "super_admin" {
+		if !user.IsVerified || user.Status != "active" {
+			// Auto-heal super_admin in DB
+			_ = s.repo.WithTx(ctx, func(q *db.Queries) error {
+				_, uErr := q.UpdateUserStatus(ctx, db.UpdateUserStatusParams{
+					ID:         user.ID,
+					Status:     "active",
+					IsVerified: true,
+				})
+				return uErr
+			})
+			user.Status = "active"
+			user.IsVerified = true
+		}
+	} else if user.Status == "active" && !user.IsVerified {
+		// Existing active user from pre-verification era: auto-heal is_verified so they are not locked out
+		_ = s.repo.WithTx(ctx, func(q *db.Queries) error {
+			_, uErr := q.UpdateUserStatus(ctx, db.UpdateUserStatusParams{
+				ID:         user.ID,
+				Status:     "active",
+				IsVerified: true,
+			})
+			return uErr
+		})
+		user.IsVerified = true
+	} else if user.Status == "pending_verification" || !user.IsVerified {
 		return nil, ErrUserNotVerified
 	}
+
 	if user.Status != "active" {
 		return nil, ErrAccountInactive
 	}
@@ -615,13 +664,27 @@ func (s *AuthService) Login(ctx context.Context, req LoginRequest, ip, userAgent
 		return nil, fmt.Errorf("failed to generate token: %w", err)
 	}
 
+	// Clamp IP and User-Agent to prevent database column overflow
+	safeIP := strings.TrimSpace(ip)
+	if idx := strings.Index(safeIP, ","); idx != -1 {
+		safeIP = strings.TrimSpace(safeIP[:idx])
+	}
+	if len(safeIP) > 45 {
+		safeIP = safeIP[:45]
+	}
+
+	safeUA := strings.TrimSpace(userAgent)
+	if len(safeUA) > 255 {
+		safeUA = safeUA[:255]
+	}
+
 	_, err = s.repo.Queries().CreateUserSession(ctx, db.CreateUserSessionParams{
 		ID:        security.GenerateUUID(),
 		UserID:    user.ID,
 		TokenJti:  jti,
 		ExpiresAt: TimestamptzFromTime(expiresAt),
-		IpAddress: TextFromString(ip),
-		UserAgent: TextFromString(userAgent),
+		IpAddress: TextFromString(safeIP),
+		UserAgent: TextFromString(safeUA),
 	})
 	if err != nil {
 		return nil, fmt.Errorf("failed to record user session: %w", err)

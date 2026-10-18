@@ -29,20 +29,28 @@ function LoginForm() {
     setLoading(true);
 
     try {
+      const trimmedIdentifier = identifier.trim();
       const data = await apiRequest<TokenResponse>("/auth/login", {
         method: "POST",
-        body: JSON.stringify({ username: identifier, identifier, password }),
+        body: JSON.stringify({ username: trimmedIdentifier, identifier: trimmedIdentifier, password }),
       });
 
       login(data.user, (data as any).csrf_token);
 
-      if (redirect) {
-        router.push(redirect);
-      } else if (
+      const hasPrivilegedRole =
         ["super_admin", "national_admin", "zonal_coordinator", "state_coordinator", "lga_representative"].includes(
           data.user.primary_role
-        )
-      ) {
+        ) ||
+        Boolean(
+          data.user.appointments?.some((a) =>
+            a.status === "active" &&
+            ["super_admin", "national_admin", "zonal_coordinator", "state_coordinator", "lga_representative"].includes(a.role_type)
+          )
+        );
+
+      if (redirect) {
+        router.push(redirect);
+      } else if (hasPrivilegedRole) {
         router.push("/admin");
       } else {
         router.push("/member");

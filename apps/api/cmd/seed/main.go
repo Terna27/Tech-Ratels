@@ -461,7 +461,7 @@ func SeedDemoAccounts(ctx context.Context, pool *pgxpool.Pool, q *db.Queries) er
 
 	// 1. National Admin (Reserved domain)
 	adminEmail := "admin@ratels.example.org"
-	adminUser, err := qtx.GetUserByEmail(ctx, text(adminEmail))
+	adminUser, err := qtx.GetUserByEmail(ctx, adminEmail)
 	if errors.Is(err, pgx.ErrNoRows) || adminUser.ID == "" {
 		pwHash, err := security.HashPassword(adminPass)
 		if err != nil {
@@ -539,7 +539,7 @@ func SeedDemoAccounts(ctx context.Context, pool *pgxpool.Pool, q *db.Queries) er
 	}
 
 	coordEmail := "lagos_coord@ratels.example.org"
-	coordUser, err := qtx.GetUserByEmail(ctx, text(coordEmail))
+	coordUser, err := qtx.GetUserByEmail(ctx, coordEmail)
 	if errors.Is(err, pgx.ErrNoRows) || coordUser.ID == "" {
 		pwHash, err := security.HashPassword(coordPass)
 		if err != nil {
@@ -598,7 +598,7 @@ func SeedDemoAccounts(ctx context.Context, pool *pgxpool.Pool, q *db.Queries) er
 
 	// 3. Sample Member
 	memberEmail := "member1@ratels.example.org"
-	memberUser, err := qtx.GetUserByEmail(ctx, text(memberEmail))
+	memberUser, err := qtx.GetUserByEmail(ctx, memberEmail)
 	if errors.Is(err, pgx.ErrNoRows) || memberUser.ID == "" {
 		pwHash, err := security.HashPassword(memberPass)
 		if err != nil {

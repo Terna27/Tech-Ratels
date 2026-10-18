@@ -84,12 +84,12 @@ func main() {
 	}
 
 	// Check if user already exists
-	existing, _ := queries.GetUserByEmail(ctx, text(email))
+	existing, _ := queries.GetUserByEmail(ctx, email)
 	if existing.ID != "" {
 		if *promoteFlag && *superAdminFlag {
 			// Migration / Promotion procedure: Promote existing user to Super Admin without resetting password
 			now := time.Now()
-			_, err := pool.Exec(ctx, "UPDATE users SET primary_role = 'super_admin', updated_at = CURRENT_TIMESTAMP WHERE id = $1", existing.ID)
+			_, err := pool.Exec(ctx, "UPDATE users SET primary_role = 'super_admin', status = 'active', is_verified = true, updated_at = CURRENT_TIMESTAMP WHERE id = $1", existing.ID)
 			if err != nil {
 				log.Fatalf("Failed to promote user: %v\n", err)
 			}

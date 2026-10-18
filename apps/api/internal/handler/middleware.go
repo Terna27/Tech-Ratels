@@ -55,9 +55,9 @@ func AuthMiddleware(cfg *config.Config, repo *repository.Repository) func(http.H
 				return
 			}
 
-			// Fetch user (verifying account is active and verified)
+			// Fetch user (verifying account is active)
 			user, err := repo.Queries().GetUserByID(r.Context(), claims.UserID)
-			if err != nil || user.ID == "" || user.Status != "active" || !user.IsVerified {
+			if err != nil || user.ID == "" || user.Status != "active" {
 				next.ServeHTTP(w, r)
 				return
 			}

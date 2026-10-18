@@ -262,7 +262,7 @@ func TestSeedDemoAccounts_Idempotent(t *testing.T) {
 		t.Fatalf("SeedDemoAccounts failed on initial run: %v", err)
 	}
 
-	adminUser, err := q.GetUserByEmail(ctx, text("admin@ratels.example.org"))
+	adminUser, err := q.GetUserByEmail(ctx, "admin@ratels.example.org")
 	if err != nil || adminUser.ID == "" {
 		t.Fatalf("admin@ratels.example.org not found after seed: %v", err)
 	}
@@ -272,7 +272,7 @@ func TestSeedDemoAccounts_Idempotent(t *testing.T) {
 		t.Fatalf("SeedDemoAccounts failed on second run: %v", err)
 	}
 
-	adminUserSecond, err := q.GetUserByEmail(ctx, text("admin@ratels.example.org"))
+	adminUserSecond, err := q.GetUserByEmail(ctx, "admin@ratels.example.org")
 	if err != nil {
 		t.Fatalf("failed to query admin user after second seed: %v", err)
 	}

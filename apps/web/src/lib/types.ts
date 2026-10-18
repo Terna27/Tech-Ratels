@@ -9,6 +9,7 @@ export interface User {
   is_verified: boolean;
   created_at: string;
   profile?: MemberProfile;
+  appointments?: Appointment[];
 }
 
 export interface TokenResponse {

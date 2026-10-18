@@ -149,7 +149,11 @@ func (h *AuthHandler) Login(w http.ResponseWriter, r *http.Request) {
 			ErrorJSON(w, http.StatusForbidden, "ACCOUNT_INACTIVE", err.Error(), nil)
 			return
 		}
-		ErrorJSON(w, http.StatusUnauthorized, "INVALID_CREDENTIALS", "Invalid email or password", nil)
+		if err == service.ErrInvalidCredentials {
+			ErrorJSON(w, http.StatusUnauthorized, "INVALID_CREDENTIALS", "Invalid email or password", nil)
+			return
+		}
+		ErrorJSON(w, http.StatusInternalServerError, "INTERNAL_ERROR", "An unexpected error occurred during login. Please try again.", nil)
 		return
 	}
 
