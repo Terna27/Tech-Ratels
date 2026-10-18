@@ -1,0 +1,102 @@
+-- name: CreateParticipationClaim :one
+INSERT INTO participation_claims (
+    id, event_id, user_id, description, evidence_notes, status, submitted_at,
+    created_at, updated_at, version
+) VALUES (
+    $1, $2, $3, $4, $5, 'pending', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, 1
+) RETURNING *;
+
+-- name: GetParticipationClaimByID :one
+SELECT * FROM participation_claims
+WHERE id = $1;
+
+-- name: GetParticipationClaimByEventAndUser :one
+SELECT * FROM participation_claims
+WHERE event_id = $1 AND user_id = $2;
+
+-- name: ListPendingClaims :many
+SELECT c.*, e.title as event_title, e.state_id, s.name as state_name, u.display_name as user_name
+FROM participation_claims c
+JOIN event_instances e ON c.event_id = e.id
+JOIN states s ON e.state_id = s.id
+JOIN users u ON c.user_id = u.id
+WHERE c.status = 'pending'
+ORDER BY c.submitted_at ASC;
+
+-- name: ListPendingClaimsByState :many
+SELECT c.*, e.title as event_title, e.state_id, s.name as state_name, u.display_name as user_name
+FROM participation_claims c
+JOIN event_instances e ON c.event_id = e.id
+JOIN states s ON e.state_id = s.id
+JOIN users u ON c.user_id = u.id
+WHERE c.status = 'pending' AND e.state_id = $1
+ORDER BY c.submitted_at ASC;
+
+-- name: ReviewParticipationClaim :one
+UPDATE participation_claims
+SET status = $2, reviewed_by_user_id = $3, review_decision = $4, review_reason = $5,
+    reviewed_at = CURRENT_TIMESTAMP, updated_at = CURRENT_TIMESTAMP
+WHERE id = $1
+RETURNING *;
+
+-- name: CreateParticipationAppeal :one
+INSERT INTO participation_appeals (
+    id, participation_id, appeal_reason, status, appealed_at,
+    created_at, updated_at, version
+) VALUES (
+    $1, $2, $3, 'pending', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, 1
+) RETURNING *;
+
+-- name: GetParticipationAppealByID :one
+SELECT * FROM participation_appeals
+WHERE id = $1;
+
+-- name: ListClaimsByUser :many
+SELECT c.*, e.title as event_title, e.start_time as event_start_time, s.name as state_name
+FROM participation_claims c
+JOIN event_instances e ON c.event_id = e.id
+JOIN states s ON e.state_id = s.id
+WHERE c.user_id = $1
+ORDER BY c.submitted_at DESC;
+
+-- name: CreateBadge :one
+INSERT INTO badges (
+    id, code, name, description, rule_version, created_at, updated_at, version
+) VALUES (
+    $1, $2, $3, $4, $5, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, 1
+) RETURNING *;
+
+-- name: GetBadgeByCode :one
+SELECT * FROM badges
+WHERE code = $1;
+
+-- name: ListBadges :many
+SELECT * FROM badges
+ORDER BY name;
+
+-- name: CreateBadgeAward :one
+INSERT INTO badge_awards (
+    id, user_id, badge_id, qualifying_participation_id, awarded_at, is_public,
+    created_at, updated_at, version
+) VALUES (
+    $1, $2, $3, $4, CURRENT_TIMESTAMP, $5, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, 1
+) RETURNING *;
+
+-- name: GetBadgeAward :one
+SELECT * FROM badge_awards
+WHERE user_id = $1 AND badge_id = $2;
+
+-- name: ListBadgeAwardsByUser :many
+SELECT a.*, b.code as badge_code, b.name as badge_name, b.description as badge_description
+FROM badge_awards a
+JOIN badges b ON a.badge_id = b.id
+WHERE a.user_id = $1
+ORDER BY a.awarded_at DESC;
+
+-- name: CountVerifiedParticipationsByUser :one
+SELECT COUNT(*) FROM participation_claims
+WHERE user_id = $1 AND status = 'verified';
+
+-- name: CountPendingClaims :one
+SELECT COUNT(*) FROM participation_claims
+WHERE status = 'pending';

@@ -1,0 +1,144 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  --background: #f9fafb;
+  --foreground: #111827;
+}
+
+body {
+  color: var(--foreground);
+  background: var(--background);
+  font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Oxygen, Ubuntu, Cantarell, "Open Sans", "Helvetica Neue", sans-serif;
+  -webkit-font-smoothing: antialiased;
+}
+
+@layer base {
+  /* Paragraph typography tokens: Desktop 18px (1.125rem), Mobile >= 17px (1.0625rem), line-height ~1.6 */
+  p, .body-paragraph {
+    font-size: 1.0625rem; /* 17px on mobile */
+    line-height: 1.625;
+  }
+  @media (min-width: 768px) {
+    p, .body-paragraph {
+      font-size: 1.125rem; /* 18px on desktop */
+      line-height: 1.625;
+    }
+  }
+
+  /* Microcopy, badges, timestamps, table cells, form labels remain distinct and proportional */
+  .text-meta {
+    font-size: 0.875rem;
+    line-height: 1.4;
+  }
+}
+
+/* Accessible focus outlines */
+*:focus-visible {
+  outline: 2px solid #059669;
+  outline-offset: 2px;
+}
+
+/* Custom scrollbars */
+::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+
+::-webkit-scrollbar-track {
+  background: #f1f5f9;
+}
+
+::-webkit-scrollbar-thumb {
+  background: #cbd5e1;
+  border-radius: 4px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: #94a3b8;
+}
+
+/* Print Stylesheet for Financial Records, Statements, and Vouchers */
+@media print {
+  @page {
+    size: A4 portrait;
+    margin: 1.5cm;
+  }
+
+  /* Hide navigation, buttons, interactive elements, flash alerts, and action headers */
+  nav,
+  header,
+  aside,
+  footer,
+  .no-print,
+  button,
+  .btn,
+  input,
+  select,
+  [role="dialog"] .modal-backdrop {
+    display: none !important;
+  }
+
+  /* Clean print background and text */
+  body, main {
+    background: #ffffff !important;
+    color: #000000 !important;
+    font-size: 10pt !important;
+    line-height: 1.35 !important;
+    padding: 0 !important;
+    margin: 0 !important;
+  }
+
+  /* Printable container expansion */
+  .print-container {
+    width: 100% !important;
+    max-width: 100% !important;
+    margin: 0 !important;
+    padding: 0 !important;
+    box-shadow: none !important;
+    border: none !important;
+  }
+
+  /* Table print optimization: repeated headers, prevent page breaks inside rows */
+  table {
+    width: 100% !important;
+    border-collapse: collapse !important;
+    page-break-inside: auto;
+  }
+
+  thead {
+    display: table-header-group; /* Repeat headers across printed pages */
+  }
+
+  tr {
+    page-break-inside: avoid;
+    page-break-after: auto;
+  }
+
+  th, td {
+    border: 1px solid #d1d5db !important;
+    padding: 5pt 7pt !important;
+    color: #111827 !important;
+    font-size: 9.5pt !important;
+  }
+
+  /* Print header display */
+  .print-only {
+    display: block !important;
+  }
+
+  /* Ensure card borders look clean and unshadowed in print */
+  .card, .print-card {
+    border: 1px solid #e5e7eb !important;
+    box-shadow: none !important;
+    page-break-inside: avoid;
+    margin-bottom: 12pt !important;
+  }
+}
+
+@media screen {
+  .print-only {
+    display: none !important;
+  }
+}

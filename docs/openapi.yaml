@@ -1,0 +1,396 @@
+openapi: 3.0.3
+info:
+  title: Nigerian Ratels Management System API
+  description: >
+    Production-grade Go backend API for the Nigerian Ratels movement,
+    managing geography, identity, leadership appointments, monthly cleanups,
+    participation claims with anti-self-approval safeguards, badge awards,
+    foundation governance, and audit trails.
+  version: 1.0.0
+servers:
+  - url: http://127.0.0.1:8000/api/v1
+    description: Local Development Server
+paths:
+  /health:
+    get:
+      summary: System Health Check
+      responses:
+        '200':
+          description: Health status of API and PostgreSQL database
+  /auth/register:
+    post:
+      summary: Register Volunteer Member
+      description: Strictly assigns primary role 'member'. Dispatches OTP via dev-safe delivery adapter.
+      responses:
+        '201':
+          description: Registration initiated
+        '403':
+          description: Role selection forbidden
+        '409':
+          description: User already exists
+  /auth/verify-contact:
+    post:
+      summary: Verify Contact with OTP
+      responses:
+        '200':
+          description: Contact verified and account activated
+        '400':
+          description: Invalid or expired code
+  /auth/login:
+    post:
+      summary: User Login
+      responses:
+        '200':
+          description: JWT Access Token and User Profile
+        '401':
+          description: Invalid credentials
+        '403':
+          description: Account pending verification
+  /auth/logout:
+    post:
+      summary: Logout Session
+      security:
+        - BearerAuth: []
+      responses:
+        '200':
+          description: Session invalidated
+  /members/me:
+    get:
+      summary: Current Member Profile
+      security:
+        - BearerAuth: []
+      responses:
+        '200':
+          description: Member details, active appointments, and badges
+    put:
+      summary: Update Member Profile
+      security:
+        - BearerAuth: []
+      responses:
+        '200':
+          description: Updated profile
+  /geography/zones:
+    get:
+      summary: List 6 Geopolitical Zones
+      responses:
+        '200':
+          description: Zones and state summaries
+  /geography/states:
+    get:
+      summary: List 36 States and FCT
+      responses:
+        '200':
+          description: States including territory flag and capital city
+  /geography/states/{id}/lgas:
+    get:
+      summary: List LGAs or Area Councils for a State
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: LGAs under state
+  /leadership/directory:
+    get:
+      summary: Public Approved Leadership Directory
+      responses:
+        '200':
+          description: Active leadership directory
+  /leadership/appointments:
+    get:
+      summary: List All Appointments (Admin)
+      security:
+        - BearerAuth: []
+      responses:
+        '200':
+          description: Appointments list
+    post:
+      summary: Create Leadership Appointment (Super Admin for State/Zonal)
+      security:
+        - BearerAuth: []
+      responses:
+        '201':
+          description: Appointment created
+        '403':
+          description: Super Admin required for zonal and state coordinators
+  /leadership/appointments/{id}/replace:
+    post:
+      summary: Replace Coordinator with New Appointee (Super Admin Only)
+      description: Replaces current appointment holder, logs history, sets effective date, and transfers privileges.
+      security:
+        - BearerAuth: []
+      responses:
+        '201':
+          description: Replacement appointment created and old appointment marked replaced
+        '403':
+          description: Forbidden - Super Admin authority required
+  /leadership/appointments/{id}/scope-dates:
+    put:
+      summary: Modify Jurisdiction Scope or Term Dates (Super Admin Only)
+      security:
+        - BearerAuth: []
+      responses:
+        '200':
+          description: Scope and dates updated
+        '403':
+          description: Super Admin required
+  /leadership/appointments/{id}/history:
+    get:
+      summary: Chronological Appointment Audit History
+      description: Returns previous holder, new holder, effective date, reason, and acting Super Admin.
+      security:
+        - BearerAuth: []
+      responses:
+        '200':
+          description: List of appointment history records
+  /finance/funds:
+    get:
+      summary: List Segregated Financial Funds
+      security:
+        - BearerAuth: []
+      responses:
+        '200':
+          description: List of supported funds
+        '403':
+          description: Financial access clearance required
+  /finance/transactions:
+    get:
+      summary: Filter & List Fund Movements
+      security:
+        - BearerAuth: []
+      responses:
+        '200':
+          description: Filtered transactions
+        '403':
+          description: Financial clearance required
+    post:
+      summary: Record Fund Movement (Idempotent Double-Entry)
+      security:
+        - BearerAuth: []
+      responses:
+        '201':
+          description: Transaction recorded
+  /finance/transactions/{id}:
+    get:
+      summary: Get Transaction Details with Ledger Entries
+      security:
+        - BearerAuth: []
+      responses:
+        '200':
+          description: Transaction with double-entry lines
+  /finance/transactions/{id}/approve:
+    post:
+      summary: Approve & Post Transaction (Super Admin Only)
+      security:
+        - BearerAuth: []
+      responses:
+        '200':
+          description: Transaction posted to general ledger
+        '403':
+          description: Super Admin authority strictly required
+  /finance/transactions/{id}/reverse:
+    post:
+      summary: Reverse Posted Transaction (Super Admin Only)
+      description: Creates linked reversal transaction with inverted entries. Posted records are never deleted.
+      security:
+        - BearerAuth: []
+      responses:
+        '200':
+          description: Linked reversal posted
+        '403':
+          description: Super Admin authority strictly required
+  /finance/statement:
+    get:
+      summary: Generate Reconciled Financial Statement
+      description: Calculates opening balance, inflows, outflows, fees, closing balance, cash, commitments, and available-to-spend.
+      security:
+        - BearerAuth: []
+      responses:
+        '200':
+          description: Reconciled statement response
+  /finance/export:
+    get:
+      summary: Export Transactions to CSV
+      security:
+        - BearerAuth: []
+      responses:
+        '200':
+          description: CSV file download
+  /finance/authorizations:
+    get:
+      summary: List Staff Financial Clearances (Super Admin Only)
+      security:
+        - BearerAuth: []
+      responses:
+        '200':
+          description: List of authorizations
+    post:
+      summary: Authorize Staff for Financial Viewing (Super Admin Only)
+      security:
+        - BearerAuth: []
+      responses:
+        '201':
+          description: Clearance granted
+  /finance/authorizations/{id}:
+    delete:
+      summary: Revoke Staff Financial Clearance (Super Admin Only)
+      security:
+        - BearerAuth: []
+      responses:
+        '200':
+          description: Clearance revoked
+  /activities/campaigns/current:
+    get:
+      summary: Current Monthly Cleanup Campaign
+      description: Computes last Saturday of month in Africa/Lagos timezone
+      responses:
+        '200':
+          description: Monthly campaign details
+  /activities/events:
+    get:
+      summary: List Published Activities & Venues
+      responses:
+        '200':
+          description: List of venues
+    post:
+      summary: Create Activity Venue
+      security:
+        - BearerAuth: []
+      responses:
+        '201':
+          description: Venue created
+  /activities/events/{id}/publish:
+    post:
+      summary: Publish Venue (Coordinator/Admin)
+      security:
+        - BearerAuth: []
+      responses:
+        '200':
+          description: Venue published
+  /activities/events/{id}/reschedule:
+    post:
+      summary: Reschedule Venue
+      security:
+        - BearerAuth: []
+      responses:
+        '200':
+          description: Rescheduled venue with preserved history
+  /activities/events/{id}/register:
+    post:
+      summary: Register for Cleanup Venue
+      security:
+        - BearerAuth: []
+      responses:
+        '200':
+          description: Registered with capacity check
+        '409':
+          description: Capacity full or already registered
+  /activities/events/{id}/cancel-registration:
+    post:
+      summary: Cancel Registration
+      security:
+        - BearerAuth: []
+      responses:
+        '200':
+          description: Registration cancelled
+  /participations/claims:
+    post:
+      summary: Submit Cleanup Participation Claim
+      security:
+        - BearerAuth: []
+      responses:
+        '201':
+          description: Claim submitted
+        '409':
+          description: Duplicate claim
+  /participations/review-queue:
+    get:
+      summary: List Pending Review Queue (Scoped)
+      security:
+        - BearerAuth: []
+      responses:
+        '200':
+          description: Claims pending review
+  /participations/claims/{id}/review:
+    post:
+      summary: Review Participation Claim
+      description: Enforces strict ANTI-SELF-APPROVAL rule and awards First Participation badge on 1st verified cleanup.
+      security:
+        - BearerAuth: []
+      responses:
+        '200':
+          description: Claim reviewed
+        '403':
+          description: Anti-self-approval violation
+  /participations/claims/{id}/appeal:
+    post:
+      summary: Submit Participation Appeal
+      security:
+        - BearerAuth: []
+      responses:
+        '201':
+          description: Appeal submitted
+  /participations/my-badges:
+    get:
+      summary: List User Awarded Badges
+      security:
+        - BearerAuth: []
+      responses:
+        '200':
+          description: Awarded badges
+  /foundation:
+    get:
+      summary: Foundation Information (Public)
+      description: Returns provisional name and masked accounts; live donations disabled in Phase 1.
+      responses:
+        '200':
+          description: Foundation details
+  /foundation/bank-accounts:
+    get:
+      summary: List Bank Accounts (Admin)
+      security:
+        - BearerAuth: []
+      responses:
+        '200':
+          description: Bank accounts
+    post:
+      summary: Submit Bank Account Draft
+      security:
+        - BearerAuth: []
+      responses:
+        '201':
+          description: Bank account draft created
+  /foundation/bank-accounts/{id}/verify:
+    post:
+      summary: Sign Off Bank Account (Dual-Officer)
+      security:
+        - BearerAuth: []
+      responses:
+        '200':
+          description: Account verification signed
+  /admin/overview:
+    get:
+      summary: Admin Dashboard Overview Metrics
+      description: Returns real database-derived counts
+      security:
+        - BearerAuth: []
+      responses:
+        '200':
+          description: Overview metrics
+  /admin/audit-logs:
+    get:
+      summary: List Audit History
+      security:
+        - BearerAuth: []
+      responses:
+        '200':
+          description: Audit logs
+components:
+  securitySchemes:
+    BearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
