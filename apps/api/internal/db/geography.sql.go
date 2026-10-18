@@ -7,6 +7,8 @@ package db
 
 import (
 	"context"
+
+	"github.com/jackc/pgx/v5/pgtype"
 )
 
 const countLGAs = `-- name: CountLGAs :one
@@ -169,6 +171,15 @@ func (q *Queries) CreateZone(ctx context.Context, arg CreateZoneParams) (Zone, e
 	return i, err
 }
 
+const deleteLGA = `-- name: DeleteLGA :exec
+DELETE FROM lgas WHERE id = $1
+`
+
+func (q *Queries) DeleteLGA(ctx context.Context, id string) error {
+	_, err := q.db.Exec(ctx, deleteLGA, id)
+	return err
+}
+
 const getCapitalCityByState = `-- name: GetCapitalCityByState :one
 SELECT id, state_id, name, created_at, updated_at, version FROM capital_cities WHERE state_id = $1 LIMIT 1
 `
@@ -193,6 +204,32 @@ SELECT id, state_id, name, is_area_council, source_reference, revision_date, cre
 
 func (q *Queries) GetLGAByID(ctx context.Context, id string) (Lga, error) {
 	row := q.db.QueryRow(ctx, getLGAByID, id)
+	var i Lga
+	err := row.Scan(
+		&i.ID,
+		&i.StateID,
+		&i.Name,
+		&i.IsAreaCouncil,
+		&i.SourceReference,
+		&i.RevisionDate,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+		&i.Version,
+	)
+	return i, err
+}
+
+const getLGAByStateAndName = `-- name: GetLGAByStateAndName :one
+SELECT id, state_id, name, is_area_council, source_reference, revision_date, created_at, updated_at, version FROM lgas WHERE state_id = $1 AND LOWER(name) = LOWER($2) LIMIT 1
+`
+
+type GetLGAByStateAndNameParams struct {
+	StateID string `json:"state_id"`
+	Lower   string `json:"lower"`
+}
+
+func (q *Queries) GetLGAByStateAndName(ctx context.Context, arg GetLGAByStateAndNameParams) (Lga, error) {
+	row := q.db.QueryRow(ctx, getLGAByStateAndName, arg.StateID, arg.Lower)
 	var i Lga
 	err := row.Scan(
 		&i.ID,
@@ -241,6 +278,24 @@ func (q *Queries) GetStateByID(ctx context.Context, id string) (State, error) {
 		&i.Code,
 		&i.Name,
 		&i.IsFct,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+		&i.Version,
+	)
+	return i, err
+}
+
+const getZoneByCode = `-- name: GetZoneByCode :one
+SELECT id, code, name, created_at, updated_at, version FROM zones WHERE code = $1 LIMIT 1
+`
+
+func (q *Queries) GetZoneByCode(ctx context.Context, code string) (Zone, error) {
+	row := q.db.QueryRow(ctx, getZoneByCode, code)
+	var i Zone
+	err := row.Scan(
+		&i.ID,
+		&i.Code,
+		&i.Name,
 		&i.CreatedAt,
 		&i.UpdatedAt,
 		&i.Version,
@@ -395,4 +450,145 @@ func (q *Queries) ListZones(ctx context.Context) ([]Zone, error) {
 		return nil, err
 	}
 	return items, nil
+}
+
+const remapEventInstanceLGA = `-- name: RemapEventInstanceLGA :exec
+UPDATE event_instances SET lga_id = $1 WHERE lga_id = $2
+`
+
+type RemapEventInstanceLGAParams struct {
+	NewLgaID string `json:"new_lga_id"`
+	OldLgaID string `json:"old_lga_id"`
+}
+
+func (q *Queries) RemapEventInstanceLGA(ctx context.Context, arg RemapEventInstanceLGAParams) error {
+	_, err := q.db.Exec(ctx, remapEventInstanceLGA, arg.NewLgaID, arg.OldLgaID)
+	return err
+}
+
+const remapMemberProfileLGA = `-- name: RemapMemberProfileLGA :exec
+UPDATE member_profiles SET home_lga_id = $1 WHERE home_lga_id = $2
+`
+
+type RemapMemberProfileLGAParams struct {
+	NewLgaID pgtype.Text `json:"new_lga_id"`
+	OldLgaID pgtype.Text `json:"old_lga_id"`
+}
+
+func (q *Queries) RemapMemberProfileLGA(ctx context.Context, arg RemapMemberProfileLGAParams) error {
+	_, err := q.db.Exec(ctx, remapMemberProfileLGA, arg.NewLgaID, arg.OldLgaID)
+	return err
+}
+
+const updateCapitalCity = `-- name: UpdateCapitalCity :one
+UPDATE capital_cities SET name = $2, updated_at = CURRENT_TIMESTAMP WHERE id = $1 RETURNING id, state_id, name, created_at, updated_at, version
+`
+
+type UpdateCapitalCityParams struct {
+	ID   string `json:"id"`
+	Name string `json:"name"`
+}
+
+func (q *Queries) UpdateCapitalCity(ctx context.Context, arg UpdateCapitalCityParams) (CapitalCity, error) {
+	row := q.db.QueryRow(ctx, updateCapitalCity, arg.ID, arg.Name)
+	var i CapitalCity
+	err := row.Scan(
+		&i.ID,
+		&i.StateID,
+		&i.Name,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+		&i.Version,
+	)
+	return i, err
+}
+
+const updateLGA = `-- name: UpdateLGA :one
+UPDATE lgas SET name = $2, is_area_council = $3, source_reference = $4, revision_date = $5, updated_at = CURRENT_TIMESTAMP WHERE id = $1 RETURNING id, state_id, name, is_area_council, source_reference, revision_date, created_at, updated_at, version
+`
+
+type UpdateLGAParams struct {
+	ID              string `json:"id"`
+	Name            string `json:"name"`
+	IsAreaCouncil   bool   `json:"is_area_council"`
+	SourceReference string `json:"source_reference"`
+	RevisionDate    string `json:"revision_date"`
+}
+
+func (q *Queries) UpdateLGA(ctx context.Context, arg UpdateLGAParams) (Lga, error) {
+	row := q.db.QueryRow(ctx, updateLGA,
+		arg.ID,
+		arg.Name,
+		arg.IsAreaCouncil,
+		arg.SourceReference,
+		arg.RevisionDate,
+	)
+	var i Lga
+	err := row.Scan(
+		&i.ID,
+		&i.StateID,
+		&i.Name,
+		&i.IsAreaCouncil,
+		&i.SourceReference,
+		&i.RevisionDate,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+		&i.Version,
+	)
+	return i, err
+}
+
+const updateState = `-- name: UpdateState :one
+UPDATE states SET zone_id = $2, name = $3, is_fct = $4, updated_at = CURRENT_TIMESTAMP WHERE id = $1 RETURNING id, zone_id, code, name, is_fct, created_at, updated_at, version
+`
+
+type UpdateStateParams struct {
+	ID     string `json:"id"`
+	ZoneID string `json:"zone_id"`
+	Name   string `json:"name"`
+	IsFct  bool   `json:"is_fct"`
+}
+
+func (q *Queries) UpdateState(ctx context.Context, arg UpdateStateParams) (State, error) {
+	row := q.db.QueryRow(ctx, updateState,
+		arg.ID,
+		arg.ZoneID,
+		arg.Name,
+		arg.IsFct,
+	)
+	var i State
+	err := row.Scan(
+		&i.ID,
+		&i.ZoneID,
+		&i.Code,
+		&i.Name,
+		&i.IsFct,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+		&i.Version,
+	)
+	return i, err
+}
+
+const updateZone = `-- name: UpdateZone :one
+UPDATE zones SET name = $2, updated_at = CURRENT_TIMESTAMP WHERE id = $1 RETURNING id, code, name, created_at, updated_at, version
+`
+
+type UpdateZoneParams struct {
+	ID   string `json:"id"`
+	Name string `json:"name"`
+}
+
+func (q *Queries) UpdateZone(ctx context.Context, arg UpdateZoneParams) (Zone, error) {
+	row := q.db.QueryRow(ctx, updateZone, arg.ID, arg.Name)
+	var i Zone
+	err := row.Scan(
+		&i.ID,
+		&i.Code,
+		&i.Name,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+		&i.Version,
+	)
+	return i, err
 }

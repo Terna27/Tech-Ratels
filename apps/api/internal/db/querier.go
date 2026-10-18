@@ -54,6 +54,7 @@ type Querier interface {
 	CreateUserSession(ctx context.Context, arg CreateUserSessionParams) (UserSession, error)
 	CreateZone(ctx context.Context, arg CreateZoneParams) (Zone, error)
 	DecrementRegisteredCount(ctx context.Context, id string) (EventInstance, error)
+	DeleteLGA(ctx context.Context, id string) error
 	GetActiveAppointmentByJurisdiction(ctx context.Context, arg GetActiveAppointmentByJurisdictionParams) (Appointment, error)
 	GetActiveFinancialAuthorization(ctx context.Context, userID string) (FinancialAuthorization, error)
 	GetActiveVerification(ctx context.Context, arg GetActiveVerificationParams) (ContactVerification, error)
@@ -74,6 +75,7 @@ type Querier interface {
 	GetFinancialTransactionByReference(ctx context.Context, reference string) (FinancialTransaction, error)
 	GetFoundationEntity(ctx context.Context) (FoundationEntity, error)
 	GetLGAByID(ctx context.Context, id string) (Lga, error)
+	GetLGAByStateAndName(ctx context.Context, arg GetLGAByStateAndNameParams) (Lga, error)
 	GetMemberProfileByUserID(ctx context.Context, userID string) (MemberProfile, error)
 	GetParticipationAppealByID(ctx context.Context, id string) (ParticipationAppeal, error)
 	GetParticipationClaimByEventAndUser(ctx context.Context, arg GetParticipationClaimByEventAndUserParams) (ParticipationClaim, error)
@@ -86,6 +88,7 @@ type Querier interface {
 	GetUserByPhone(ctx context.Context, phone pgtype.Text) (User, error)
 	GetUserSession(ctx context.Context, tokenJti string) (UserSession, error)
 	GetVerificationRateLimit(ctx context.Context, arg GetVerificationRateLimitParams) (EmailVerificationRateLimit, error)
+	GetZoneByCode(ctx context.Context, code string) (Zone, error)
 	GetZoneByID(ctx context.Context, id string) (Zone, error)
 	IncrementRegisteredCount(ctx context.Context, id string) (EventInstance, error)
 	IncrementVerificationAttempt(ctx context.Context, id string) (ContactVerification, error)
@@ -120,6 +123,8 @@ type Querier interface {
 	ListZones(ctx context.Context) ([]Zone, error)
 	MarkEmailVerificationTokenUsed(ctx context.Context, id string) (EmailVerificationToken, error)
 	MarkVerificationUsed(ctx context.Context, id string) (ContactVerification, error)
+	RemapEventInstanceLGA(ctx context.Context, arg RemapEventInstanceLGAParams) error
+	RemapMemberProfileLGA(ctx context.Context, arg RemapMemberProfileLGAParams) error
 	RescheduleEvent(ctx context.Context, arg RescheduleEventParams) (EventInstance, error)
 	ResetVerificationRateLimit(ctx context.Context, arg ResetVerificationRateLimitParams) (EmailVerificationRateLimit, error)
 	ReviewParticipationClaim(ctx context.Context, arg ReviewParticipationClaimParams) (ParticipationClaim, error)
@@ -129,13 +134,17 @@ type Querier interface {
 	UpdateAppointmentScopeAndDates(ctx context.Context, arg UpdateAppointmentScopeAndDatesParams) (Appointment, error)
 	UpdateAppointmentStatus(ctx context.Context, arg UpdateAppointmentStatusParams) (Appointment, error)
 	UpdateBankAccountVerification(ctx context.Context, arg UpdateBankAccountVerificationParams) (VerifiedBankAccountVersion, error)
+	UpdateCapitalCity(ctx context.Context, arg UpdateCapitalCityParams) (CapitalCity, error)
 	UpdateEventRegistrationStatus(ctx context.Context, arg UpdateEventRegistrationStatusParams) (EventRegistration, error)
 	UpdateEventStatus(ctx context.Context, arg UpdateEventStatusParams) (EventInstance, error)
 	UpdateFinancialTransactionStatus(ctx context.Context, arg UpdateFinancialTransactionStatusParams) (FinancialTransaction, error)
 	UpdateFoundationEntity(ctx context.Context, arg UpdateFoundationEntityParams) (FoundationEntity, error)
+	UpdateLGA(ctx context.Context, arg UpdateLGAParams) (Lga, error)
 	UpdateMemberProfile(ctx context.Context, arg UpdateMemberProfileParams) (MemberProfile, error)
+	UpdateState(ctx context.Context, arg UpdateStateParams) (State, error)
 	UpdateUserPassword(ctx context.Context, arg UpdateUserPasswordParams) (User, error)
 	UpdateUserStatus(ctx context.Context, arg UpdateUserStatusParams) (User, error)
+	UpdateZone(ctx context.Context, arg UpdateZoneParams) (Zone, error)
 	UpsertVerificationRateLimit(ctx context.Context, arg UpsertVerificationRateLimitParams) (EmailVerificationRateLimit, error)
 }
 
