@@ -2,7 +2,7 @@
 // Browser session tokens are strictly stored in HttpOnly cookies (never in sessionStorage or localStorage).
 // In the browser, client-side requests target the same-origin Next.js reverse proxy (/api/v1).
 
-class ApiError extends Error {
+export class ApiError extends Error {
   code: string;
   details: Record<string, any>;
   status: number;
@@ -12,6 +12,7 @@ class ApiError extends Error {
     this.status = status;
     this.code = code;
     this.details = details;
+    this.name = "ApiError";
   }
 }
 
@@ -78,28 +79,73 @@ export async function apiRequest<T = any>(
     url = `${base}${cleanEndpoint}`;
   }
 
-  const res = await fetch(url, {
-    ...options,
-    credentials: options.credentials || "same-origin",
-    headers,
-  });
+  let res: Response;
+  try {
+    res = await fetch(url, {
+      ...options,
+      credentials: options.credentials || "same-origin",
+      headers,
+    });
+  } catch (netErr: any) {
+    throw new ApiError(
+      503,
+      "NETWORK_ERROR",
+      "Unable to connect to server. Please check your internet connection or try again in a few moments.",
+      { originalError: netErr?.message }
+    );
+  }
 
   if (!res.ok) {
     let errCode = "UNKNOWN_ERROR";
     let errMsg = `Request failed with status ${res.status}`;
-    let errDetails = {};
+    let errDetails: Record<string, any> = {};
 
     try {
-      const errJson = await res.json();
-      if (errJson.error) {
-        errCode = errJson.error.code || errCode;
-        errMsg = errJson.error.message || errMsg;
-        errDetails = errJson.error.details || {};
-      } else if (errJson.detail) {
-        errMsg = typeof errJson.detail === "string" ? errJson.detail : JSON.stringify(errJson.detail);
+      const contentType = res.headers.get("content-type") || "";
+      if (contentType.includes("application/json")) {
+        const errJson = await res.json();
+        if (errJson && typeof errJson === "object") {
+          if (errJson.error) {
+            errCode = errJson.error.code || errCode;
+            errMsg = errJson.error.message || errMsg;
+            errDetails = errJson.error.details || {};
+          } else if (errJson.detail) {
+            errMsg = typeof errJson.detail === "string" ? errJson.detail : JSON.stringify(errJson.detail);
+          } else if (errJson.message) {
+            errMsg = errJson.message;
+          }
+        }
+      } else {
+        // Non-JSON response (e.g. 502 Bad Gateway / 503 / 504 HTML error page)
+        if (res.status === 502) {
+          errCode = "BAD_GATEWAY";
+          errMsg = "Service temporarily unavailable (502 Bad Gateway). The backend server may be restarting or deploying. Please wait a moment and try again.";
+        } else if (res.status === 503) {
+          errCode = "SERVICE_UNAVAILABLE";
+          errMsg = "Service temporarily unavailable (503 Service Unavailable). Please wait a moment and try again.";
+        } else if (res.status === 504) {
+          errCode = "GATEWAY_TIMEOUT";
+          errMsg = "Gateway timeout (504). The server took too long to respond. Please try again shortly.";
+        } else if (res.status >= 500) {
+          errCode = "SERVER_ERROR";
+          errMsg = `Server error (${res.status}). The service is temporarily unable to process your request. Please try again shortly.`;
+        }
       }
     } catch {
-      // Non-JSON response
+      // JSON parse error or response stream closed
+      if (res.status === 502) {
+        errCode = "BAD_GATEWAY";
+        errMsg = "Service temporarily unavailable (502 Bad Gateway). The backend server may be restarting or deploying. Please wait a moment and try again.";
+      } else if (res.status === 503) {
+        errCode = "SERVICE_UNAVAILABLE";
+        errMsg = "Service temporarily unavailable (503 Service Unavailable). Please wait a moment and try again.";
+      } else if (res.status === 504) {
+        errCode = "GATEWAY_TIMEOUT";
+        errMsg = "Gateway timeout (504). The server took too long to respond. Please try again shortly.";
+      } else if (res.status >= 500) {
+        errCode = "SERVER_ERROR";
+        errMsg = `Server error (${res.status}). The service is temporarily unable to process your request. Please try again shortly.`;
+      }
     }
 
     throw new ApiError(res.status, errCode, errMsg, errDetails);

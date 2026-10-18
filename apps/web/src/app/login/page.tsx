@@ -56,15 +56,74 @@ function LoginForm() {
         router.push("/member");
       }
     } catch (err: any) {
-      const msg = err.message || "Invalid login credentials. Please check and try again.";
-      setError(msg);
-      if (
-        msg.toLowerCase().includes("pending") ||
-        msg.toLowerCase().includes("verification") ||
-        msg.toLowerCase().includes("unverified")
-      ) {
-        setIsUnverified(true);
+      const status = typeof err?.status === "number" ? err.status : 0;
+      const code = typeof err?.code === "string" ? err.code : "";
+      const rawMsg = typeof err?.message === "string" ? err.message : "";
+
+      // 1. Gateway & Infrastructure Errors (502 Bad Gateway, Cloudflare, Next.js rewrite proxy timeout)
+      if (status === 502 || code === "BAD_GATEWAY" || rawMsg.includes("502") || rawMsg.toLowerCase().includes("bad gateway")) {
+        setError(
+          "Service temporarily unavailable (502 Bad Gateway). The backend server is restarting or unreachable. Please wait a moment and try again."
+        );
+        return;
       }
+
+      // 2. Service Unavailable, Gateway Timeout, or Network Drops (503, 504, connection refused)
+      if (
+        status === 503 ||
+        status === 504 ||
+        code === "SERVICE_UNAVAILABLE" ||
+        code === "GATEWAY_TIMEOUT" ||
+        code === "NETWORK_ERROR" ||
+        rawMsg.toLowerCase().includes("failed to fetch") ||
+        rawMsg.toLowerCase().includes("network")
+      ) {
+        setError(
+          rawMsg || "Authentication service is temporarily unavailable. Please wait a moment and try again."
+        );
+        return;
+      }
+
+      // 3. Other Internal Server Errors (500)
+      if (status >= 500 || code === "SERVER_ERROR") {
+        setError(
+          "An unexpected server error occurred. Please try again in a few moments."
+        );
+        return;
+      }
+
+      // 4. Rate Limiting (429)
+      if (status === 429 || code === "RATE_LIMIT_EXCEEDED") {
+        setError(rawMsg || "Too many login attempts. Please wait a few minutes before trying again.");
+        return;
+      }
+
+      // 5. Account Unverified (403)
+      if (
+        (status === 403 && code === "USER_UNVERIFIED") ||
+        rawMsg.toLowerCase().includes("pending") ||
+        rawMsg.toLowerCase().includes("verification") ||
+        rawMsg.toLowerCase().includes("unverified")
+      ) {
+        setError(rawMsg || "Your account email is unverified. Please check your inbox or request a new verification link.");
+        setIsUnverified(true);
+        return;
+      }
+
+      // 6. Account Inactive or Suspended (403)
+      if (status === 403 && (code === "ACCOUNT_INACTIVE" || rawMsg.toLowerCase().includes("inactive"))) {
+        setError("Your account is currently inactive. Please contact support or your coordinator.");
+        return;
+      }
+
+      // 7. Genuine Authentication Failure (Strictly HTTP 401 or INVALID_CREDENTIALS)
+      if (status === 401 || code === "INVALID_CREDENTIALS") {
+        setError("Invalid email or password. Please check your credentials and try again.");
+        return;
+      }
+
+      // 8. Safe Fallback - NEVER display "Invalid email or password" unless status was 401
+      setError(rawMsg || "Unable to complete login. Please check your connection and try again.");
     } finally {
       setLoading(false);
     }
