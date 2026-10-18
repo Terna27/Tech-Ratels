@@ -15,14 +15,27 @@ import {
   Sparkles,
 } from "lucide-react";
 import { apiRequest } from "@/lib/api";
-import { EventInstance, PublicLeader } from "@/lib/types";
+import { EventInstance, PublicLeader, HeroMedia, ActiveHeroMediaResponse } from "@/lib/types";
 import { Badge } from "@/components/ui/Badge";
 import { Alert } from "@/components/ui/Alert";
 
 export default function HomePage() {
   const [featuredEvent, setFeaturedEvent] = useState<EventInstance | null>(null);
   const [leaders, setLeaders] = useState<PublicLeader[]>([]);
+  const [heroMedia, setHeroMedia] = useState<HeroMedia | null>(null);
+  const [videoPlaybackError, setVideoPlaybackError] = useState(false);
+  const [reducedMotion, setReducedMotion] = useState(false);
   const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    if (typeof window !== "undefined") {
+      const mediaQuery = window.matchMedia("(prefers-reduced-motion: reduce)");
+      setReducedMotion(mediaQuery.matches);
+      const listener = (e: MediaQueryListEvent) => setReducedMotion(e.matches);
+      mediaQuery.addEventListener?.("change", listener);
+      return () => mediaQuery.removeEventListener?.("change", listener);
+    }
+  }, []);
 
   useEffect(() => {
     async function loadData() {
@@ -34,6 +47,14 @@ export default function HomePage() {
         const dir = await apiRequest<PublicLeader[]>("/leadership/directory");
         if (dir) {
           setLeaders(dir.slice(0, 4));
+        }
+        try {
+          const heroRes = await apiRequest<ActiveHeroMediaResponse>("/homepage/hero-media");
+          if (heroRes?.active && heroRes.media) {
+            setHeroMedia(heroRes.media);
+          }
+        } catch (_) {
+          // Graceful fallback to default green gradient
         }
       } catch (err) {
         console.error("Failed to load initial data", err);
@@ -47,8 +68,41 @@ export default function HomePage() {
   return (
     <div className="space-y-12 pb-16">
       {/* Hero Section */}
-      <section className="bg-gradient-to-b from-emerald-950 via-emerald-900 to-gray-900 text-white pt-16 pb-20 px-4 sm:px-6 lg:px-8 border-b border-emerald-800">
-        <div className="max-w-5xl mx-auto text-center space-y-6">
+      <section className="relative bg-gradient-to-b from-emerald-950 via-emerald-900 to-gray-900 text-white pt-16 pb-20 px-4 sm:px-6 lg:px-8 border-b border-emerald-800 overflow-hidden">
+        {/* Dynamic HTML5 Video Background (Admin-managed via Cloudflare R2) */}
+        {heroMedia && !reducedMotion && (
+          <div className="absolute inset-0 z-0 overflow-hidden pointer-events-none" aria-hidden="true">
+            <video
+              autoPlay
+              muted
+              loop
+              playsInline
+              preload="metadata"
+              poster={heroMedia.poster_url || undefined}
+              onError={() => setVideoPlaybackError(true)}
+              className={`w-full h-full object-cover object-center transition-opacity duration-500 ${
+                videoPlaybackError ? "opacity-0" : "opacity-100"
+              }`}
+            >
+              <source src={heroMedia.video_url} type={heroMedia.content_type || "video/mp4"} />
+            </video>
+            {/* Dark overlay for contrast and WCAG readability */}
+            <div className="absolute inset-0 bg-gradient-to-b from-black/70 via-black/55 to-black/85" />
+          </div>
+        )}
+
+        {/* Static poster fallback for reduced motion preference */}
+        {reducedMotion && heroMedia?.poster_url && (
+          <div
+            className="absolute inset-0 z-0 bg-cover bg-center pointer-events-none"
+            style={{ backgroundImage: `url(${heroMedia.poster_url})` }}
+            aria-hidden="true"
+          >
+            <div className="absolute inset-0 bg-gradient-to-b from-black/70 via-black/55 to-black/85" />
+          </div>
+        )}
+
+        <div className="relative z-10 max-w-5xl mx-auto text-center space-y-6">
           <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-emerald-800/80 border border-emerald-700 text-emerald-200 text-xs font-semibold">
             <Sparkles className="w-3.5 h-3.5 text-emerald-300" />
             <span>National Movement Platform • Phase 1 Operational Foundation</span>

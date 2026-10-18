@@ -26,6 +26,7 @@ type RouterParams struct {
 	InventoryHandler     *InventoryHandler
 	MarketplaceHandler   *MarketplaceHandler
 	CareersHandler       *CareersHandler
+	HeroMediaHandler     *HeroMediaHandler
 }
 
 func NewRouter(p RouterParams) http.Handler {
@@ -304,10 +305,28 @@ func NewRouter(p RouterParams) http.Handler {
 			})
 		})
 
+		// Homepage Media (Public)
+		api.Route("/homepage", func(home chi.Router) {
+			home.Get("/hero-media", p.HeroMediaHandler.GetActiveHeroMedia)
+		})
+
 		// Admin Workspace
 		api.Route("/admin", func(adm chi.Router) {
 			adm.With(RequireRole("national_admin", "state_coordinator", "zonal_coordinator", "lga_representative")).Get("/overview", p.AdminHandler.GetOverview)
 			adm.With(RequireRole("national_admin")).Get("/audit-logs", p.AdminHandler.ListAuditLogs)
+
+			// Homepage Hero Media Administration (Super Admin & National Admin)
+			adm.Route("/hero-media", func(admHero chi.Router) {
+				admHero.Use(RequireRole("national_admin", "super_admin"))
+				admHero.Get("/", p.HeroMediaHandler.ListHeroMedia)
+				admHero.Post("/presign", p.HeroMediaHandler.AuthorizeHeroMediaUpload)
+				admHero.Post("/upload", p.HeroMediaHandler.UploadHeroMediaDirect)
+				admHero.Post("/publish", p.HeroMediaHandler.PublishHeroMedia)
+				admHero.Post("/{id}/publish", p.HeroMediaHandler.PublishHeroMedia)
+				admHero.Patch("/toggle", p.HeroMediaHandler.ToggleHeroMedia)
+				admHero.Post("/{id}/poster", p.HeroMediaHandler.UploadHeroPoster)
+				admHero.Delete("/{id}", p.HeroMediaHandler.DeleteHeroMedia)
+			})
 		})
 	})
 

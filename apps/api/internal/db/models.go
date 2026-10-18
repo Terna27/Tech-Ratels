@@ -417,6 +417,25 @@ type FoundationEntity struct {
 	Version             int32              `json:"version"`
 }
 
+type HomepageHeroMedium struct {
+	ID                string             `json:"id"`
+	Title             string             `json:"title"`
+	VideoKey          string             `json:"video_key"`
+	VideoUrl          string             `json:"video_url"`
+	PosterKey         pgtype.Text        `json:"poster_key"`
+	PosterUrl         pgtype.Text        `json:"poster_url"`
+	ContentType       string             `json:"content_type"`
+	FileSizeBytes     int64              `json:"file_size_bytes"`
+	DurationSeconds   pgtype.Numeric     `json:"duration_seconds"`
+	IsActive          bool               `json:"is_active"`
+	CreatedByUserID   string             `json:"created_by_user_id"`
+	PublishedByUserID pgtype.Text        `json:"published_by_user_id"`
+	CreatedAt         pgtype.Timestamptz `json:"created_at"`
+	PublishedAt       pgtype.Timestamptz `json:"published_at"`
+	UpdatedAt         pgtype.Timestamptz `json:"updated_at"`
+	Version           int32              `json:"version"`
+}
+
 type InventoryItem struct {
 	ID                   string             `json:"id"`
 	Sku                  string             `json:"sku"`

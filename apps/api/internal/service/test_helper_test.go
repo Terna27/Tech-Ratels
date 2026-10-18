@@ -11,6 +11,7 @@ import (
 	"ratels-api/internal/payment"
 	"ratels-api/internal/repository"
 	"ratels-api/internal/service"
+	"ratels-api/internal/storage"
 )
 
 type TestEnv struct {
@@ -30,6 +31,7 @@ type TestEnv struct {
 	InventoryService *service.InventoryService
 	MarketplaceService *service.MarketplaceService
 	CareersService     *service.CareersService
+	HeroMediaService   *service.HeroMediaService
 }
 
 func setupTestEnv(t *testing.T) *TestEnv {
@@ -63,6 +65,8 @@ func setupTestEnv(t *testing.T) *TestEnv {
 	sandboxGateway := payment.NewSandboxGateway(cfg.FrontendBaseURL)
 	mktSvc := service.NewMarketplaceService(repo, auditSvc, sandboxGateway)
 	careersSvc := service.NewCareersService(repo, auditSvc, del)
+	mockStorage := storage.NewDevSandboxStorageService("http://localhost:3000")
+	heroSvc := service.NewHeroMediaService(repo, auditSvc, mockStorage)
 
 	return &TestEnv{
 		Pool:               pool,
@@ -81,5 +85,6 @@ func setupTestEnv(t *testing.T) *TestEnv {
 		InventoryService:   invSvc,
 		MarketplaceService: mktSvc,
 		CareersService:     careersSvc,
+		HeroMediaService:   heroSvc,
 	}
 }

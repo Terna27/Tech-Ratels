@@ -1050,3 +1050,47 @@ export function parseProductImages(raw: any): string[] {
 
   return [];
 }
+
+// -------------------------------------------------------------
+// Homepage Hero Media Types
+// -------------------------------------------------------------
+
+export interface HeroMedia {
+  id: string;
+  title: string;
+  video_key: string;
+  video_url: string;
+  poster_key?: string;
+  poster_url?: string;
+  content_type: string;
+  file_size_bytes: number;
+  duration_seconds?: number;
+  is_active: boolean;
+  created_by_user_id: string;
+  published_by_user_id?: string;
+  published_at?: string;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface ActiveHeroMediaResponse {
+  active: boolean;
+  media: HeroMedia | null;
+}
+
+export interface PresignedHeroUploadResponse {
+  id: string;
+  upload_url: string;
+  object_key: string;
+  public_url: string;
+  content_type: string;
+  file_size_bytes: number;
+  expires_in_seconds: number;
+}
+
+export interface ToggleHeroMediaResponse {
+  active: boolean;
+  message: string;
+  media?: HeroMedia;
+}
+

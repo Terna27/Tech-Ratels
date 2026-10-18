@@ -138,8 +138,12 @@ func main() {
 		storageService = r2
 		log.Printf("Marketplace image storage initialized via Cloudflare R2 (bucket: %s, domain: %s)\n", cfg.R2BucketName, r2.GetPublicURL(""))
 	} else if !isProduction {
-		storageService = storage.NewDevSandboxStorageService(cfg.FrontendBaseURL)
-		log.Println("Marketplace image storage running in development safe sandbox mode (in-memory mock).")
+		storageDomain := cfg.R2PublicDomain
+		if storageDomain == "" {
+			storageDomain = "https://pub-82990f82f02446b5a11817fdce96912d.r2.dev"
+		}
+		storageService = storage.NewDevSandboxStorageService(storageDomain)
+		log.Println("Media storage running in development safe sandbox mode (in-memory mock).")
 	} else {
 		storageService = storage.NewUnconfiguredStorageService()
 		log.Println("WARNING: Marketplace image storage is UNCONFIGURED in production. Image uploads will return 503 until R2 credentials are configured.")
@@ -147,6 +151,7 @@ func main() {
 
 	marketplaceService := service.NewMarketplaceService(repo, auditService, paymentGateway, storageService)
 	careersService := service.NewCareersService(repo, auditService, emailDelivery)
+	heroMediaService := service.NewHeroMediaService(repo, auditService, storageService)
 
 	// Handlers
 	healthH := handler.NewHealthHandler(repo)
@@ -162,6 +167,7 @@ func main() {
 	inventoryH := handler.NewInventoryHandler(inventoryService)
 	marketplaceH := handler.NewMarketplaceHandler(marketplaceService)
 	careersH := handler.NewCareersHandler(careersService)
+	heroMediaH := handler.NewHeroMediaHandler(heroMediaService)
 
 	router := handler.NewRouter(handler.RouterParams{
 		Config:               cfg,
@@ -179,6 +185,7 @@ func main() {
 		InventoryHandler:     inventoryH,
 		MarketplaceHandler:   marketplaceH,
 		CareersHandler:       careersH,
+		HeroMediaHandler:     heroMediaH,
 	})
 
 	srv := &http.Server{

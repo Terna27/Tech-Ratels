@@ -73,6 +73,7 @@ type Querier interface {
 	CreateFinancialTransaction(ctx context.Context, arg CreateFinancialTransactionParams) (FinancialTransaction, error)
 	CreateFoundationCampaign(ctx context.Context, arg CreateFoundationCampaignParams) (FoundationCampaign, error)
 	CreateFoundationEntity(ctx context.Context, arg CreateFoundationEntityParams) (FoundationEntity, error)
+	CreateHeroMedia(ctx context.Context, arg CreateHeroMediaParams) (HomepageHeroMedium, error)
 	CreateInventoryItem(ctx context.Context, arg CreateInventoryItemParams) (InventoryItem, error)
 	CreateLGA(ctx context.Context, arg CreateLGAParams) (Lga, error)
 	CreateLedgerEntry(ctx context.Context, arg CreateLedgerEntryParams) (FinancialLedgerEntry, error)
@@ -119,15 +120,18 @@ type Querier interface {
 	CreateUser(ctx context.Context, arg CreateUserParams) (User, error)
 	CreateUserSession(ctx context.Context, arg CreateUserSessionParams) (UserSession, error)
 	CreateZone(ctx context.Context, arg CreateZoneParams) (Zone, error)
+	DeactivateAllHeroMedia(ctx context.Context) error
 	DecrementCareersJobApplications(ctx context.Context, id string) error
 	DecrementProductStock(ctx context.Context, arg DecrementProductStockParams) (MarketplaceProduct, error)
 	DecrementRegisteredCount(ctx context.Context, id string) (EventInstance, error)
 	DeleteBusinessBranch(ctx context.Context, id string) error
 	DeleteCareersRecruiter(ctx context.Context, arg DeleteCareersRecruiterParams) error
+	DeleteHeroMedia(ctx context.Context, id string) error
 	DeleteLGA(ctx context.Context, id string) error
 	DeleteMarketplaceProduct(ctx context.Context, id string) error
 	GetActiveAppointmentByJurisdiction(ctx context.Context, arg GetActiveAppointmentByJurisdictionParams) (Appointment, error)
 	GetActiveFinancialAuthorization(ctx context.Context, userID string) (FinancialAuthorization, error)
+	GetActiveHeroMedia(ctx context.Context) (HomepageHeroMedium, error)
 	GetActiveVerification(ctx context.Context, arg GetActiveVerificationParams) (ContactVerification, error)
 	GetAppointmentByID(ctx context.Context, id string) (Appointment, error)
 	GetBadgeAward(ctx context.Context, arg GetBadgeAwardParams) (BadgeAward, error)
@@ -161,10 +165,12 @@ type Querier interface {
 	GetFinancialTransactionByIdempotencyKey(ctx context.Context, idempotencyKey pgtype.Text) (FinancialTransaction, error)
 	GetFinancialTransactionByReference(ctx context.Context, reference string) (FinancialTransaction, error)
 	GetFoundationEntity(ctx context.Context) (FoundationEntity, error)
+	GetHeroMediaByID(ctx context.Context, id string) (HomepageHeroMedium, error)
 	GetInventoryItemByID(ctx context.Context, id string) (InventoryItem, error)
 	GetInventoryItemBySKU(ctx context.Context, sku string) (InventoryItem, error)
 	GetLGAByID(ctx context.Context, id string) (Lga, error)
 	GetLGAByStateAndName(ctx context.Context, arg GetLGAByStateAndNameParams) (Lga, error)
+	GetLatestPublishedHeroMedia(ctx context.Context) (HomepageHeroMedium, error)
 	GetLatestStockLedgerEntry(ctx context.Context, arg GetLatestStockLedgerEntryParams) (StockLedgerEntry, error)
 	// -------------------------------------------------------------
 	// Marketplace Overview Analytics
@@ -244,6 +250,7 @@ type Querier interface {
 	ListFinancialReportLogs(ctx context.Context) ([]ListFinancialReportLogsRow, error)
 	ListFinancialTransactionsFiltered(ctx context.Context, arg ListFinancialTransactionsFilteredParams) ([]ListFinancialTransactionsFilteredRow, error)
 	ListFoundationCampaigns(ctx context.Context) ([]FoundationCampaign, error)
+	ListHeroMedia(ctx context.Context) ([]HomepageHeroMedium, error)
 	ListInventoryItems(ctx context.Context, arg ListInventoryItemsParams) ([]InventoryItem, error)
 	ListLGAsByState(ctx context.Context, stateID string) ([]Lga, error)
 	ListLedgerEntriesByTransaction(ctx context.Context, transactionID string) ([]ListLedgerEntriesByTransactionRow, error)
@@ -280,6 +287,7 @@ type Querier interface {
 	MarkMaterialTransferDispatched(ctx context.Context, arg MarkMaterialTransferDispatchedParams) (MaterialTransfer, error)
 	MarkMaterialTransferReceived(ctx context.Context, arg MarkMaterialTransferReceivedParams) (MaterialTransfer, error)
 	MarkVerificationUsed(ctx context.Context, id string) (ContactVerification, error)
+	PublishHeroMedia(ctx context.Context, arg PublishHeroMediaParams) (HomepageHeroMedium, error)
 	RemapEventInstanceLGA(ctx context.Context, arg RemapEventInstanceLGAParams) error
 	RemapMemberProfileLGA(ctx context.Context, arg RemapMemberProfileLGAParams) error
 	RescheduleEvent(ctx context.Context, arg RescheduleEventParams) (EventInstance, error)
@@ -291,6 +299,7 @@ type Querier interface {
 	RevokeFinancialAuthorization(ctx context.Context, id string) (FinancialAuthorization, error)
 	RevokeUserSession(ctx context.Context, tokenJti string) error
 	SetStockBalanceQuantities(ctx context.Context, arg SetStockBalanceQuantitiesParams) (StockBalance, error)
+	ToggleHeroMediaPlayback(ctx context.Context, arg ToggleHeroMediaPlaybackParams) (HomepageHeroMedium, error)
 	UpdateAppointmentScopeAndDates(ctx context.Context, arg UpdateAppointmentScopeAndDatesParams) (Appointment, error)
 	UpdateAppointmentStatus(ctx context.Context, arg UpdateAppointmentStatusParams) (Appointment, error)
 	UpdateBankAccountVerification(ctx context.Context, arg UpdateBankAccountVerificationParams) (VerifiedBankAccountVersion, error)
@@ -306,6 +315,7 @@ type Querier interface {
 	UpdateEventStatus(ctx context.Context, arg UpdateEventStatusParams) (EventInstance, error)
 	UpdateFinancialTransactionStatus(ctx context.Context, arg UpdateFinancialTransactionStatusParams) (FinancialTransaction, error)
 	UpdateFoundationEntity(ctx context.Context, arg UpdateFoundationEntityParams) (FoundationEntity, error)
+	UpdateHeroMediaPoster(ctx context.Context, arg UpdateHeroMediaPosterParams) (HomepageHeroMedium, error)
 	UpdateInventoryItem(ctx context.Context, arg UpdateInventoryItemParams) (InventoryItem, error)
 	UpdateLGA(ctx context.Context, arg UpdateLGAParams) (Lga, error)
 	UpdateMarketplaceBusiness(ctx context.Context, arg UpdateMarketplaceBusinessParams) (MarketplaceBusiness, error)
