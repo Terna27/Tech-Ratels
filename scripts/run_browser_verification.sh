@@ -52,8 +52,8 @@ for i in {1..30}; do
 done
 
 # 6. Start Next.js frontend on port 3000
-echo "-> Starting Next.js frontend on port ${WEB_PORT}..."
-(cd "${ROOT_DIR}/apps/web" && npm run start -- -p ${WEB_PORT}) &
+echo "-> Starting Next.js frontend on port ${WEB_PORT} with API reverse proxy..."
+(cd "${ROOT_DIR}/apps/web" && API_URL="http://127.0.0.1:${PORT}" PORT=${WEB_PORT} npm run start) &
 WEB_PID=$!
 
 # Clean cleanup trap

@@ -29,15 +29,15 @@ function LoginForm() {
     try {
       const data = await apiRequest<TokenResponse>("/auth/login", {
         method: "POST",
-        body: JSON.stringify({ identifier, password }),
+        body: JSON.stringify({ username: identifier, identifier, password }),
       });
 
-      login(data.access_token, data.user);
+      login(data.user, (data as any).csrf_token);
 
       if (redirect) {
         router.push(redirect);
       } else if (
-        ["national_admin", "zonal_coordinator", "state_coordinator", "lga_representative"].includes(
+        ["super_admin", "national_admin", "zonal_coordinator", "state_coordinator", "lga_representative"].includes(
           data.user.primary_role
         )
       ) {

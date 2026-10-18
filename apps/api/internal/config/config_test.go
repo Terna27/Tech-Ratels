@@ -123,15 +123,56 @@ func TestConfig_ProductionRejections(t *testing.T) {
 		}
 	})
 
-	// Case 6: Production valid configuration succeeds
-	t.Run("Valid production configuration succeeds", func(t *testing.T) {
+	// Case 6: Production with missing ALLOWED_ORIGINS rejected
+	t.Run("Missing ALLOWED_ORIGINS rejected in production", func(t *testing.T) {
 		os.Setenv("APP_ENV", "production")
 		os.Setenv("DATABASE_URL", "postgres://user:pass@ep-production-host.neon.tech/dbname?sslmode=require")
 		os.Setenv("JWT_SECRET", "super-secret-jwt-production-key-minimum-32-chars-long!")
+		os.Unsetenv("ALLOWED_ORIGINS")
 		defer func() {
 			os.Unsetenv("APP_ENV")
 			os.Unsetenv("DATABASE_URL")
 			os.Unsetenv("JWT_SECRET")
+		}()
+
+		cfg := Load()
+		err := cfg.Validate()
+		if err == nil || !strings.Contains(err.Error(), "ALLOWED_ORIGINS is required") {
+			t.Errorf("expected error for missing ALLOWED_ORIGINS in production, got: %v", err)
+		}
+	})
+
+	// Case 7: Production with wildcard origin rejected
+	t.Run("Wildcard origin rejected in production", func(t *testing.T) {
+		os.Setenv("APP_ENV", "production")
+		os.Setenv("DATABASE_URL", "postgres://user:pass@ep-production-host.neon.tech/dbname?sslmode=require")
+		os.Setenv("JWT_SECRET", "super-secret-jwt-production-key-minimum-32-chars-long!")
+		os.Setenv("ALLOWED_ORIGINS", "https://*.onrender.com")
+		defer func() {
+			os.Unsetenv("APP_ENV")
+			os.Unsetenv("DATABASE_URL")
+			os.Unsetenv("JWT_SECRET")
+			os.Unsetenv("ALLOWED_ORIGINS")
+		}()
+
+		cfg := Load()
+		err := cfg.Validate()
+		if err == nil || !strings.Contains(err.Error(), "wildcard origin") {
+			t.Errorf("expected error for wildcard origin in production, got: %v", err)
+		}
+	})
+
+	// Case 8: Production valid configuration succeeds with explicit origins
+	t.Run("Valid production configuration succeeds", func(t *testing.T) {
+		os.Setenv("APP_ENV", "production")
+		os.Setenv("DATABASE_URL", "postgres://user:pass@ep-production-host.neon.tech/dbname?sslmode=require")
+		os.Setenv("JWT_SECRET", "super-secret-jwt-production-key-minimum-32-chars-long!")
+		os.Setenv("ALLOWED_ORIGINS", "https://ratels-web.onrender.com,https://ratels.org.ng")
+		defer func() {
+			os.Unsetenv("APP_ENV")
+			os.Unsetenv("DATABASE_URL")
+			os.Unsetenv("JWT_SECRET")
+			os.Unsetenv("ALLOWED_ORIGINS")
 		}()
 
 		cfg, err := LoadAndValidate()

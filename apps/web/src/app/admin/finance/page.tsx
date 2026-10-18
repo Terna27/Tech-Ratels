@@ -241,12 +241,11 @@ export default function AdminFinancePage() {
     if (startDate) params.append("start_date", new Date(startDate).toISOString());
     if (endDate) params.append("end_date", new Date(endDate).toISOString());
 
-    const token = sessionStorage.getItem("ratels_auth_token");
     const downloadUrl = `${API_BASE}/finance/export?${params.toString()}`;
 
-    // Direct authenticated fetch and download
+    // Direct authenticated fetch and download using HttpOnly session cookie
     fetch(downloadUrl, {
-      headers: { Authorization: `Bearer ${token}` },
+      credentials: "same-origin",
     })
       .then((res) => res.blob())
       .then((blob) => {

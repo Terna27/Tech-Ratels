@@ -155,6 +155,154 @@ async function runBrowserVerification() {
 
   try {
     // ----------------------------------------------------
+    // TEST 0: Real Browser Login, HttpOnly Cookies, Zero Storage & CSRF Verification
+    // ----------------------------------------------------
+    console.log("\n[BROWSER TEST 0] Executing Real UI Login via Next.js Proxy & Verifying HttpOnly Cookies...");
+    await page.goto(`${WEB_BASE}/login`, { waitUntil: "networkidle0" });
+
+    // Type credentials into the real login form
+    await page.type('input[type="text"]', SA_EMAIL);
+    await page.type('input[type="password"]', SA_PASS);
+
+    // Click submit and wait for navigation through the Next.js API proxy
+    await Promise.all([
+      page.waitForNavigation({ waitUntil: "networkidle0" }),
+      page.click('button[type="submit"]'),
+    ]);
+
+    console.log("-> Current Page URL after login:", page.url());
+    if (!page.url().includes("/admin")) {
+      throw new Error(`Expected redirect to /admin, but got: ${page.url()}`);
+    }
+
+    // Inspect browser cookies
+    const cookies = await page.cookies();
+    const sessionCookie = cookies.find(c => c.name === "ratels_session");
+    const csrfCookie = cookies.find(c => c.name === "ratels_csrf");
+
+    console.log("-> Browser Cookies Retrieved:", cookies.map(c => ({ name: c.name, httpOnly: c.httpOnly, sameSite: c.sameSite, domain: c.domain })));
+
+    if (!sessionCookie) {
+      throw new Error("Missing 'ratels_session' cookie after real browser login!");
+    }
+    if (!sessionCookie.httpOnly) {
+      throw new Error("Security failure: 'ratels_session' cookie must be HttpOnly!");
+    }
+    if (sessionCookie.sameSite !== "Lax") {
+      throw new Error(`Expected 'ratels_session' sameSite='Lax', got '${sessionCookie.sameSite}'`);
+    }
+    console.log("   ✓ 'ratels_session' cookie verified: HttpOnly=true, SameSite=Lax, Path=/");
+
+    if (!csrfCookie) {
+      throw new Error("Missing 'ratels_csrf' cookie after real browser login!");
+    }
+    if (csrfCookie.httpOnly) {
+      throw new Error("Security failure: 'ratels_csrf' cookie must NOT be HttpOnly so JavaScript can read for double-submit header!");
+    }
+    console.log("   ✓ 'ratels_csrf' cookie verified: HttpOnly=false, SameSite=Lax, Path=/");
+
+    // Inspect client web storage (sessionStorage and localStorage)
+    const storageInspection = await page.evaluate(() => {
+      const sessionTok = window.sessionStorage.getItem("ratels_auth_token");
+      const sessionKeys = Object.keys(window.sessionStorage);
+      const localKeys = Object.keys(window.localStorage);
+      const hasTokenInStorage = sessionKeys.some(k => k.includes("token")) || localKeys.some(k => k.includes("token"));
+      return { sessionTok, sessionKeys, localKeys, hasTokenInStorage };
+    });
+
+    console.log("-> Client Web Storage Inspection:", storageInspection);
+    if (storageInspection.sessionTok !== null || storageInspection.hasTokenInStorage) {
+      throw new Error("Security violation: authentication token found in sessionStorage or localStorage!");
+    }
+    console.log("   ✓ Zero session tokens stored in sessionStorage or localStorage (strictly HttpOnly cookie storage).");
+
+    // Authenticated request through Next.js proxy (/api/v1/members/me)
+    const userMe = await page.evaluate(async () => {
+      const res = await fetch("/api/v1/members/me", { credentials: "same-origin" });
+      const data = await res.json().catch(() => ({}));
+      return { status: res.status, data };
+    });
+
+    console.log("-> Proxy Authenticated Request (/api/v1/members/me): status =", userMe.status, "role =", userMe.data.primary_role);
+    if (userMe.status !== 200 || userMe.data.primary_role !== "super_admin") {
+      throw new Error(`Expected HTTP 200 with role 'super_admin', got status ${userMe.status}: ${JSON.stringify(userMe.data)}`);
+    }
+    console.log("   ✓ Same-origin proxy request authenticated successfully via HttpOnly cookie.");
+
+    // Double-submit CSRF Protection & Rejection Testing
+    console.log("\n[BROWSER TEST 0.5] Verifying Double-Submit CSRF Enforcement & Rejection...");
+
+    // 1. Mutating POST without X-CSRF-Token header -> MUST BE 403 Forbidden
+    const noCsrfRes = await page.evaluate(async () => {
+      const res = await fetch("/api/v1/auth/logout", {
+        method: "POST",
+        credentials: "same-origin",
+        headers: { "Content-Type": "application/json" },
+      });
+      const data = await res.json().catch(() => ({}));
+      return { status: res.status, data };
+    });
+
+    console.log("-> Mutating POST without X-CSRF-Token:", noCsrfRes.status, noCsrfRes.data?.error?.code);
+    if (noCsrfRes.status !== 403 || noCsrfRes.data?.error?.code !== "CSRF_TOKEN_REQUIRED") {
+      throw new Error(`Expected HTTP 403 with CSRF_TOKEN_REQUIRED, got status ${noCsrfRes.status}: ${JSON.stringify(noCsrfRes.data)}`);
+    }
+    console.log("   ✓ Mutating POST without X-CSRF-Token correctly rejected with HTTP 403 Forbidden (CSRF_TOKEN_REQUIRED).");
+
+    // 2. Mutating POST with TAMPERED X-CSRF-Token -> MUST BE 403 Forbidden
+    const badCsrfRes = await page.evaluate(async () => {
+      const res = await fetch("/api/v1/auth/logout", {
+        method: "POST",
+        credentials: "same-origin",
+        headers: {
+          "Content-Type": "application/json",
+          "X-CSRF-Token": "tampered-bogus-csrf-token-123456",
+        },
+      });
+      const data = await res.json().catch(() => ({}));
+      return { status: res.status, data };
+    });
+
+    console.log("-> Mutating POST with tampered X-CSRF-Token:", badCsrfRes.status, badCsrfRes.data?.error?.code);
+    if (badCsrfRes.status !== 403 || badCsrfRes.data?.error?.code !== "CSRF_TOKEN_INVALID") {
+      throw new Error(`Expected HTTP 403 with CSRF_TOKEN_INVALID, got status ${badCsrfRes.status}: ${JSON.stringify(badCsrfRes.data)}`);
+    }
+    console.log("   ✓ Mutating POST with invalid X-CSRF-Token correctly rejected with HTTP 403 Forbidden (CSRF_TOKEN_INVALID).");
+
+    // 3. Mutating POST with VALID matching X-CSRF-Token -> MUST BE 200 OK
+    const validLogoutRes = await page.evaluate(async () => {
+      const match = document.cookie.match(/(?:^|;\s*)ratels_csrf=([^;]+)/);
+      const token = match ? decodeURIComponent(match[1]) : "";
+      const res = await fetch("/api/v1/auth/logout", {
+        method: "POST",
+        credentials: "same-origin",
+        headers: {
+          "Content-Type": "application/json",
+          "X-CSRF-Token": token,
+        },
+      });
+      const data = await res.json().catch(() => ({}));
+      return { status: res.status, data };
+    });
+
+    console.log("-> Mutating POST with matching X-CSRF-Token (Logout):", validLogoutRes.status);
+    if (validLogoutRes.status !== 200) {
+      throw new Error(`Expected HTTP 200 for valid logout, got ${validLogoutRes.status}: ${JSON.stringify(validLogoutRes.data)}`);
+    }
+    console.log("   ✓ Mutating POST with valid double-submit CSRF token succeeded with HTTP 200 OK.");
+
+    // 4. Verify post-logout rejection (session cookie invalidated)
+    const postLogoutCheck = await page.evaluate(async () => {
+      const res = await fetch("/api/v1/members/me", { credentials: "same-origin" });
+      return { status: res.status };
+    });
+    console.log("-> Post-logout verification request (/api/v1/members/me): status =", postLogoutCheck.status);
+    if (postLogoutCheck.status !== 401) {
+      throw new Error(`Expected HTTP 401 Unauthorized after logout, got: ${postLogoutCheck.status}`);
+    }
+    console.log("   ✓ Post-logout request correctly rejected with HTTP 401 Unauthorized (session invalidated).");
+
+    // ----------------------------------------------------
     // TEST 1: Paragraph Font Size & Line-Height Verification
     // ----------------------------------------------------
     console.log("\n[BROWSER TEST 1] Verifying Paragraph Typography in Live DOM...");
@@ -204,11 +352,25 @@ async function runBrowserVerification() {
     console.log("\n[BROWSER TEST 2] Verifying Unauthorized Financial Access Block in Browser DOM...");
     await page.setViewport({ width: 1400, height: 900 });
 
-    // Inject National Admin (unauthorized) token into sessionStorage
-    await page.goto(WEB_BASE, { waitUntil: "domcontentloaded" });
-    await page.evaluate((tok) => {
-      sessionStorage.setItem("ratels_auth_token", tok);
-    }, natToken);
+    // Set National Admin (unauthorized) HttpOnly session cookie on the browser
+    await page.setCookie(
+      {
+        name: "ratels_session",
+        value: natToken,
+        domain: "localhost",
+        path: "/",
+        httpOnly: true,
+        sameSite: "Lax",
+      },
+      {
+        name: "ratels_csrf",
+        value: "browser-test-csrf-token-national-admin",
+        domain: "localhost",
+        path: "/",
+        httpOnly: false,
+        sameSite: "Lax",
+      }
+    );
 
     // Navigate to /admin/finance as unauthorized user
     await page.goto(`${WEB_BASE}/admin/finance`, { waitUntil: "networkidle0" });
@@ -237,13 +399,12 @@ async function runBrowserVerification() {
     console.log("   ✓ Financial Documentation Restricted screen verified in live DOM.");
     console.log("   ✓ Zero financial tables, vouchers, print buttons, or export links accessible.");
 
-    // Verify browser direct fetch rejection
-    const fetchRejection = await page.evaluate(async (apiBase) => {
-      const tok = sessionStorage.getItem("ratels_auth_token");
-      const r1 = await fetch(`${apiBase}/finance/export`, { headers: { Authorization: `Bearer ${tok}` } });
-      const r2 = await fetch(`${apiBase}/finance/statement`, { headers: { Authorization: `Bearer ${tok}` } });
+    // Verify browser direct fetch rejection through same-origin reverse proxy
+    const fetchRejection = await page.evaluate(async () => {
+      const r1 = await fetch("/api/v1/finance/export", { credentials: "same-origin" });
+      const r2 = await fetch("/api/v1/finance/statement", { credentials: "same-origin" });
       return { exportStatus: r1.status, statementStatus: r2.status };
-    }, API_BASE);
+    });
 
     console.log("-> Direct Browser API Security Checks:", fetchRejection);
     if (fetchRejection.exportStatus !== 403 || fetchRejection.statementStatus !== 403) {
@@ -258,13 +419,27 @@ async function runBrowserVerification() {
     // ----------------------------------------------------
     // TEST 3: Super Admin Multi-Page Financial Dashboard
     // ----------------------------------------------------
-    console.log("\n[BROWSER TEST 3] Authenticating as Super Admin in Browser Session...");
+    console.log("\n[BROWSER TEST 3] Authenticating as Super Admin via HttpOnly Cookie...");
 
-    // Inject Super Admin token
-    await page.goto(WEB_BASE, { waitUntil: "domcontentloaded" });
-    await page.evaluate((tok) => {
-      sessionStorage.setItem("ratels_auth_token", tok);
-    }, saToken);
+    // Set Super Admin HttpOnly session cookie on the browser
+    await page.setCookie(
+      {
+        name: "ratels_session",
+        value: saToken,
+        domain: "localhost",
+        path: "/",
+        httpOnly: true,
+        sameSite: "Lax",
+      },
+      {
+        name: "ratels_csrf",
+        value: "browser-test-csrf-token-super-admin",
+        domain: "localhost",
+        path: "/",
+        httpOnly: false,
+        sameSite: "Lax",
+      }
+    );
 
     await page.goto(`${WEB_BASE}/admin/finance`, { waitUntil: "networkidle0" });
 

@@ -311,15 +311,35 @@ bash scripts/start_dev.sh
 - **Service Type**: Web Service (Node.js)
 - **Root Directory**: `apps/web`
 - **Build Command**: `npm install && npm run build` (or `cd apps/web && npm install && npm run build` if Root Directory is left empty)
-- **Start Command**: `npm run start` (updated in [`package.json`](file:///home/recoding/Tech-Ratels/apps/web/package.json) to `next start`, allowing dynamic binding to Render's dynamic `$PORT`)
+- **Start Command**: `npm run start` (runs `next start`, binding to dynamic Render `$PORT`)
 - **Environment Variables**:
   - `NODE_ENV`: `production`
-  - `NEXT_PUBLIC_API_URL`: `https://ratels.onrender.com/api/v1`
-- **Backend CORS & Origin Configuration**:
-  - The Go backend supports `ALLOWED_ORIGINS` in [`apps/api/internal/config/config.go`](file:///home/recoding/Tech-Ratels/apps/api/internal/config/config.go) and defaults to include `https://*.onrender.com` alongside local dev origins.
-  - On the backend Render service (`https://ratels.onrender.com`), set `ALLOWED_ORIGINS=https://<your-web-service>.onrender.com` (or your custom domain).
-- **Authentication & CSRF Architecture**:
-  - The Next.js frontend uses Bearer token authorization stored in `sessionStorage` and attaches `Authorization: Bearer <token>` to all API requests.
-  - CSRF protection (`CSRFProtectionMiddleware`) applies only to cookie-authenticated mutations. Bearer token requests are verified statelessly against the database session and bypass CSRF checks.
-  - When cookies are issued (`ratels_session` and `ratels_csrf`), `auth_handler.go` assigns `SameSite: None; Secure: true` over HTTPS to guarantee cross-site cookie functionality across Render subdomains.
+  - `API_URL`: `https://ratels.onrender.com` (server-side Next.js reverse proxy target in `next.config.js`)
+  - `NEXT_PUBLIC_API_URL`: `/api/v1` (defaults browser requests to same-origin relative paths)
+
+### Backend CORS & Production Origin Enforcement
+- **Wildcard Removal**: The previously permissive default `https://*.onrender.com` wildcard has been removed from [`apps/api/internal/config/config.go`](file:///home/recoding/Tech-Ratels/apps/api/internal/config/config.go).
+- **Production Validation Invariant**: In production (`APP_ENV=production`), `ALLOWED_ORIGINS` is strictly required. Setting wildcards (`*` or `*.domain`) causes the API server to refuse to boot (`ErrOriginWildcardDisallowed`).
+- **Render Backend Configuration**: On the backend service (`https://ratels.onrender.com`), configure:
+  - `ALLOWED_ORIGINS`: `https://<your-frontend-service>.onrender.com` (explicitly configured frontend origin, e.g. `https://ratels-web.onrender.com`).
+
+### HttpOnly Cookie Authentication & Same-Origin Proxy Architecture
+- **HttpOnly Session Cookies**:
+  - Session tokens are issued in the `ratels_session` cookie with `HttpOnly: true`, `SameSite: Lax`, `Path: /`, and `Secure: isSecure`.
+  - Zero session tokens are stored in `window.sessionStorage` or `window.localStorage`, eliminating the threat of token exfiltration via client-side cross-site scripting (XSS).
+- **Double-Submit CSRF Protection**:
+  - The API concurrently issues a non-HttpOnly `ratels_csrf` cookie (`SameSite: Lax`, `Path: /`).
+  - Client JavaScript in [`apps/web/src/lib/api.ts`](file:///home/recoding/Tech-Ratels/apps/web/src/lib/api.ts) reads the CSRF cookie value and attaches it as the `X-CSRF-Token` header on all mutating requests (`POST`, `PUT`, `DELETE`, `PATCH`).
+  - Go middleware [`CSRFProtectionMiddleware`](file:///home/recoding/Tech-Ratels/apps/api/internal/handler/auth_handler.go) verifies that the header matches the cookie token before permitting request execution.
+- **First-Party Same-Origin Proxy vs Third-Party Cookies**:
+  - All browser requests execute against relative paths (`/api/v1/...`) proxied transparently by Next.js rewrites to the Go backend (`API_URL`).
+  - Because browser requests target the frontend domain itself, cookies are treated as **first-party** context with `SameSite=Lax`.
+  - **No `SameSite=None` reliance**: Relying on `SameSite=None; Secure=true` does not guarantee cross-site cookie availability. Modern browsers (Apple Safari Intelligent Tracking Prevention, Mozilla Firefox Total Cookie Protection, and Google Chrome Privacy Sandbox) partition or block third-party cookies across differing origins (`ratels.onrender.com` vs `ratels-web.onrender.com`). The first-party same-origin proxy pattern completely bypasses third-party cookie restrictions.
+- **Verified Browser Flows**:
+  - Full UI form authentication via `/login` redirects Super Admin to `/admin`.
+  - Verified absence of tokens in `sessionStorage` and `localStorage`.
+  - Verified CSRF rejection: requests without `X-CSRF-Token` return HTTP 403 (`CSRF_TOKEN_REQUIRED`); requests with invalid tokens return HTTP 403 (`CSRF_TOKEN_INVALID`); valid matching tokens succeed.
+  - Verified logout clears cookies and subsequent requests return HTTP 401 Unauthorized.
+  - Verified unauthorized users visiting `/admin/finance` are blocked in DOM and cannot export CSV or view statements.
+
 

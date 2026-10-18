@@ -63,8 +63,9 @@ type VerifyContactRequest struct {
 }
 
 type LoginRequest struct {
-	Username string `json:"username"` // email or phone
-	Password string `json:"password"`
+	Username   string `json:"username"`   // email, phone, or membership reference
+	Identifier string `json:"identifier"` // alternative alias
+	Password   string `json:"password"`
 }
 
 type LoginResponse struct {
@@ -243,6 +244,9 @@ func (s *AuthService) VerifyContact(ctx context.Context, req VerifyContactReques
 
 func (s *AuthService) Login(ctx context.Context, req LoginRequest, ip, userAgent string) (*LoginResponse, error) {
 	username := strings.TrimSpace(req.Username)
+	if username == "" {
+		username = strings.TrimSpace(req.Identifier)
+	}
 	var user db.User
 	var err error
 

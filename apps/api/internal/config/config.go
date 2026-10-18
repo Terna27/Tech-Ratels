@@ -65,19 +65,31 @@ func Load() *Config {
 		foundationName = "Martins Vincent Otse Foundation"
 	}
 
-	// AllowedOrigins: include local dev origins and Render wildcard by default
-	allowedOrigins := []string{
-		"http://localhost:3000",
-		"http://127.0.0.1:3000",
-		"http://localhost:8000",
-		"http://127.0.0.1:8000",
-		"https://*.onrender.com",
-	}
-	if rawOrigins := os.Getenv("ALLOWED_ORIGINS"); rawOrigins != "" {
-		for _, o := range strings.Split(rawOrigins, ",") {
-			trimmed := strings.TrimSpace(o)
-			if trimmed != "" {
-				allowedOrigins = append(allowedOrigins, trimmed)
+	// AllowedOrigins: In production, allow ONLY explicitly configured frontend origins.
+	// In development/test, default to local dev server origins.
+	var allowedOrigins []string
+	if isProduction {
+		if rawOrigins := os.Getenv("ALLOWED_ORIGINS"); rawOrigins != "" {
+			for _, o := range strings.Split(rawOrigins, ",") {
+				trimmed := strings.TrimSpace(o)
+				if trimmed != "" {
+					allowedOrigins = append(allowedOrigins, trimmed)
+				}
+			}
+		}
+	} else {
+		allowedOrigins = []string{
+			"http://localhost:3000",
+			"http://127.0.0.1:3000",
+			"http://localhost:8000",
+			"http://127.0.0.1:8000",
+		}
+		if rawOrigins := os.Getenv("ALLOWED_ORIGINS"); rawOrigins != "" {
+			for _, o := range strings.Split(rawOrigins, ",") {
+				trimmed := strings.TrimSpace(o)
+				if trimmed != "" {
+					allowedOrigins = append(allowedOrigins, trimmed)
+				}
 			}
 		}
 	}
@@ -112,6 +124,14 @@ func (c *Config) Validate() error {
 		}
 		if len(c.JWTSecret) < MinJWTSecretLength {
 			return fmt.Errorf("JWT_SECRET is too short (%d characters); minimum requirement is %d characters in production", len(c.JWTSecret), MinJWTSecretLength)
+		}
+		if len(c.AllowedOrigins) == 0 {
+			return errors.New("ALLOWED_ORIGINS is required in production environment; specify explicit frontend origin(s)")
+		}
+		for _, o := range c.AllowedOrigins {
+			if strings.Contains(o, "*") {
+				return fmt.Errorf("wildcard origin %q is prohibited in production; specify explicit frontend origins", o)
+			}
 		}
 	}
 	return nil
