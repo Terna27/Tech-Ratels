@@ -16,7 +16,7 @@ import {
 import { useCart } from "@/lib/cart-context";
 import { useAuth } from "@/lib/auth-context";
 import { apiRequest } from "@/lib/api";
-import { State, LGA } from "@/lib/types";
+import { State, LGA, resolveImageUrl } from "@/lib/types";
 import { Spinner } from "@/components/ui/Spinner";
 import { Alert } from "@/components/ui/Alert";
 
@@ -442,7 +442,7 @@ export default function CheckoutPage() {
                     <div className="flex items-center gap-2.5 max-w-[70%]">
                       {item.imageUrl ? (
                         <img
-                          src={item.imageUrl}
+                          src={resolveImageUrl(item.imageUrl)}
                           alt={item.title}
                           className="w-10 h-10 rounded-lg object-cover border border-gray-100 shrink-0"
                           onError={(e) => {

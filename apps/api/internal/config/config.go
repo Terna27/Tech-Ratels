@@ -181,6 +181,11 @@ func Load() *Config {
 	r2SecretAccessKey := strings.TrimSpace(os.Getenv("R2_SECRET_ACCESS_KEY"))
 	r2BucketName := strings.TrimSpace(os.Getenv("R2_BUCKET_NAME"))
 	r2PublicDomain := strings.TrimRight(strings.TrimSpace(os.Getenv("R2_PUBLIC_DOMAIN")), "/")
+	if r2PublicDomain == "" {
+		r2PublicDomain = "https://pub-82990f82f02446b5a11817fdce96912d.r2.dev"
+	} else if !strings.HasPrefix(r2PublicDomain, "http://") && !strings.HasPrefix(r2PublicDomain, "https://") {
+		r2PublicDomain = "https://" + r2PublicDomain
+	}
 	r2Endpoint := strings.TrimRight(strings.TrimSpace(os.Getenv("R2_ENDPOINT")), "/")
 
 	return &Config{

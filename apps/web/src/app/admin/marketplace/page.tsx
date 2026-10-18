@@ -28,6 +28,7 @@ import {
 } from "lucide-react";
 import { useAuth } from "@/lib/auth-context";
 import { apiRequest } from "@/lib/api";
+import { parseProductImages } from "@/lib/types";
 import { Spinner } from "@/components/ui/Spinner";
 import { Badge } from "@/components/ui/Badge";
 import { Alert } from "@/components/ui/Alert";
@@ -632,11 +633,8 @@ export default function AdminMarketplacePage() {
                       <td className="py-3.5 px-4 font-bold text-gray-900">
                         <div className="flex items-center gap-2.5">
                           {(() => {
-                            let firstImg = "";
-                            try {
-                              const arr = typeof p.images === "string" ? JSON.parse(p.images) : p.images;
-                              if (Array.isArray(arr) && arr.length > 0) firstImg = arr[0];
-                            } catch (_) {}
+                            const prodImgs = parseProductImages(p.images);
+                            const firstImg = prodImgs[0] || "";
                             return firstImg ? (
                               <img
                                 src={firstImg}

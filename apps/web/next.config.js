@@ -6,8 +6,10 @@ const nextConfig = {
   reactStrictMode: true,
   images: {
     remotePatterns: [
-      { protocol: "https", hostname: "**.r2.cloudflarestorage.com" },
+      { protocol: "https", hostname: "pub-82990f82f02446b5a11817fdce96912d.r2.dev" },
+      { protocol: "https", hostname: "*.r2.dev" },
       { protocol: "https", hostname: "**.r2.dev" },
+      { protocol: "https", hostname: "**.r2.cloudflarestorage.com" },
       { protocol: "https", hostname: "**.ratels.org.ng" },
       { protocol: "https", hostname: "ratels.org.ng" },
       { protocol: "https", hostname: "images.unsplash.com" },

@@ -7,6 +7,7 @@ package db
 
 import (
 	"context"
+	"encoding/json"
 
 	"github.com/jackc/pgx/v5/pgtype"
 )
@@ -446,24 +447,24 @@ INSERT INTO marketplace_products (
 `
 
 type CreateMarketplaceProductParams struct {
-	ID                   string      `json:"id"`
-	BusinessID           string      `json:"business_id"`
-	BranchID             pgtype.Text `json:"branch_id"`
-	Title                string      `json:"title"`
-	Slug                 string      `json:"slug"`
-	Description          string      `json:"description"`
-	Category             string      `json:"category"`
-	Sku                  string      `json:"sku"`
-	PriceKobo            int64       `json:"price_kobo"`
-	CompareAtPriceKobo   pgtype.Int8 `json:"compare_at_price_kobo"`
-	StockQuantity        int32       `json:"stock_quantity"`
-	LowStockThreshold    int32       `json:"low_stock_threshold"`
-	Images               []byte      `json:"images"`
-	WeightGrams          pgtype.Int4 `json:"weight_grams"`
-	DeliveryRestrictions pgtype.Text `json:"delivery_restrictions"`
-	ReturnPolicy         pgtype.Text `json:"return_policy"`
-	Status               string      `json:"status"`
-	IsFeatured           bool        `json:"is_featured"`
+	ID                   string          `json:"id"`
+	BusinessID           string          `json:"business_id"`
+	BranchID             pgtype.Text     `json:"branch_id"`
+	Title                string          `json:"title"`
+	Slug                 string          `json:"slug"`
+	Description          string          `json:"description"`
+	Category             string          `json:"category"`
+	Sku                  string          `json:"sku"`
+	PriceKobo            int64           `json:"price_kobo"`
+	CompareAtPriceKobo   pgtype.Int8     `json:"compare_at_price_kobo"`
+	StockQuantity        int32           `json:"stock_quantity"`
+	LowStockThreshold    int32           `json:"low_stock_threshold"`
+	Images               json.RawMessage `json:"images"`
+	WeightGrams          pgtype.Int4     `json:"weight_grams"`
+	DeliveryRestrictions pgtype.Text     `json:"delivery_restrictions"`
+	ReturnPolicy         pgtype.Text     `json:"return_policy"`
+	Status               string          `json:"status"`
+	IsFeatured           bool            `json:"is_featured"`
 }
 
 // -------------------------------------------------------------
@@ -1253,7 +1254,7 @@ type GetMarketplaceProductByIDRow struct {
 	CompareAtPriceKobo    pgtype.Int8        `json:"compare_at_price_kobo"`
 	StockQuantity         int32              `json:"stock_quantity"`
 	LowStockThreshold     int32              `json:"low_stock_threshold"`
-	Images                []byte             `json:"images"`
+	Images                json.RawMessage    `json:"images"`
 	WeightGrams           pgtype.Int4        `json:"weight_grams"`
 	DeliveryRestrictions  pgtype.Text        `json:"delivery_restrictions"`
 	ReturnPolicy          pgtype.Text        `json:"return_policy"`
@@ -1339,7 +1340,7 @@ type GetMarketplaceProductBySlugRow struct {
 	CompareAtPriceKobo    pgtype.Int8        `json:"compare_at_price_kobo"`
 	StockQuantity         int32              `json:"stock_quantity"`
 	LowStockThreshold     int32              `json:"low_stock_threshold"`
-	Images                []byte             `json:"images"`
+	Images                json.RawMessage    `json:"images"`
 	WeightGrams           pgtype.Int4        `json:"weight_grams"`
 	DeliveryRestrictions  pgtype.Text        `json:"delivery_restrictions"`
 	ReturnPolicy          pgtype.Text        `json:"return_policy"`
@@ -2214,7 +2215,7 @@ type ListMarketplaceProductsRow struct {
 	CompareAtPriceKobo    pgtype.Int8        `json:"compare_at_price_kobo"`
 	StockQuantity         int32              `json:"stock_quantity"`
 	LowStockThreshold     int32              `json:"low_stock_threshold"`
-	Images                []byte             `json:"images"`
+	Images                json.RawMessage    `json:"images"`
 	WeightGrams           pgtype.Int4        `json:"weight_grams"`
 	DeliveryRestrictions  pgtype.Text        `json:"delivery_restrictions"`
 	ReturnPolicy          pgtype.Text        `json:"return_policy"`
@@ -2730,22 +2731,22 @@ RETURNING id, business_id, branch_id, title, slug, description, category, sku, p
 `
 
 type UpdateMarketplaceProductParams struct {
-	ID                   string      `json:"id"`
-	BranchID             pgtype.Text `json:"branch_id"`
-	Title                string      `json:"title"`
-	Description          string      `json:"description"`
-	Category             string      `json:"category"`
-	Sku                  string      `json:"sku"`
-	PriceKobo            int64       `json:"price_kobo"`
-	CompareAtPriceKobo   pgtype.Int8 `json:"compare_at_price_kobo"`
-	StockQuantity        int32       `json:"stock_quantity"`
-	LowStockThreshold    int32       `json:"low_stock_threshold"`
-	Images               []byte      `json:"images"`
-	WeightGrams          pgtype.Int4 `json:"weight_grams"`
-	DeliveryRestrictions pgtype.Text `json:"delivery_restrictions"`
-	ReturnPolicy         pgtype.Text `json:"return_policy"`
-	Status               string      `json:"status"`
-	IsFeatured           bool        `json:"is_featured"`
+	ID                   string          `json:"id"`
+	BranchID             pgtype.Text     `json:"branch_id"`
+	Title                string          `json:"title"`
+	Description          string          `json:"description"`
+	Category             string          `json:"category"`
+	Sku                  string          `json:"sku"`
+	PriceKobo            int64           `json:"price_kobo"`
+	CompareAtPriceKobo   pgtype.Int8     `json:"compare_at_price_kobo"`
+	StockQuantity        int32           `json:"stock_quantity"`
+	LowStockThreshold    int32           `json:"low_stock_threshold"`
+	Images               json.RawMessage `json:"images"`
+	WeightGrams          pgtype.Int4     `json:"weight_grams"`
+	DeliveryRestrictions pgtype.Text     `json:"delivery_restrictions"`
+	ReturnPolicy         pgtype.Text     `json:"return_policy"`
+	Status               string          `json:"status"`
+	IsFeatured           bool            `json:"is_featured"`
 }
 
 func (q *Queries) UpdateMarketplaceProduct(ctx context.Context, arg UpdateMarketplaceProductParams) (MarketplaceProduct, error) {

@@ -17,6 +17,7 @@ import {
 } from "lucide-react";
 import { useAuth } from "@/lib/auth-context";
 import { apiRequest } from "@/lib/api";
+import { resolveImageUrl } from "@/lib/types";
 import { Spinner } from "@/components/ui/Spinner";
 import { Badge } from "@/components/ui/Badge";
 import { Alert } from "@/components/ui/Alert";
@@ -316,9 +317,12 @@ export default function OrderDetailPage({ params }: OrderDetailProps) {
                   <div className="flex items-center gap-3">
                     {item.image_url_snapshot ? (
                       <img
-                        src={item.image_url_snapshot}
+                        src={resolveImageUrl(item.image_url_snapshot)}
                         alt={item.title_snapshot}
                         className="w-12 h-12 rounded-xl object-cover border border-gray-100 bg-gray-50"
+                        onError={(e) => {
+                          (e.target as HTMLElement).style.display = "none";
+                        }}
                       />
                     ) : (
                       <div className="w-12 h-12 rounded-xl bg-gray-100 flex items-center justify-center text-gray-400">

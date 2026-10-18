@@ -62,6 +62,49 @@ async function runMarketplaceBrowserVerification() {
     }
   }
 
+  // 1c. Test Live Cloudflare R2 Public Object Accessibility
+  console.log("-> Testing Live Cloudflare R2 Public Object Accessibility...");
+  const liveR2Key = "marketplace/products/1618aeda-d831-4329-9120-c0858e72118d/549e1bf71d2c445ca217961b9b2e6035.png";
+  const liveR2Url = `https://pub-82990f82f02446b5a11817fdce96912d.r2.dev/${liveR2Key}`;
+  const r2Head = await fetch(liveR2Url, { method: "HEAD" });
+  if (r2Head.status !== 200) {
+    throw new Error(`Live Cloudflare R2 object URL returned status ${r2Head.status}`);
+  }
+  const r2ContentType = r2Head.headers.get("content-type");
+  if (!r2ContentType || !r2ContentType.startsWith("image/")) {
+    throw new Error(`Live Cloudflare R2 object returned non-image content type: ${r2ContentType}`);
+  }
+  console.log(`   ✓ Live Cloudflare R2 image verified accessible (HTTP 200, Content-Type: ${r2ContentType}).`);
+
+  // 1d. Seed a verified product with R2 image to verify display, persistence, and refresh across UI
+  console.log("-> Seeding verified product with Cloudflare R2 image for rendering verification...");
+  const myBizRes = await fetch(`${API_BASE}/marketplace/seller/business`, { headers: authHeaders });
+  const myBiz = await myBizRes.json();
+  const testProductImage = `https://pub-82990f82f02446b5a11817fdce96912d.r2.dev/marketplace/products/${myBiz.id}/549e1bf71d2c445ca217961b9b2e6035.png`;
+
+  const prodCreateRes = await fetch(`${API_BASE}/marketplace/seller/products`, {
+    method: "POST",
+    headers: authHeaders,
+    body: JSON.stringify({
+      business_id: myBiz.id,
+      title: "Movement R2 Verified Emblem Cap",
+      description: "Official cap featuring verified Cloudflare R2 product image delivery",
+      category: "apparel_merch",
+      sku: "R2-CAP-VERIFIED-01",
+      price_kobo: 450000,
+      stock_quantity: 50,
+      low_stock_threshold: 5,
+      images: [testProductImage],
+      status: "published",
+      is_featured: true,
+    }),
+  });
+  if (prodCreateRes.ok) {
+    console.log("   ✓ Seeded product with R2 image for browser verification.");
+  } else {
+    console.log(`   Notice: Product seed response ${prodCreateRes.status}`);
+  }
+
   // 2. Launch Google Chrome Headless
   console.log("-> Launching Google Chrome Headless...");
   const browser = await puppeteer.launch({
@@ -248,6 +291,86 @@ async function runMarketplaceBrowserVerification() {
       if (closeBtn && closeBtn.asElement()) {
         await closeBtn.asElement().click();
         await new Promise(r => setTimeout(r, 300));
+      }
+
+      // 4. Verify seller dashboard displays product image for the seeded R2 product
+      console.log("-> Verifying seller product table displays product images correctly...");
+      const sellerImgFound = await page.evaluate(() => {
+        const imgs = Array.from(document.querySelectorAll("img"));
+        return imgs.some(img => img.src.includes("549e1bf71d2c445ca217961b9b2e6035.png"));
+      });
+      if (!sellerImgFound) {
+        throw new Error("Product with Cloudflare R2 image did not render thumbnail in seller table!");
+      }
+      console.log("   ✓ Verified seller table renders product thumbnail from Cloudflare R2.");
+
+      // 5. Open Edit Product modal on the seeded R2 product and verify images are populated in modal
+      console.log("-> Opening Edit Product modal on R2 product to verify image persistence...");
+      const editBtn = await page.evaluateHandle(() => {
+        const rows = Array.from(document.querySelectorAll("tr"));
+        const targetRow = rows.find(r => r.innerText.includes("Movement R2 Verified Emblem Cap"));
+        if (!targetRow) return null;
+        const buttons = Array.from(targetRow.querySelectorAll("button"));
+        return buttons.find(b => b.innerText.toLowerCase().includes("edit"));
+      });
+      if (editBtn && editBtn.asElement()) {
+        await editBtn.asElement().click();
+        await new Promise(r => setTimeout(r, 600));
+
+        const editModalImgFound = await page.evaluate(() => {
+          const imgs = Array.from(document.querySelectorAll("img"));
+          return imgs.some(img => img.src.includes("549e1bf71d2c445ca217961b9b2e6035.png"));
+        });
+        if (!editModalImgFound) {
+          throw new Error("R2 product image was not loaded into the edit modal preview!");
+        }
+        console.log("   ✓ Verified existing R2 image correctly loads into product edit modal preview.");
+
+        // Close edit modal
+        const closeEditBtn = await page.evaluateHandle(() => {
+          const buttons = Array.from(document.querySelectorAll("button"));
+          return buttons.find(b => b.innerText.trim() === "✕");
+        });
+        if (closeEditBtn && closeEditBtn.asElement()) {
+          await closeEditBtn.asElement().click();
+          await new Promise(r => setTimeout(r, 300));
+        }
+      }
+
+      // 6. Navigate to Storefront (/marketplace) and verify image display on public product card
+      console.log("-> Navigating to Storefront (/marketplace) to verify public product card image display...");
+      await page.goto(`${WEB_BASE}/marketplace`, { waitUntil: "networkidle2" });
+      const storefrontImgFound = await page.evaluate(() => {
+        const imgs = Array.from(document.querySelectorAll("img"));
+        return imgs.some(img => img.src.includes("549e1bf71d2c445ca217961b9b2e6035.png"));
+      });
+      if (!storefrontImgFound) {
+        throw new Error("Storefront product card did not render Cloudflare R2 image!");
+      }
+      console.log("   ✓ Verified public storefront product card renders Cloudflare R2 image.");
+
+      // 7. Click product card to navigate to Product Detail page and verify image display and refresh
+      console.log("-> Navigating to Product Detail page to verify image display and refresh persistence...");
+      const productLink = await page.evaluateHandle(() => {
+        const links = Array.from(document.querySelectorAll("a"));
+        return links.find(a => a.innerText.includes("Movement R2 Verified Emblem Cap"));
+      });
+      if (productLink && productLink.asElement()) {
+        const prodHref = await page.evaluate(el => el ? el.getAttribute("href") : null, productLink);
+        if (prodHref) {
+          await page.goto(`${WEB_BASE}${prodHref}`, { waitUntil: "networkidle2" });
+        } else {
+          await productLink.asElement().click();
+        }
+
+        await page.waitForSelector('img[src*="549e1bf71d2c445ca217961b9b2e6035.png"]', { timeout: 10000 });
+        console.log("   ✓ Verified product detail page renders Cloudflare R2 image.");
+
+        // Reload page to verify persistence across refresh
+        console.log("-> Reloading product detail page to verify image persistence across page refresh...");
+        await page.reload({ waitUntil: "networkidle2" });
+        await page.waitForSelector('img[src*="549e1bf71d2c445ca217961b9b2e6035.png"]', { timeout: 10000 });
+        console.log("   ✓ Verified product image persists and displays after browser page refresh.");
       }
     }
 

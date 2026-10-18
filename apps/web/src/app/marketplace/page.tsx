@@ -17,7 +17,7 @@ import {
   MapPin,
 } from "lucide-react";
 import { apiRequest } from "@/lib/api";
-import { MarketplaceProduct } from "@/lib/types";
+import { MarketplaceProduct, parseProductImages } from "@/lib/types";
 import { useCart } from "@/lib/cart-context";
 import { useAuth } from "@/lib/auth-context";
 import { Spinner } from "@/components/ui/Spinner";
@@ -35,19 +35,6 @@ const CATEGORIES = [
   { id: "books_education", label: "Education" },
   { id: "general_goods", label: "General Goods" },
 ];
-
-function parseImages(raw: any): string[] {
-  if (Array.isArray(raw)) return raw.filter((x): x is string => typeof x === "string" && Boolean(x.trim()));
-  if (typeof raw === "string") {
-    try {
-      const parsed = JSON.parse(raw);
-      if (Array.isArray(parsed)) return parsed.filter((x): x is string => typeof x === "string" && Boolean(x.trim()));
-    } catch (_) {
-      if (raw.trim()) return [raw.trim()];
-    }
-  }
-  return [];
-}
 
 export default function MarketplaceStorefrontPage() {
   const { user } = useAuth();
@@ -91,7 +78,7 @@ export default function MarketplaceStorefrontPage() {
     e.preventDefault();
     e.stopPropagation();
 
-    const pImages = parseImages(p.images);
+    const pImages = parseProductImages(p.images);
     const img = pImages.length > 0 ? pImages[0] : "";
 
     addToCart({
@@ -255,7 +242,7 @@ export default function MarketplaceStorefrontPage() {
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-6">
             {products.map((product) => {
               const inStock = product.stock_quantity > 0;
-              const prodImages = parseImages(product.images);
+              const prodImages = parseProductImages(product.images);
               const firstImage = prodImages.length > 0 ? prodImages[0] : "";
 
               return (
@@ -271,6 +258,9 @@ export default function MarketplaceStorefrontPage() {
                         src={firstImage}
                         alt={product.title}
                         className="w-full h-full object-cover group-hover:scale-105 transition duration-300"
+                        onError={(e) => {
+                          (e.target as HTMLElement).style.display = "none";
+                        }}
                       />
                     ) : (
                       <div className="flex flex-col items-center gap-2 text-gray-400">

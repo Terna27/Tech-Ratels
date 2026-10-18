@@ -61,6 +61,11 @@ export async function apiRequest<T = any>(
     ...(options.headers as Record<string, string>),
   };
 
+  // If request body is FormData, delete Content-Type so browser sets boundary automatically
+  if (typeof FormData !== "undefined" && options.body instanceof FormData) {
+    delete headers["Content-Type"];
+  }
+
   // Double-submit CSRF token attachment for mutating cookie-authenticated requests
   if (isMutating && !headers["X-CSRF-Token"]) {
     const csrf = getCsrfToken();

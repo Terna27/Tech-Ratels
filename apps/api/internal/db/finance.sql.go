@@ -7,6 +7,7 @@ package db
 
 import (
 	"context"
+	"encoding/json"
 
 	"github.com/jackc/pgx/v5/pgtype"
 )
@@ -129,15 +130,15 @@ INSERT INTO financial_report_logs (
 `
 
 type CreateFinancialReportLogParams struct {
-	ID                string `json:"id"`
-	ReportReference   string `json:"report_reference"`
-	GeneratedByUserID string `json:"generated_by_user_id"`
-	ReportType        string `json:"report_type"`
-	Filters           []byte `json:"filters"`
-	OpeningBalance    int64  `json:"opening_balance"`
-	ClosingBalance    int64  `json:"closing_balance"`
-	TotalInflows      int64  `json:"total_inflows"`
-	TotalOutflows     int64  `json:"total_outflows"`
+	ID                string          `json:"id"`
+	ReportReference   string          `json:"report_reference"`
+	GeneratedByUserID string          `json:"generated_by_user_id"`
+	ReportType        string          `json:"report_type"`
+	Filters           json.RawMessage `json:"filters"`
+	OpeningBalance    int64           `json:"opening_balance"`
+	ClosingBalance    int64           `json:"closing_balance"`
+	TotalInflows      int64           `json:"total_inflows"`
+	TotalOutflows     int64           `json:"total_outflows"`
 }
 
 func (q *Queries) CreateFinancialReportLog(ctx context.Context, arg CreateFinancialReportLogParams) (FinancialReportLog, error) {
@@ -644,7 +645,7 @@ type ListFinancialReportLogsRow struct {
 	ReportReference   string             `json:"report_reference"`
 	GeneratedByUserID string             `json:"generated_by_user_id"`
 	ReportType        string             `json:"report_type"`
-	Filters           []byte             `json:"filters"`
+	Filters           json.RawMessage    `json:"filters"`
 	OpeningBalance    int64              `json:"opening_balance"`
 	ClosingBalance    int64              `json:"closing_balance"`
 	TotalInflows      int64              `json:"total_inflows"`

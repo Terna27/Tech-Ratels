@@ -17,7 +17,7 @@ import {
   Package,
 } from "lucide-react";
 import { apiRequest } from "@/lib/api";
-import { MarketplaceProduct } from "@/lib/types";
+import { MarketplaceProduct, parseProductImages } from "@/lib/types";
 import { useCart } from "@/lib/cart-context";
 import { Spinner } from "@/components/ui/Spinner";
 import { Alert } from "@/components/ui/Alert";
@@ -69,19 +69,7 @@ export default function ProductDetailPage({ params }: { params: Promise<{ id: st
   }
 
   const inStock = product.stock_quantity > 0;
-  let images: string[] = [];
-  if (Array.isArray(product.images)) {
-    images = product.images.filter((x: any): x is string => typeof x === "string" && Boolean(x.trim()));
-  } else if (typeof product.images === "string") {
-    try {
-      const parsed = JSON.parse(product.images);
-      if (Array.isArray(parsed)) {
-        images = parsed.filter((x: any): x is string => typeof x === "string" && Boolean(x.trim()));
-      }
-    } catch (_) {
-      if (product.images.trim()) images = [product.images.trim()];
-    }
-  }
+  const images: string[] = parseProductImages(product.images);
   const currentImage = images.length > 0 ? images[activeImageIndex] || images[0] : "";
 
   const formatNaira = (kobo: number) => {

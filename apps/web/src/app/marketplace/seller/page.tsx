@@ -26,7 +26,7 @@ import {
 } from "lucide-react";
 import { useAuth } from "@/lib/auth-context";
 import { apiRequest } from "@/lib/api";
-import { State, LGA } from "@/lib/types";
+import { State, LGA, parseProductImages, R2_PUBLIC_DOMAIN } from "@/lib/types";
 import { Spinner } from "@/components/ui/Spinner";
 import { Badge } from "@/components/ui/Badge";
 import { Alert } from "@/components/ui/Alert";
@@ -146,7 +146,7 @@ export default function SellerPortalPage() {
       setBusiness(b);
       setHasNoBusiness(false);
 
-      if (b && (b.approval_status === "approved" || b.status === "active")) {
+      if (b && (b.status === "approved" || b.status === "active" || b.approval_status === "approved")) {
         // Load metrics, products, orders, branches
         const [mRes, pRes, oRes, brRes] = await Promise.allSettled([
           apiRequest<any>("/marketplace/seller/metrics"),
@@ -260,12 +260,14 @@ export default function SellerPortalPage() {
           body: formData,
         });
 
+        const finalDirectUrl = uploadRes.public_url || (uploadRes.object_key ? `${R2_PUBLIC_DOMAIN}/${uploadRes.object_key}` : "");
+
         setProductImages((prev) =>
           prev.map((item) =>
             item.id === tempId
               ? {
                   id: tempId,
-                  url: uploadRes.public_url,
+                  url: finalDirectUrl,
                   objectKey: uploadRes.object_key,
                   isUploading: false,
                   progress: 100,
@@ -298,12 +300,14 @@ export default function SellerPortalPage() {
             throw new Error(`Cloudflare R2 upload returned status ${putRes.status}`);
           }
 
+          const finalPresignUrl = presignRes.public_url || (presignRes.object_key ? `${R2_PUBLIC_DOMAIN}/${presignRes.object_key}` : "");
+
           setProductImages((prev) =>
             prev.map((item) =>
               item.id === tempId
                 ? {
                     id: tempId,
-                    url: presignRes.public_url,
+                    url: finalPresignUrl,
                     objectKey: presignRes.object_key,
                     isUploading: false,
                     progress: 100,
@@ -518,17 +522,12 @@ export default function SellerPortalPage() {
     setProdStock(p.stock_quantity.toString());
     setProdLowStock(p.low_stock_threshold.toString());
     
-    let parsedImages: { id: string; url: string; isUploading?: boolean }[] = [];
-    try {
-      const arr = typeof p.images === "string" ? JSON.parse(p.images) : p.images;
-      if (Array.isArray(arr)) {
-        parsedImages = arr.map((url: string, idx: number) => ({
-          id: `existing-${idx}-${url}`,
-          url,
-          isUploading: false,
-        }));
-      }
-    } catch (_) {}
+    const urls = parseProductImages(p.images);
+    const parsedImages = urls.map((url: string, idx: number) => ({
+      id: `existing-${idx}-${url}`,
+      url,
+      isUploading: false,
+    }));
     setProductImages(parsedImages);
     setImageError(null);
     setProdStatus(p.status);
@@ -727,7 +726,7 @@ export default function SellerPortalPage() {
   }
 
   // 2. If business is pending approval
-  if (business && business.approval_status === "pending") {
+  if (business && (business.status === "pending_review" || business.status === "pending" || business.approval_status === "pending")) {
     return (
       <div className="max-w-2xl mx-auto px-4 py-16 text-center space-y-6">
         <div className="w-16 h-16 bg-amber-100 rounded-full flex items-center justify-center mx-auto text-amber-700">
@@ -929,11 +928,8 @@ export default function SellerPortalPage() {
                       <tr key={p.id} className="hover:bg-gray-50/50">
                         <td className="py-3 px-4 font-bold text-gray-900 flex items-center gap-3">
                           {(() => {
-                            let firstImg = "";
-                            try {
-                              const arr = typeof p.images === "string" ? JSON.parse(p.images) : p.images;
-                              if (Array.isArray(arr) && arr.length > 0) firstImg = arr[0];
-                            } catch (_) {}
+                            const prodImgs = parseProductImages(p.images);
+                            const firstImg = prodImgs[0] || "";
                             return firstImg ? (
                               <img
                                 src={firstImg}

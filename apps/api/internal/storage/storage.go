@@ -87,8 +87,9 @@ func NewR2StorageService(ctx context.Context, cfg R2Config) (*R2StorageService, 
 
 	pubDomain := strings.TrimRight(cfg.PublicDomain, "/")
 	if pubDomain == "" {
-		// Fallback to endpoint/bucket URL if public domain is not configured
-		pubDomain = fmt.Sprintf("%s/%s", endpointURL, cfg.BucketName)
+		pubDomain = "https://pub-82990f82f02446b5a11817fdce96912d.r2.dev"
+	} else if !strings.HasPrefix(pubDomain, "http://") && !strings.HasPrefix(pubDomain, "https://") {
+		pubDomain = "https://" + pubDomain
 	}
 
 	return &R2StorageService{

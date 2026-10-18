@@ -953,5 +953,100 @@ export function safeJsonParse<T = any>(val: any, fallback: T): T {
   return fallback;
 }
 
+export const R2_PUBLIC_DOMAIN = "https://pub-82990f82f02446b5a11817fdce96912d.r2.dev";
 
+/**
+ * Normalizes any image URL or object key to an absolute, deliverable URL.
+ */
+export function resolveImageUrl(urlOrKey: string): string {
+  if (!urlOrKey) return "";
+  let clean = urlOrKey.trim();
+  if (!clean) return "";
 
+  // If already full http(s) URL, return directly
+  if (clean.startsWith("http://") || clean.startsWith("https://")) {
+    return clean;
+  }
+
+  // If data URI or blob URL, return as-is
+  if (clean.startsWith("data:image/") || clean.startsWith("blob:")) {
+    return clean;
+  }
+
+  // If it's a storage key (e.g. marketplace/products/...), resolve with public R2 domain
+  clean = clean.replace(/^\/+/, "");
+  return `${R2_PUBLIC_DOMAIN}/${clean}`;
+}
+
+/**
+ * Resiliently parses product images from:
+ * 1. JavaScript string[] or object[]
+ * 2. Raw JSON string array: '["https://..."]'
+ * 3. Base64-encoded JSON string array: "WyJodHRwczovL..." (from PostgreSQL JSONB)
+ * 4. Single raw image URL or comma-separated URLs
+ * Resolves any storage object keys to the public R2 domain.
+ */
+export function parseProductImages(raw: any): string[] {
+  if (raw === null || raw === undefined) return [];
+
+  // 1. Direct array
+  if (Array.isArray(raw)) {
+    return raw
+      .map((item) => {
+        if (typeof item === "string") return resolveImageUrl(item);
+        if (item && typeof item === "object" && item.url) return resolveImageUrl(item.url);
+        if (item && typeof item === "object" && item.public_url) return resolveImageUrl(item.public_url);
+        return "";
+      })
+      .filter(Boolean);
+  }
+
+  // 2. String representation
+  if (typeof raw === "string") {
+    const trimmed = raw.trim();
+    if (!trimmed) return [];
+
+    // 2a. Direct JSON parse
+    try {
+      const parsed = JSON.parse(trimmed);
+      if (Array.isArray(parsed)) {
+        return parsed
+          .map((item) => (typeof item === "string" ? resolveImageUrl(item) : ""))
+          .filter(Boolean);
+      }
+    } catch (_) {}
+
+    // 2b. Base64 encoded JSON string
+    try {
+      let decoded = "";
+      if (typeof window !== "undefined" && (window as any).atob) {
+        decoded = (window as any).atob(trimmed);
+      } else if (typeof Buffer !== "undefined") {
+        decoded = Buffer.from(trimmed, "base64").toString("utf-8");
+      }
+      if (decoded) {
+        const parsed = JSON.parse(decoded);
+        if (Array.isArray(parsed)) {
+          return parsed
+            .map((item) => (typeof item === "string" ? resolveImageUrl(item) : ""))
+            .filter(Boolean);
+        }
+      }
+    } catch (_) {}
+
+    // 2c. Comma-separated URLs
+    if (trimmed.includes(",")) {
+      return trimmed
+        .split(",")
+        .map((s) => resolveImageUrl(s.trim()))
+        .filter(Boolean);
+    }
+
+    // 2d. Single URL or object key
+    if (trimmed.startsWith("http://") || trimmed.startsWith("https://") || trimmed.startsWith("marketplace/")) {
+      return [resolveImageUrl(trimmed)];
+    }
+  }
+
+  return [];
+}

@@ -5,6 +5,8 @@
 package db
 
 import (
+	"encoding/json"
+
 	"github.com/jackc/pgx/v5/pgtype"
 )
 
@@ -107,7 +109,7 @@ type CareersApplication struct {
 	StatusUpdatedAt       pgtype.Timestamptz `json:"status_updated_at"`
 	StatusUpdatedByUserID pgtype.Text        `json:"status_updated_by_user_id"`
 	MatchScore            int32              `json:"match_score"`
-	MatchFactors          []byte             `json:"match_factors"`
+	MatchFactors          json.RawMessage    `json:"match_factors"`
 	CreatedAt             pgtype.Timestamptz `json:"created_at"`
 	UpdatedAt             pgtype.Timestamptz `json:"updated_at"`
 	Version               int32              `json:"version"`
@@ -128,11 +130,11 @@ type CareersCandidateProfile struct {
 	UserID                          string             `json:"user_id"`
 	ProfessionalHeadline            string             `json:"professional_headline"`
 	Summary                         string             `json:"summary"`
-	Skills                          []byte             `json:"skills"`
-	Education                       []byte             `json:"education"`
-	Experience                      []byte             `json:"experience"`
-	Certifications                  []byte             `json:"certifications"`
-	PreferredCategories             []byte             `json:"preferred_categories"`
+	Skills                          json.RawMessage    `json:"skills"`
+	Education                       json.RawMessage    `json:"education"`
+	Experience                      json.RawMessage    `json:"experience"`
+	Certifications                  json.RawMessage    `json:"certifications"`
+	PreferredCategories             json.RawMessage    `json:"preferred_categories"`
 	PreferredWorkplaceType          string             `json:"preferred_workplace_type"`
 	PreferredStateID                pgtype.Text        `json:"preferred_state_id"`
 	ResumeUrl                       string             `json:"resume_url"`
@@ -203,7 +205,7 @@ type CareersJob struct {
 	Description        string             `json:"description"`
 	Responsibilities   string             `json:"responsibilities"`
 	Requirements       string             `json:"requirements"`
-	SkillsRequired     []byte             `json:"skills_required"`
+	SkillsRequired     json.RawMessage    `json:"skills_required"`
 	ExperienceLevel    string             `json:"experience_level"`
 	DeadlineAt         pgtype.Timestamptz `json:"deadline_at"`
 	Status             string             `json:"status"`
@@ -350,7 +352,7 @@ type FinancialReportLog struct {
 	ReportReference   string             `json:"report_reference"`
 	GeneratedByUserID string             `json:"generated_by_user_id"`
 	ReportType        string             `json:"report_type"`
-	Filters           []byte             `json:"filters"`
+	Filters           json.RawMessage    `json:"filters"`
 	OpeningBalance    int64              `json:"opening_balance"`
 	ClosingBalance    int64              `json:"closing_balance"`
 	TotalInflows      int64              `json:"total_inflows"`
@@ -566,7 +568,7 @@ type MarketplaceProduct struct {
 	CompareAtPriceKobo   pgtype.Int8        `json:"compare_at_price_kobo"`
 	StockQuantity        int32              `json:"stock_quantity"`
 	LowStockThreshold    int32              `json:"low_stock_threshold"`
-	Images               []byte             `json:"images"`
+	Images               json.RawMessage    `json:"images"`
 	WeightGrams          pgtype.Int4        `json:"weight_grams"`
 	DeliveryRestrictions pgtype.Text        `json:"delivery_restrictions"`
 	ReturnPolicy         pgtype.Text        `json:"return_policy"`

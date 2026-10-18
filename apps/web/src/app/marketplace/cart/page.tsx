@@ -14,6 +14,7 @@ import {
   Store,
 } from "lucide-react";
 import { useCart } from "@/lib/cart-context";
+import { resolveImageUrl } from "@/lib/types";
 
 export default function CartPage() {
   const { items, updateQuantity, removeFromCart, clearCart, subtotalKobo, totalItems } = useCart();
@@ -85,7 +86,14 @@ export default function CartPage() {
                       {/* Image */}
                       <div className="w-16 h-16 rounded-xl bg-gray-100 border border-gray-200 overflow-hidden flex items-center justify-center shrink-0">
                         {item.imageUrl ? (
-                          <img src={item.imageUrl} alt={item.title} className="w-full h-full object-cover" />
+                          <img
+                            src={resolveImageUrl(item.imageUrl)}
+                            alt={item.title}
+                            className="w-full h-full object-cover"
+                            onError={(e) => {
+                              (e.target as HTMLElement).style.display = "none";
+                            }}
+                          />
                         ) : (
                           <ShoppingBag className="w-6 h-6 text-gray-400" />
                         )}
