@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/go-chi/chi/v5"
+	"ratels-api/internal/db"
 	"ratels-api/internal/service"
 )
 
@@ -38,6 +39,9 @@ func (h *InventoryHandler) ListItems(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		ErrorJSON(w, http.StatusInternalServerError, "INTERNAL_ERROR", err.Error(), nil)
 		return
+	}
+	if items == nil {
+		items = []db.InventoryItem{}
 	}
 	JSON(w, http.StatusOK, items)
 }
@@ -122,6 +126,9 @@ func (h *InventoryHandler) ListLocations(w http.ResponseWriter, r *http.Request)
 		ErrorJSON(w, http.StatusInternalServerError, "INTERNAL_ERROR", err.Error(), nil)
 		return
 	}
+	if locations == nil {
+		locations = []db.ListStorageLocationsRow{}
+	}
 	JSON(w, http.StatusOK, locations)
 }
 
@@ -176,6 +183,9 @@ func (h *InventoryHandler) ListBalances(w http.ResponseWriter, r *http.Request) 
 		ErrorJSON(w, http.StatusInternalServerError, "INTERNAL_ERROR", err.Error(), nil)
 		return
 	}
+	if balances == nil {
+		balances = []db.ListAllStockBalancesRow{}
+	}
 	JSON(w, http.StatusOK, balances)
 }
 
@@ -205,6 +215,9 @@ func (h *InventoryHandler) ListLowStockAlerts(w http.ResponseWriter, r *http.Req
 		ErrorJSON(w, http.StatusInternalServerError, "INTERNAL_ERROR", err.Error(), nil)
 		return
 	}
+	if alerts == nil {
+		alerts = []db.ListLowStockAlertsRow{}
+	}
 	JSON(w, http.StatusOK, alerts)
 }
 
@@ -231,6 +244,9 @@ func (h *InventoryHandler) ListRequests(w http.ResponseWriter, r *http.Request) 
 	if err != nil {
 		ErrorJSON(w, http.StatusInternalServerError, "INTERNAL_ERROR", err.Error(), nil)
 		return
+	}
+	if requests == nil {
+		requests = []db.ListMaterialRequestsRow{}
 	}
 	JSON(w, http.StatusOK, requests)
 }
@@ -371,6 +387,9 @@ func (h *InventoryHandler) ListTransfers(w http.ResponseWriter, r *http.Request)
 		ErrorJSON(w, http.StatusInternalServerError, "INTERNAL_ERROR", err.Error(), nil)
 		return
 	}
+	if transfers == nil {
+		transfers = []db.ListMaterialTransfersRow{}
+	}
 	JSON(w, http.StatusOK, transfers)
 }
 
@@ -493,6 +512,9 @@ func (h *InventoryHandler) ListDiscrepancies(w http.ResponseWriter, r *http.Requ
 		ErrorJSON(w, http.StatusInternalServerError, "INTERNAL_ERROR", err.Error(), nil)
 		return
 	}
+	if discrepancies == nil {
+		discrepancies = []db.ListTransferDiscrepanciesRow{}
+	}
 	JSON(w, http.StatusOK, discrepancies)
 }
 
@@ -584,6 +606,9 @@ func (h *InventoryHandler) ListStockLedger(w http.ResponseWriter, r *http.Reques
 	if err != nil {
 		ErrorJSON(w, http.StatusInternalServerError, "INTERNAL_ERROR", err.Error(), nil)
 		return
+	}
+	if entries == nil {
+		entries = []db.ListStockLedgerEntriesRow{}
 	}
 
 	response := map[string]interface{}{

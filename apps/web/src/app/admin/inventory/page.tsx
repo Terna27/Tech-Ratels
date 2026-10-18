@@ -176,15 +176,15 @@ export default function AdminInventoryPage() {
       ]);
 
       setSummary(sum);
-      setItems(itms);
-      setLocations(locs);
-      setBalances(bals);
-      setLowStockAlerts(alerts);
-      setRequests(reqs);
-      setTransfers(trfs);
-      setDiscrepancies(discs);
-      setLedgerEntries(led.entries || []);
-      setLedgerTotal(led.total || 0);
+      setItems(Array.isArray(itms) ? itms : []);
+      setLocations(Array.isArray(locs) ? locs : []);
+      setBalances(Array.isArray(bals) ? bals : []);
+      setLowStockAlerts(Array.isArray(alerts) ? alerts : []);
+      setRequests(Array.isArray(reqs) ? reqs : []);
+      setTransfers(Array.isArray(trfs) ? trfs : []);
+      setDiscrepancies(Array.isArray(discs) ? discs : []);
+      setLedgerEntries(Array.isArray(led?.entries) ? led.entries : []);
+      setLedgerTotal(typeof led?.total === "number" ? led.total : 0);
     } catch (err: any) {
       setFeedback({ type: "error", message: err.message || "Failed to load inventory data" });
     } finally {

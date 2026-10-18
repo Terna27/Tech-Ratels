@@ -546,3 +546,239 @@ func TestInventoryService_ConcurrentOverAllocationProtection(t *testing.T) {
 		t.Fatalf("Race condition protection failed! Success: %d, Failure: %d (Err1: %v, Err2: %v)", successCount, failureCount, err1, err2)
 	}
 }
+
+func TestInventoryService_FullEndToEndLifecycleWorkflow(t *testing.T) {
+	// Full Lifecycle Verification:
+	// Material Request → Approval → Reservation → Dispatch → Receipt → Discrepancy Resolution → Closure
+	// Confirms that inventory balances and audit records remain consistent throughout.
+	env := setupTestEnv(t)
+	defer env.Pool.Close()
+	ctx := context.Background()
+
+	// 1. Setup Actors: Super Admin and Requesting Member
+	saUser := createRegisteredUser(t, env, "sa_lifecycle", "super_admin")
+	reqUser := createRegisteredUser(t, env, "req_lifecycle", "member")
+
+	// 2. Setup Warehouses: Source (National Depot) and Destination (State Depot)
+	whSource, err := env.InventoryService.CreateLocation(ctx, saUser, service.CreateLocationRequest{
+		Code:         fmt.Sprintf("WH-NAT-E2E-%d", time.Now().UnixNano()),
+		Name:         "Abuja National Supply Hub",
+		LocationType: "national",
+	})
+	if err != nil {
+		t.Fatalf("Failed to create source warehouse: %v", err)
+	}
+
+	whDest, err := env.InventoryService.CreateLocation(ctx, saUser, service.CreateLocationRequest{
+		Code:         fmt.Sprintf("WH-STA-E2E-%d", time.Now().UnixNano()),
+		Name:         "Kano State Sanitation Depot",
+		LocationType: "state",
+	})
+	if err != nil {
+		t.Fatalf("Failed to create destination warehouse: %v", err)
+	}
+
+	// 3. Setup Item: Nitrile Gloves
+	item, err := env.InventoryService.CreateItem(ctx, saUser, service.CreateItemRequest{
+		SKU:                  fmt.Sprintf("GLV-E2E-%d", time.Now().UnixNano()),
+		Name:                 "Heavy Duty Nitrile Cleaning Gloves",
+		Category:             "protective_equipment",
+		UnitOfMeasure:        "pairs",
+		MinThresholdQuantity: 25,
+	})
+	if err != nil {
+		t.Fatalf("Failed to create inventory item: %v", err)
+	}
+
+	// 4. Initial Bulk Receipt into Source Warehouse (200 pairs)
+	_, err = env.InventoryService.ReceiveStock(ctx, saUser, service.ReceiveStockRequest{
+		LocationID:   whSource.ID,
+		ItemID:       item.ID,
+		Quantity:     200,
+		MovementType: "initial_receipt",
+		Notes:        strPtr("Batch 2026-NTR-01 initial stock"),
+	})
+	if err != nil {
+		t.Fatalf("Failed to stock initial inventory: %v", err)
+	}
+
+	// Check Source Balance: 200 on hand, 0 reserved, 200 available
+	srcBal, err := env.InventoryService.ListStockBalances(ctx, &whSource.ID, &item.ID, nil)
+	if err != nil || len(srcBal) != 1 || srcBal[0].OnHandQuantity != 200 || srcBal[0].AvailableQuantity != 200 {
+		t.Fatalf("Initial source balance incorrect: %+v", srcBal)
+	}
+
+	// 5. Material Request: Member submits request for 50 pairs to Kano Depot
+	matReq, err := env.InventoryService.CreateMaterialRequest(ctx, reqUser, service.CreateMaterialRequestInput{
+		JurisdictionType:      "state",
+		DestinationLocationID: whDest.ID,
+		IntendedUse:           "State-wide Drainage Cleanup Campaign",
+		RequiredDate:          time.Now().AddDate(0, 0, 7),
+		Items: []service.MaterialRequestItemInput{
+			{
+				ItemID:            item.ID,
+				RequestedQuantity: 50,
+				UnitOfMeasure:     "pairs",
+			},
+		},
+	})
+	if err != nil {
+		t.Fatalf("Failed to create material request: %v", err)
+	}
+	if matReq.Status != "submitted" {
+		t.Errorf("Expected request status 'submitted', got '%s'", matReq.Status)
+	}
+
+	// 6. Approval: Authorized Super Admin reviews and approves request
+	reviewedReq, err := env.InventoryService.ReviewMaterialRequest(ctx, saUser, nil, matReq.ID, service.ReviewMaterialRequestInput{
+		Action: "approve",
+	})
+	if err != nil {
+		t.Fatalf("Approval failed: %v", err)
+	}
+	if reviewedReq.Status != "approved" {
+		t.Errorf("Expected request status 'approved', got '%s'", reviewedReq.Status)
+	}
+
+	// 7. Reservation: Stock Allocation from supplying warehouse
+	err = env.InventoryService.AllocateAndReserveStock(ctx, saUser, matReq.ID, whSource.ID)
+	if err != nil {
+		t.Fatalf("Stock allocation and reservation failed: %v", err)
+	}
+
+	// Check Source Balance: 200 on hand, 50 reserved, 150 available
+	srcBalAllocated, err := env.InventoryService.ListStockBalances(ctx, &whSource.ID, &item.ID, nil)
+	if err != nil || len(srcBalAllocated) != 1 {
+		t.Fatalf("Failed to query allocated balance: %v", err)
+	}
+	if srcBalAllocated[0].OnHandQuantity != 200 || srcBalAllocated[0].ReservedQuantity != 50 || srcBalAllocated[0].AvailableQuantity != 150 {
+		t.Fatalf("Allocation balance mismatch: on_hand=%d, reserved=%d, available=%d",
+			srcBalAllocated[0].OnHandQuantity, srcBalAllocated[0].ReservedQuantity, srcBalAllocated[0].AvailableQuantity)
+	}
+
+	// 8. Transfer Creation: Linked to Material Request
+	trfIdemKey := fmt.Sprintf("idem-e2e-trf-%d", time.Now().UnixNano())
+	trf, err := env.InventoryService.CreateTransfer(ctx, saUser, service.CreateTransferInput{
+		IdempotencyKey:        &trfIdemKey,
+		RequestID:             &matReq.ID,
+		SourceLocationID:      whSource.ID,
+		DestinationLocationID: whDest.ID,
+		CarrierName:           strPtr("Ratels Fleet Logistic #12"),
+		TrackingNumber:        strPtr("TRK-E2E-7700"),
+		Items: []service.CreateTransferItemInput{
+			{
+				ItemID:             item.ID,
+				DispatchedQuantity: 50,
+				UnitOfMeasure:      "pairs",
+			},
+		},
+	})
+	if err != nil {
+		t.Fatalf("Failed to create transfer: %v", err)
+	}
+
+	// 9. Dispatch: Source warehouse dispatches 50 pairs
+	dispatchedTrf, err := env.InventoryService.DispatchTransfer(ctx, saUser, trf.ID, service.DispatchTransferInput{
+		CarrierName: strPtr("Ratels Fleet Logistic #12"),
+	})
+	if err != nil {
+		t.Fatalf("Failed to dispatch transfer: %v", err)
+	}
+	if dispatchedTrf.Status != "dispatched" {
+		t.Errorf("Expected status 'dispatched', got '%s'", dispatchedTrf.Status)
+	}
+
+	// Check Source Balance post-dispatch: 150 on hand, 0 reserved, 150 available
+	srcBalDispatched, err := env.InventoryService.ListStockBalances(ctx, &whSource.ID, &item.ID, nil)
+	if err != nil || srcBalDispatched[0].OnHandQuantity != 150 || srcBalDispatched[0].ReservedQuantity != 0 {
+		t.Fatalf("Post-dispatch source balance incorrect: %+v", srcBalDispatched[0])
+	}
+
+	// Check Destination Balance during transit: must still be 0 (goods in transit)
+	dstBalInTransit, err := env.InventoryService.ListStockBalances(ctx, &whDest.ID, &item.ID, nil)
+	if err != nil {
+		t.Fatalf("Failed to query destination balance: %v", err)
+	}
+	if len(dstBalInTransit) > 0 && dstBalInTransit[0].OnHandQuantity > 0 {
+		t.Fatalf("Destination stock credited prematurely before physical receipt! Found %d", dstBalInTransit[0].OnHandQuantity)
+	}
+
+	// 10. Receipt: Destination receives 45 pairs (5 pairs missing in transit)
+	recvIdemKey := fmt.Sprintf("idem-e2e-recv-%d", time.Now().UnixNano())
+	receivedTrf, err := env.InventoryService.ConfirmTransferReceipt(ctx, saUser, trf.ID, service.ConfirmReceiptInput{
+		IdempotencyKey: &recvIdemKey,
+		Items: []service.ReceiptItemInput{
+			{
+				ItemID:           item.ID,
+				ReceivedQuantity: 45,
+			},
+		},
+		DiscrepancyReason: strPtr("missing_in_transit"),
+	})
+	if err != nil {
+		t.Fatalf("Confirm receipt failed: %v", err)
+	}
+	if receivedTrf.Status != "disputed" {
+		t.Errorf("Expected transfer status 'disputed', got '%s'", receivedTrf.Status)
+	}
+
+	// Check Destination Balance post-receipt: exactly 45 on hand
+	dstBalReceived, err := env.InventoryService.ListStockBalances(ctx, &whDest.ID, &item.ID, nil)
+	if err != nil || len(dstBalReceived) != 1 || dstBalReceived[0].OnHandQuantity != 45 {
+		t.Fatalf("Destination stock balance post-receipt incorrect: expected 45, got %+v", dstBalReceived)
+	}
+
+	// Check Material Request Closure: Request linked to transfer must now be 'fulfilled'
+	finalMatReq, err := env.InventoryService.GetMaterialRequest(ctx, matReq.ID)
+	if err != nil {
+		t.Fatalf("Failed to get material request: %v", err)
+	}
+	if finalMatReq.Status != "fulfilled" {
+		t.Errorf("Expected material request to be 'fulfilled' after transfer receipt, got '%s'", finalMatReq.Status)
+	}
+
+	// 11. Discrepancy Resolution: Resolve 5 missing pairs via write-off
+	discs, err := env.InventoryService.ListDiscrepancies(ctx, nil, &trf.ID)
+	if err != nil || len(discs) != 1 {
+		t.Fatalf("Expected 1 open discrepancy, got %d", len(discs))
+	}
+	disc := discs[0]
+	if disc.ExpectedQuantity != 50 || disc.ReceivedQuantity != 45 || disc.DifferenceQuantity != 5 {
+		t.Fatalf("Discrepancy figures incorrect: expected=50, received=45, diff=%d", disc.DifferenceQuantity)
+	}
+
+	resolvedDisc, err := env.InventoryService.ResolveDiscrepancy(ctx, saUser, disc.ID, service.ResolveDiscrepancyInput{
+		Resolution: "write_off",
+		Notes:      "5 pairs punctured during transit; loss written off under administrative authority",
+	})
+	if err != nil {
+		t.Fatalf("Failed to resolve discrepancy: %v", err)
+	}
+	if resolvedDisc.Status != "resolved_writeoff" {
+		t.Errorf("Expected discrepancy status 'resolved_writeoff', got '%s'", resolvedDisc.Status)
+	}
+
+	// 12. Full Immutable Audit Ledger Verification
+	ledgerEntries, _, err := env.InventoryService.ListStockLedger(ctx, nil, &item.ID, nil, nil, nil, 100, 0)
+	if err != nil {
+		t.Fatalf("Failed to query stock ledger: %v", err)
+	}
+	// Expected 4 movements:
+	// 1. Initial Receipt: +200 at Source
+	// 2. Transfer Dispatch: -50 at Source
+	// 3. Transfer Receipt: +45 at Destination
+	// 4. Loss Write-Off: -5 at Destination
+	if len(ledgerEntries) < 4 {
+		t.Fatalf("Expected at least 4 ledger entries, found %d", len(ledgerEntries))
+	}
+
+	// Total stock accountability:
+	// Source on hand (150) + Destination on hand (45) + Loss written off (5) = 200 initial stock!
+	finalSrcBal, _ := env.InventoryService.ListStockBalances(ctx, &whSource.ID, &item.ID, nil)
+	finalDstBal, _ := env.InventoryService.ListStockBalances(ctx, &whDest.ID, &item.ID, nil)
+
+	totalAccountedFor := finalSrcBal[0].OnHandQuantity + finalDstBal[0].OnHandQuantity + disc.DifferenceQuantity
+	if totalAccountedFor != 200 {
+		t.Fatalf("Stock balance conservation violated! Initial 200 != Total Accounted %d", totalAccountedFor)
+	}
+}
