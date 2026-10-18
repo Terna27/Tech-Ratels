@@ -29,6 +29,7 @@ type TestEnv struct {
 	FinanceService *service.FinanceService
 	InventoryService *service.InventoryService
 	MarketplaceService *service.MarketplaceService
+	CareersService     *service.CareersService
 }
 
 func setupTestEnv(t *testing.T) *TestEnv {
@@ -61,6 +62,7 @@ func setupTestEnv(t *testing.T) *TestEnv {
 	invSvc := service.NewInventoryService(repo, auditSvc)
 	sandboxGateway := payment.NewSandboxGateway(cfg.FrontendBaseURL)
 	mktSvc := service.NewMarketplaceService(repo, auditSvc, sandboxGateway)
+	careersSvc := service.NewCareersService(repo, auditSvc, del)
 
 	return &TestEnv{
 		Pool:               pool,
@@ -78,5 +80,6 @@ func setupTestEnv(t *testing.T) *TestEnv {
 		FinanceService:     finSvc,
 		InventoryService:   invSvc,
 		MarketplaceService: mktSvc,
+		CareersService:     careersSvc,
 	}
 }

@@ -31,6 +31,7 @@ export function Navbar() {
     { href: "/about", label: "About" },
     { href: "/activities", label: "Cleanups & Events" },
     { href: "/marketplace", label: "Ratels Marketplace" },
+    { href: "/careers", label: "Ratels Careers" },
     { href: "/leadership", label: "Leadership" },
     { href: "/foundation", label: "Foundation" },
   ];

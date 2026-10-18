@@ -279,6 +279,38 @@ export default function MemberDashboardPage() {
               </li>
               <li>
                 <Link
+                  href="/marketplace"
+                  className="block p-2.5 rounded-lg border border-gray-200 hover:bg-gray-50 text-gray-700 font-medium"
+                >
+                  Ratels Marketplace
+                </Link>
+              </li>
+              <li>
+                <Link
+                  href="/careers"
+                  className="block p-2.5 rounded-lg border border-emerald-200 bg-emerald-50/50 hover:bg-emerald-50 text-emerald-900 font-medium"
+                >
+                  Ratels Careers & Vacancies
+                </Link>
+              </li>
+              <li>
+                <Link
+                  href="/careers/profile"
+                  className="block p-2.5 rounded-lg border border-gray-200 hover:bg-gray-50 text-gray-700 font-medium"
+                >
+                  My Candidate Profile
+                </Link>
+              </li>
+              <li>
+                <Link
+                  href="/careers/applications"
+                  className="block p-2.5 rounded-lg border border-gray-200 hover:bg-gray-50 text-gray-700 font-medium"
+                >
+                  My Applications & Interviews
+                </Link>
+              </li>
+              <li>
+                <Link
                   href="/foundation"
                   className="block p-2.5 rounded-lg border border-gray-200 hover:bg-gray-50 text-gray-700 font-medium"
                 >

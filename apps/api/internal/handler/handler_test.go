@@ -37,6 +37,7 @@ type TestHarness struct {
 	FinanceService   *service.FinanceService
 	InventoryService *service.InventoryService
 	MarketplaceService *service.MarketplaceService
+	CareersService   *service.CareersService
 	Cleanup          func()
 }
 
@@ -70,6 +71,7 @@ func setupTestHarness(t *testing.T) *TestHarness {
 	inventorySvc := service.NewInventoryService(repo, auditSvc)
 	paymentGw := payment.NewSandboxGateway(cfg.FrontendBaseURL)
 	marketplaceSvc := service.NewMarketplaceService(repo, auditSvc, paymentGw)
+	careersSvc := service.NewCareersService(repo, auditSvc, del)
 
 	healthH := handler.NewHealthHandler(repo)
 	authH := handler.NewAuthHandler(authSvc, cfg)
@@ -83,6 +85,7 @@ func setupTestHarness(t *testing.T) *TestHarness {
 	financeH := handler.NewFinanceHandler(financeSvc)
 	inventoryH := handler.NewInventoryHandler(inventorySvc)
 	marketplaceH := handler.NewMarketplaceHandler(marketplaceSvc)
+	careersH := handler.NewCareersHandler(careersSvc)
 
 	router := handler.NewRouter(handler.RouterParams{
 		Config:               cfg,
@@ -99,6 +102,7 @@ func setupTestHarness(t *testing.T) *TestHarness {
 		FinanceHandler:       financeH,
 		InventoryHandler:     inventoryH,
 		MarketplaceHandler:   marketplaceH,
+		CareersHandler:       careersH,
 	})
 
 	return &TestHarness{
@@ -117,6 +121,7 @@ func setupTestHarness(t *testing.T) *TestHarness {
 		FinanceService:   financeSvc,
 		InventoryService: inventorySvc,
 		MarketplaceService: marketplaceSvc,
+		CareersService:   careersSvc,
 		Cleanup: func() {
 			pool.Close()
 		},

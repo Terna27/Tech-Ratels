@@ -11,6 +11,10 @@ import (
 )
 
 type Querier interface {
+	// -------------------------------------------------------------
+	// Recruiters
+	// -------------------------------------------------------------
+	AddCareersRecruiter(ctx context.Context, arg AddCareersRecruiterParams) (CareersRecruiter, error)
 	CalculateExternalInflowsAndOutflows(ctx context.Context, arg CalculateExternalInflowsAndOutflowsParams) (CalculateExternalInflowsAndOutflowsRow, error)
 	CalculateFundBalanceBeforeDate(ctx context.Context, arg CalculateFundBalanceBeforeDateParams) (int64, error)
 	CountActiveAppointments(ctx context.Context) (int64, error)
@@ -39,6 +43,26 @@ type Querier interface {
 	// -------------------------------------------------------------
 	CreateBusinessBranch(ctx context.Context, arg CreateBusinessBranchParams) (MarketplaceBusinessBranch, error)
 	CreateCapitalCity(ctx context.Context, arg CreateCapitalCityParams) (CapitalCity, error)
+	// -------------------------------------------------------------
+	// Job Applications
+	// -------------------------------------------------------------
+	CreateCareersApplication(ctx context.Context, arg CreateCareersApplicationParams) (CareersApplication, error)
+	// -------------------------------------------------------------
+	// Application History
+	// -------------------------------------------------------------
+	CreateCareersApplicationHistory(ctx context.Context, arg CreateCareersApplicationHistoryParams) (CareersApplicationHistory, error)
+	// -------------------------------------------------------------
+	// Careers Employers
+	// -------------------------------------------------------------
+	CreateCareersEmployer(ctx context.Context, arg CreateCareersEmployerParams) (CareersEmployer, error)
+	// -------------------------------------------------------------
+	// Interviews
+	// -------------------------------------------------------------
+	CreateCareersInterview(ctx context.Context, arg CreateCareersInterviewParams) (CareersInterview, error)
+	// -------------------------------------------------------------
+	// Jobs
+	// -------------------------------------------------------------
+	CreateCareersJob(ctx context.Context, arg CreateCareersJobParams) (CareersJob, error)
 	CreateCleanupCampaign(ctx context.Context, arg CreateCleanupCampaignParams) (CleanupCampaign, error)
 	CreateContactVerification(ctx context.Context, arg CreateContactVerificationParams) (ContactVerification, error)
 	CreateEmailVerificationToken(ctx context.Context, arg CreateEmailVerificationTokenParams) (EmailVerificationToken, error)
@@ -95,9 +119,11 @@ type Querier interface {
 	CreateUser(ctx context.Context, arg CreateUserParams) (User, error)
 	CreateUserSession(ctx context.Context, arg CreateUserSessionParams) (UserSession, error)
 	CreateZone(ctx context.Context, arg CreateZoneParams) (Zone, error)
+	DecrementCareersJobApplications(ctx context.Context, id string) error
 	DecrementProductStock(ctx context.Context, arg DecrementProductStockParams) (MarketplaceProduct, error)
 	DecrementRegisteredCount(ctx context.Context, id string) (EventInstance, error)
 	DeleteBusinessBranch(ctx context.Context, id string) error
+	DeleteCareersRecruiter(ctx context.Context, arg DeleteCareersRecruiterParams) error
 	DeleteLGA(ctx context.Context, id string) error
 	DeleteMarketplaceProduct(ctx context.Context, id string) error
 	GetActiveAppointmentByJurisdiction(ctx context.Context, arg GetActiveAppointmentByJurisdictionParams) (Appointment, error)
@@ -108,7 +134,22 @@ type Querier interface {
 	GetBadgeByCode(ctx context.Context, code string) (Badge, error)
 	GetBankAccountVersionByID(ctx context.Context, id string) (VerifiedBankAccountVersion, error)
 	GetBusinessBranchByID(ctx context.Context, id string) (GetBusinessBranchByIDRow, error)
+	GetCandidateProfileByUserID(ctx context.Context, userID string) (GetCandidateProfileByUserIDRow, error)
 	GetCapitalCityByState(ctx context.Context, stateID string) (CapitalCity, error)
+	// -------------------------------------------------------------
+	// Overview & Metrics
+	// -------------------------------------------------------------
+	GetCareersAdminOverview(ctx context.Context) (GetCareersAdminOverviewRow, error)
+	GetCareersApplicationByID(ctx context.Context, id string) (GetCareersApplicationByIDRow, error)
+	GetCareersApplicationByJobAndCandidate(ctx context.Context, arg GetCareersApplicationByJobAndCandidateParams) (CareersApplication, error)
+	GetCareersEmployerByID(ctx context.Context, id string) (GetCareersEmployerByIDRow, error)
+	GetCareersEmployerByOwner(ctx context.Context, ownerUserID string) (CareersEmployer, error)
+	GetCareersEmployerBySlug(ctx context.Context, slug string) (GetCareersEmployerBySlugRow, error)
+	GetCareersEmployerOverview(ctx context.Context, employerID string) (GetCareersEmployerOverviewRow, error)
+	GetCareersInterviewByID(ctx context.Context, id string) (GetCareersInterviewByIDRow, error)
+	GetCareersJobByID(ctx context.Context, id string) (GetCareersJobByIDRow, error)
+	GetCareersJobBySlug(ctx context.Context, slug string) (GetCareersJobBySlugRow, error)
+	GetCareersRecruiter(ctx context.Context, arg GetCareersRecruiterParams) (GetCareersRecruiterRow, error)
 	GetCleanupCampaignByID(ctx context.Context, id string) (CleanupCampaign, error)
 	GetCleanupCampaignByYearMonth(ctx context.Context, arg GetCleanupCampaignByYearMonthParams) (CleanupCampaign, error)
 	GetEmailVerificationTokenByHash(ctx context.Context, tokenHash string) (EmailVerificationToken, error)
@@ -166,11 +207,14 @@ type Querier interface {
 	GetVerificationRateLimit(ctx context.Context, arg GetVerificationRateLimitParams) (EmailVerificationRateLimit, error)
 	GetZoneByCode(ctx context.Context, code string) (Zone, error)
 	GetZoneByID(ctx context.Context, id string) (Zone, error)
+	IncrementCareersJobApplications(ctx context.Context, id string) error
+	IncrementCareersJobViews(ctx context.Context, id string) error
 	IncrementProductStock(ctx context.Context, arg IncrementProductStockParams) (MarketplaceProduct, error)
 	IncrementRegisteredCount(ctx context.Context, id string) (EventInstance, error)
 	IncrementVerificationAttempt(ctx context.Context, id string) (ContactVerification, error)
 	InvalidatePendingEmailVerificationTokens(ctx context.Context, userID string) error
 	ListActiveAppointmentsByUser(ctx context.Context, userID string) ([]Appointment, error)
+	ListAllCareersJobsAdmin(ctx context.Context, arg ListAllCareersJobsAdminParams) ([]ListAllCareersJobsAdminRow, error)
 	ListAllEvents(ctx context.Context) ([]ListAllEventsRow, error)
 	ListAllMarketplaceDisputes(ctx context.Context, dollar_1 string) ([]ListAllMarketplaceDisputesRow, error)
 	ListAllMarketplaceOrders(ctx context.Context, arg ListAllMarketplaceOrdersParams) ([]ListAllMarketplaceOrdersRow, error)
@@ -181,6 +225,17 @@ type Querier interface {
 	ListBadgeAwardsByUser(ctx context.Context, userID string) ([]ListBadgeAwardsByUserRow, error)
 	ListBadges(ctx context.Context) ([]Badge, error)
 	ListBusinessBranchesByBusiness(ctx context.Context, businessID string) ([]ListBusinessBranchesByBusinessRow, error)
+	ListCareersApplicationHistory(ctx context.Context, applicationID string) ([]ListCareersApplicationHistoryRow, error)
+	ListCareersApplicationsAdmin(ctx context.Context, arg ListCareersApplicationsAdminParams) ([]ListCareersApplicationsAdminRow, error)
+	ListCareersApplicationsByCandidate(ctx context.Context, candidateUserID string) ([]ListCareersApplicationsByCandidateRow, error)
+	ListCareersApplicationsByEmployer(ctx context.Context, arg ListCareersApplicationsByEmployerParams) ([]ListCareersApplicationsByEmployerRow, error)
+	ListCareersApplicationsByJob(ctx context.Context, arg ListCareersApplicationsByJobParams) ([]ListCareersApplicationsByJobRow, error)
+	ListCareersEmployers(ctx context.Context, arg ListCareersEmployersParams) ([]ListCareersEmployersRow, error)
+	ListCareersInterviewsByApplication(ctx context.Context, applicationID string) ([]ListCareersInterviewsByApplicationRow, error)
+	ListCareersInterviewsByCandidate(ctx context.Context, candidateUserID string) ([]ListCareersInterviewsByCandidateRow, error)
+	ListCareersInterviewsByEmployer(ctx context.Context, employerID string) ([]ListCareersInterviewsByEmployerRow, error)
+	ListCareersJobsByEmployer(ctx context.Context, arg ListCareersJobsByEmployerParams) ([]ListCareersJobsByEmployerRow, error)
+	ListCareersRecruitersByEmployer(ctx context.Context, employerID string) ([]ListCareersRecruitersByEmployerRow, error)
 	ListClaimsByUser(ctx context.Context, userID string) ([]ListClaimsByUserRow, error)
 	ListCleanupCampaigns(ctx context.Context) ([]CleanupCampaign, error)
 	ListEventsByState(ctx context.Context, stateID string) ([]ListEventsByStateRow, error)
@@ -206,6 +261,7 @@ type Querier interface {
 	ListMaterialTransfers(ctx context.Context, arg ListMaterialTransfersParams) ([]ListMaterialTransfersRow, error)
 	ListPendingClaims(ctx context.Context) ([]ListPendingClaimsRow, error)
 	ListPendingClaimsByState(ctx context.Context, stateID string) ([]ListPendingClaimsByStateRow, error)
+	ListPublicCareersJobs(ctx context.Context, arg ListPublicCareersJobsParams) ([]ListPublicCareersJobsRow, error)
 	ListPublicLeadershipDirectory(ctx context.Context) ([]ListPublicLeadershipDirectoryRow, error)
 	ListPublishedEvents(ctx context.Context) ([]ListPublishedEventsRow, error)
 	ListPublishedEventsByState(ctx context.Context, stateID string) ([]ListPublishedEventsByStateRow, error)
@@ -240,6 +296,12 @@ type Querier interface {
 	UpdateBankAccountVerification(ctx context.Context, arg UpdateBankAccountVerificationParams) (VerifiedBankAccountVersion, error)
 	UpdateBusinessBranch(ctx context.Context, arg UpdateBusinessBranchParams) (MarketplaceBusinessBranch, error)
 	UpdateCapitalCity(ctx context.Context, arg UpdateCapitalCityParams) (CapitalCity, error)
+	UpdateCareersApplicationStatus(ctx context.Context, arg UpdateCareersApplicationStatusParams) (CareersApplication, error)
+	UpdateCareersEmployer(ctx context.Context, arg UpdateCareersEmployerParams) (CareersEmployer, error)
+	UpdateCareersEmployerVerification(ctx context.Context, arg UpdateCareersEmployerVerificationParams) (CareersEmployer, error)
+	UpdateCareersInterviewStatus(ctx context.Context, arg UpdateCareersInterviewStatusParams) (CareersInterview, error)
+	UpdateCareersJob(ctx context.Context, arg UpdateCareersJobParams) (CareersJob, error)
+	UpdateCareersJobStatus(ctx context.Context, arg UpdateCareersJobStatusParams) (CareersJob, error)
 	UpdateEventRegistrationStatus(ctx context.Context, arg UpdateEventRegistrationStatusParams) (EventRegistration, error)
 	UpdateEventStatus(ctx context.Context, arg UpdateEventStatusParams) (EventInstance, error)
 	UpdateFinancialTransactionStatus(ctx context.Context, arg UpdateFinancialTransactionStatusParams) (FinancialTransaction, error)
@@ -264,6 +326,10 @@ type Querier interface {
 	UpdateUserPassword(ctx context.Context, arg UpdateUserPasswordParams) (User, error)
 	UpdateUserStatus(ctx context.Context, arg UpdateUserStatusParams) (User, error)
 	UpdateZone(ctx context.Context, arg UpdateZoneParams) (Zone, error)
+	// -------------------------------------------------------------
+	// Candidate Professional Profiles
+	// -------------------------------------------------------------
+	UpsertCandidateProfile(ctx context.Context, arg UpsertCandidateProfileParams) (CareersCandidateProfile, error)
 	UpsertStockBalance(ctx context.Context, arg UpsertStockBalanceParams) (StockBalance, error)
 	UpsertVerificationRateLimit(ctx context.Context, arg UpsertVerificationRateLimitParams) (EmailVerificationRateLimit, error)
 }

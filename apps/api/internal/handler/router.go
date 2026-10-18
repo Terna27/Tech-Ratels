@@ -25,6 +25,7 @@ type RouterParams struct {
 	FinanceHandler       *FinanceHandler
 	InventoryHandler     *InventoryHandler
 	MarketplaceHandler   *MarketplaceHandler
+	CareersHandler       *CareersHandler
 }
 
 func NewRouter(p RouterParams) http.Handler {
@@ -244,6 +245,55 @@ func NewRouter(p RouterParams) http.Handler {
 				mktAdm.Get("/payments", p.MarketplaceHandler.ListPaymentsAdmin)
 				mktAdm.Get("/disputes", p.MarketplaceHandler.ListDisputesAdmin)
 				mktAdm.Post("/disputes/{id}/resolve", p.MarketplaceHandler.ResolveDispute)
+			})
+		})
+
+		// Ratels Careers (Blueprint v2.0 Section 09)
+		api.Route("/careers", func(car chi.Router) {
+			// Public Job Discovery & Employers
+			car.Get("/jobs", p.CareersHandler.ListPublicJobs)
+			car.Get("/jobs/{id}", p.CareersHandler.GetPublicJob)
+			car.Get("/employers/{id}", p.CareersHandler.GetEmployer)
+
+			// Candidate Portal (Authenticated Members)
+			car.With(RequireAuth).Get("/candidate/profile", p.CareersHandler.GetMyProfile)
+			car.With(RequireAuth).Put("/candidate/profile", p.CareersHandler.UpsertMyProfile)
+			car.With(RequireAuth).Post("/jobs/{id}/apply", p.CareersHandler.ApplyForJob)
+			car.With(RequireAuth).Get("/applications", p.CareersHandler.ListMyApplications)
+			car.With(RequireAuth).Get("/applications/{id}", p.CareersHandler.GetApplication)
+			car.With(RequireAuth).Post("/applications/{id}/withdraw", p.CareersHandler.WithdrawApplication)
+			car.With(RequireAuth).Get("/applications/{id}/history", p.CareersHandler.GetApplicationHistory)
+			car.With(RequireAuth).Get("/interviews", p.CareersHandler.ListMyInterviews)
+
+			// Employer Portal (Recruiters)
+			car.Route("/employer", func(emp chi.Router) {
+				emp.Use(RequireAuth)
+				emp.Post("/register", p.CareersHandler.RegisterEmployer)
+				emp.Get("/me", p.CareersHandler.GetMyEmployer)
+				emp.Put("/{id}", p.CareersHandler.UpdateEmployer)
+				emp.Get("/{id}/overview", p.CareersHandler.GetEmployerOverview)
+				emp.Get("/{id}/recruiters", p.CareersHandler.ListRecruiters)
+				emp.Post("/{id}/recruiters", p.CareersHandler.AddRecruiter)
+				emp.Get("/{id}/jobs", p.CareersHandler.ListEmployerJobs)
+				emp.Post("/{id}/jobs", p.CareersHandler.CreateJob)
+				emp.Put("/jobs/{jobId}", p.CareersHandler.UpdateJob)
+				emp.Patch("/jobs/{jobId}/status", p.CareersHandler.UpdateJobStatus)
+				emp.Get("/jobs/{jobId}/applications", p.CareersHandler.ListJobApplications)
+				emp.Get("/applications/{appId}/candidate-profile", p.CareersHandler.GetApplicantProfile)
+				emp.Patch("/applications/{appId}/status", p.CareersHandler.UpdateApplicationStatus)
+				emp.Post("/applications/{appId}/interviews", p.CareersHandler.ScheduleInterview)
+				emp.Get("/{id}/interviews", p.CareersHandler.ListEmployerInterviews)
+			})
+
+			// Admin Careers Workspace
+			car.Route("/admin", func(carAdm chi.Router) {
+				carAdm.Use(RequireRole("national_admin", "super_admin", "zonal_coordinator", "state_coordinator"))
+				carAdm.Get("/overview", p.CareersHandler.GetAdminOverview)
+				carAdm.Get("/employers", p.CareersHandler.ListEmployersAdmin)
+				carAdm.Post("/employers/{id}/verify", p.CareersHandler.VerifyEmployer)
+				carAdm.Get("/jobs", p.CareersHandler.ListJobsAdmin)
+				carAdm.Post("/jobs/{id}/moderate", p.CareersHandler.ModerateJob)
+				carAdm.Get("/applications", p.CareersHandler.ListApplicationsAdmin)
 			})
 		})
 

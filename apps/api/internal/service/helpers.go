@@ -75,3 +75,21 @@ func Float8Val(f pgtype.Float8) *float64 {
 	}
 	return &f.Float64
 }
+
+func Int8(i *int64) pgtype.Int8 {
+	if i == nil {
+		return pgtype.Int8{Valid: false}
+	}
+	return pgtype.Int8{Int64: *i, Valid: true}
+}
+
+func Int8FromInt64(i int64) pgtype.Int8 {
+	return pgtype.Int8{Int64: i, Valid: true}
+}
+
+func Int8Val(i pgtype.Int8) *int64 {
+	if !i.Valid {
+		return nil
+	}
+	return &i.Int64
+}

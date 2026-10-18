@@ -721,4 +721,237 @@ export interface MarketplaceSellerOverviewMetrics {
   seller_products_count: number;
 }
 
+// -------------------------------------------------------------
+// Ratels Careers (Blueprint v2.0 Section 09)
+// -------------------------------------------------------------
+
+export interface CareersEmployer {
+  id: string;
+  owner_user_id: string;
+  organization_name: string;
+  slug: string;
+  registration_number: string;
+  industry: string;
+  company_size: string;
+  description: string;
+  website_url?: string;
+  contact_email: string;
+  contact_phone: string;
+  logo_url?: string;
+  state_id: string;
+  lga_id?: string;
+  address: string;
+  verification_status: "pending" | "verified" | "rejected" | "suspended";
+  verified_by_user_id?: string;
+  verified_at?: string;
+  rejection_reason?: string;
+  owner_name?: string;
+  owner_email?: string;
+  state_name?: string;
+  lga_name?: string;
+  total_jobs?: number;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface CareersJob {
+  id: string;
+  employer_id: string;
+  title: string;
+  slug: string;
+  category: string;
+  employment_type: "full_time" | "part_time" | "contract" | "internship" | "volunteer";
+  workplace_type: "on_site" | "remote" | "hybrid";
+  state_id?: string;
+  lga_id?: string;
+  location_summary: string;
+  salary_min_kobo?: number;
+  salary_max_kobo?: number;
+  currency: string;
+  is_salary_negotiable: boolean;
+  description: string;
+  responsibilities: string;
+  requirements: string;
+  skills_required: string[] | any;
+  experience_level: "entry" | "mid" | "senior" | "executive" | "no_experience";
+  deadline_at?: string;
+  status: "draft" | "pending_approval" | "published" | "paused" | "closed" | "expired" | "rejected";
+  moderated_by_user_id?: string;
+  moderated_at?: string;
+  moderation_notes?: string;
+  views_count: number;
+  applications_count: number;
+  employer_name?: string;
+  employer_slug?: string;
+  employer_logo?: string;
+  employer_verification_status?: string;
+  employer_industry?: string;
+  employer_website?: string;
+  state_name?: string;
+  lga_name?: string;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface CareersCandidateProfile {
+  id: string;
+  user_id: string;
+  professional_headline: string;
+  summary: string;
+  skills: string[] | any;
+  education: Array<{
+    institution: string;
+    degree: string;
+    field_of_study?: string;
+    start_year?: number;
+    end_year?: number;
+  }> | any;
+  experience: Array<{
+    company: string;
+    title: string;
+    location?: string;
+    start_date?: string;
+    end_date?: string;
+    current?: boolean;
+    description?: string;
+  }> | any;
+  certifications: Array<{
+    name: string;
+    issuing_org: string;
+    year?: number;
+    credential_id?: string;
+  }> | any;
+  preferred_categories: string[] | any;
+  preferred_workplace_type: "any" | "on_site" | "remote" | "hybrid";
+  preferred_state_id?: string;
+  preferred_state_name?: string;
+  resume_url?: string;
+  resume_filename?: string;
+  resume_uploaded_at?: string;
+  is_searchable_by_verified_employers: boolean;
+  display_name?: string;
+  email?: string;
+  phone?: string;
+  membership_reference?: string;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface CareersApplication {
+  id: string;
+  job_id: string;
+  candidate_user_id: string;
+  employer_id: string;
+  cover_letter: string;
+  qualifications_summary: string;
+  resume_url: string;
+  resume_filename: string;
+  status: "submitted" | "under_review" | "shortlisted" | "interview" | "offered" | "hired" | "rejected" | "withdrawn";
+  rejection_reason?: string;
+  withdrawal_reason?: string;
+  status_updated_at: string;
+  match_score: number;
+  match_factors?: {
+    skills_score?: number;
+    skills_matched?: string[];
+    location_score?: number;
+    category_score?: number;
+    experience_score?: number;
+    criteria_explanation?: string;
+  } | any;
+  job_title?: string;
+  job_category?: string;
+  job_employment_type?: string;
+  job_workplace_type?: string;
+  job_status?: string;
+  employer_name?: string;
+  employer_slug?: string;
+  employer_logo?: string;
+  candidate_name?: string;
+  candidate_email?: string;
+  candidate_phone?: string;
+  candidate_membership_reference?: string;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface CareersApplicationHistory {
+  id: string;
+  application_id: string;
+  from_status: string;
+  to_status: string;
+  changed_by_user_id?: string;
+  changed_by_name?: string;
+  notes: string;
+  created_at: string;
+}
+
+export interface CareersInterview {
+  id: string;
+  application_id: string;
+  job_id: string;
+  employer_id: string;
+  candidate_user_id: string;
+  scheduled_time: string;
+  format: "video" | "in_person" | "phone";
+  location_or_link: string;
+  instructions: string;
+  status: "scheduled" | "completed" | "cancelled" | "rescheduled";
+  job_title?: string;
+  employer_name?: string;
+  employer_slug?: string;
+  candidate_name?: string;
+  candidate_email?: string;
+  candidate_phone?: string;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface CareersAdminOverview {
+  total_employers: number;
+  verified_employers: number;
+  pending_employers: number;
+  total_jobs: number;
+  active_jobs: number;
+  pending_approval_jobs: number;
+  total_applications: number;
+  total_hires: number;
+}
+
+export interface CareersEmployerOverview {
+  total_jobs: number;
+  active_jobs: number;
+  total_applications: number;
+  pending_applications: number;
+  shortlisted_applications: number;
+  interview_applications: number;
+  hired_applications: number;
+}
+
+export function safeJsonParse<T = any>(val: any, fallback: T): T {
+  if (val === null || val === undefined) return fallback;
+  if (typeof val !== "string") return val as T;
+  const trimmed = val.trim();
+  if (!trimmed) return fallback;
+
+  try {
+    return JSON.parse(trimmed);
+  } catch (_) {}
+
+  try {
+    let decoded = "";
+    if (typeof window !== "undefined" && window.atob) {
+      decoded = window.atob(trimmed);
+    } else if (typeof Buffer !== "undefined") {
+      decoded = Buffer.from(trimmed, "base64").toString("utf-8");
+    }
+    if (decoded) {
+      return JSON.parse(decoded);
+    }
+  } catch (_) {}
+
+  return fallback;
+}
+
+
 

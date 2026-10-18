@@ -92,6 +92,141 @@ type CapitalCity struct {
 	Version   int32              `json:"version"`
 }
 
+type CareersApplication struct {
+	ID                    string             `json:"id"`
+	JobID                 string             `json:"job_id"`
+	CandidateUserID       string             `json:"candidate_user_id"`
+	EmployerID            string             `json:"employer_id"`
+	CoverLetter           string             `json:"cover_letter"`
+	QualificationsSummary string             `json:"qualifications_summary"`
+	ResumeUrl             string             `json:"resume_url"`
+	ResumeFilename        string             `json:"resume_filename"`
+	Status                string             `json:"status"`
+	RejectionReason       string             `json:"rejection_reason"`
+	WithdrawalReason      string             `json:"withdrawal_reason"`
+	StatusUpdatedAt       pgtype.Timestamptz `json:"status_updated_at"`
+	StatusUpdatedByUserID pgtype.Text        `json:"status_updated_by_user_id"`
+	MatchScore            int32              `json:"match_score"`
+	MatchFactors          []byte             `json:"match_factors"`
+	CreatedAt             pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt             pgtype.Timestamptz `json:"updated_at"`
+	Version               int32              `json:"version"`
+}
+
+type CareersApplicationHistory struct {
+	ID              string             `json:"id"`
+	ApplicationID   string             `json:"application_id"`
+	FromStatus      string             `json:"from_status"`
+	ToStatus        string             `json:"to_status"`
+	ChangedByUserID pgtype.Text        `json:"changed_by_user_id"`
+	Notes           string             `json:"notes"`
+	CreatedAt       pgtype.Timestamptz `json:"created_at"`
+}
+
+type CareersCandidateProfile struct {
+	ID                              string             `json:"id"`
+	UserID                          string             `json:"user_id"`
+	ProfessionalHeadline            string             `json:"professional_headline"`
+	Summary                         string             `json:"summary"`
+	Skills                          []byte             `json:"skills"`
+	Education                       []byte             `json:"education"`
+	Experience                      []byte             `json:"experience"`
+	Certifications                  []byte             `json:"certifications"`
+	PreferredCategories             []byte             `json:"preferred_categories"`
+	PreferredWorkplaceType          string             `json:"preferred_workplace_type"`
+	PreferredStateID                pgtype.Text        `json:"preferred_state_id"`
+	ResumeUrl                       string             `json:"resume_url"`
+	ResumeFilename                  string             `json:"resume_filename"`
+	ResumeUploadedAt                pgtype.Timestamptz `json:"resume_uploaded_at"`
+	IsSearchableByVerifiedEmployers bool               `json:"is_searchable_by_verified_employers"`
+	CreatedAt                       pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt                       pgtype.Timestamptz `json:"updated_at"`
+	Version                         int32              `json:"version"`
+}
+
+type CareersEmployer struct {
+	ID                 string             `json:"id"`
+	OwnerUserID        string             `json:"owner_user_id"`
+	OrganizationName   string             `json:"organization_name"`
+	Slug               string             `json:"slug"`
+	RegistrationNumber string             `json:"registration_number"`
+	Industry           string             `json:"industry"`
+	CompanySize        string             `json:"company_size"`
+	Description        string             `json:"description"`
+	WebsiteUrl         pgtype.Text        `json:"website_url"`
+	ContactEmail       string             `json:"contact_email"`
+	ContactPhone       string             `json:"contact_phone"`
+	LogoUrl            pgtype.Text        `json:"logo_url"`
+	StateID            string             `json:"state_id"`
+	LgaID              pgtype.Text        `json:"lga_id"`
+	Address            string             `json:"address"`
+	VerificationStatus string             `json:"verification_status"`
+	VerifiedByUserID   pgtype.Text        `json:"verified_by_user_id"`
+	VerifiedAt         pgtype.Timestamptz `json:"verified_at"`
+	RejectionReason    pgtype.Text        `json:"rejection_reason"`
+	CreatedAt          pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt          pgtype.Timestamptz `json:"updated_at"`
+	Version            int32              `json:"version"`
+}
+
+type CareersInterview struct {
+	ID              string             `json:"id"`
+	ApplicationID   string             `json:"application_id"`
+	JobID           string             `json:"job_id"`
+	EmployerID      string             `json:"employer_id"`
+	CandidateUserID string             `json:"candidate_user_id"`
+	ScheduledTime   pgtype.Timestamptz `json:"scheduled_time"`
+	Format          string             `json:"format"`
+	LocationOrLink  string             `json:"location_or_link"`
+	Instructions    string             `json:"instructions"`
+	Status          string             `json:"status"`
+	CreatedByUserID pgtype.Text        `json:"created_by_user_id"`
+	CreatedAt       pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt       pgtype.Timestamptz `json:"updated_at"`
+}
+
+type CareersJob struct {
+	ID                 string             `json:"id"`
+	EmployerID         string             `json:"employer_id"`
+	Title              string             `json:"title"`
+	Slug               string             `json:"slug"`
+	Category           string             `json:"category"`
+	EmploymentType     string             `json:"employment_type"`
+	WorkplaceType      string             `json:"workplace_type"`
+	StateID            pgtype.Text        `json:"state_id"`
+	LgaID              pgtype.Text        `json:"lga_id"`
+	LocationSummary    string             `json:"location_summary"`
+	SalaryMinKobo      pgtype.Int8        `json:"salary_min_kobo"`
+	SalaryMaxKobo      pgtype.Int8        `json:"salary_max_kobo"`
+	Currency           string             `json:"currency"`
+	IsSalaryNegotiable bool               `json:"is_salary_negotiable"`
+	Description        string             `json:"description"`
+	Responsibilities   string             `json:"responsibilities"`
+	Requirements       string             `json:"requirements"`
+	SkillsRequired     []byte             `json:"skills_required"`
+	ExperienceLevel    string             `json:"experience_level"`
+	DeadlineAt         pgtype.Timestamptz `json:"deadline_at"`
+	Status             string             `json:"status"`
+	ModeratedByUserID  pgtype.Text        `json:"moderated_by_user_id"`
+	ModeratedAt        pgtype.Timestamptz `json:"moderated_at"`
+	ModerationNotes    pgtype.Text        `json:"moderation_notes"`
+	ViewsCount         int32              `json:"views_count"`
+	ApplicationsCount  int32              `json:"applications_count"`
+	CreatedAt          pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt          pgtype.Timestamptz `json:"updated_at"`
+	Version            int32              `json:"version"`
+}
+
+type CareersRecruiter struct {
+	ID         string             `json:"id"`
+	EmployerID string             `json:"employer_id"`
+	UserID     string             `json:"user_id"`
+	Role       string             `json:"role"`
+	IsActive   bool               `json:"is_active"`
+	CreatedAt  pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt  pgtype.Timestamptz `json:"updated_at"`
+}
+
 type CleanupCampaign struct {
 	ID            string             `json:"id"`
 	Year          int32              `json:"year"`

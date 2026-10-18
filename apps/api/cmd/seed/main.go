@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"flag"
 	"fmt"
@@ -419,6 +420,11 @@ func SeedReferenceData(ctx context.Context, pool *pgxpool.Pool, q *db.Queries) e
 		log.Printf("Warning: Marketplace seeding notice: %v\n", err)
 	}
 
+	// Seed baseline careers employer and job opportunities
+	if err := seedCareersReferenceData(ctx, qtx); err != nil {
+		log.Printf("Warning: Careers seeding notice: %v\n", err)
+	}
+
 	if tx != nil {
 		if err := tx.Commit(ctx); err != nil {
 			return fmt.Errorf("failed to commit reference data transaction: %w", err)
@@ -629,6 +635,189 @@ func seedMarketplaceReferenceData(ctx context.Context, qtx *db.Queries) error {
 	}
 
 	log.Printf("Successfully seeded %d baseline marketplace products under %s.\n", len(prods), biz.Name)
+	return nil
+}
+
+func seedCareersReferenceData(ctx context.Context, qtx *db.Queries) error {
+	log.Println("Checking and populating baseline verified careers employer and job vacancies...")
+
+	empSlug := "ratels-environmental-logistics"
+	if _, err := qtx.GetCareersEmployerBySlug(ctx, empSlug); err == nil {
+		log.Println("Baseline careers employer already present; skipping careers reference seeding.")
+		return nil
+	}
+
+	// 1. Find an active user to act as owner
+	var ownerID string
+	adminUser, err := qtx.GetUserByEmail(ctx, "admin@ratels.example.org")
+	if err == nil && adminUser.ID != "" {
+		ownerID = adminUser.ID
+	} else {
+		users, uErr := qtx.ListUsers(ctx, db.ListUsersParams{Limit: 1, Offset: 0})
+		if uErr == nil && len(users) > 0 {
+			ownerID = users[0].ID
+		}
+	}
+	if ownerID == "" {
+		log.Println("Notice: No user account found yet; skipping careers reference seeding.")
+		return nil
+	}
+
+	// 2. Find FCT and Lagos States
+	fctState, err := qtx.GetStateByCode(ctx, "FC")
+	if err != nil {
+		log.Printf("Notice: FCT state not found (%v); skipping careers seeding.", err)
+		return nil
+	}
+	lagosState, err := qtx.GetStateByCode(ctx, "LA")
+	if err != nil {
+		log.Printf("Notice: Lagos state not found (%v); skipping careers seeding.", err)
+		return nil
+	}
+
+	// 3. Create Verified Employer
+	empID := security.GenerateUUID()
+	emp, err := qtx.CreateCareersEmployer(ctx, db.CreateCareersEmployerParams{
+		ID:                 empID,
+		OwnerUserID:        ownerID,
+		OrganizationName:   "Ratels Environmental Logistics & Safety Corp",
+		Slug:               empSlug,
+		RegistrationNumber: "RC-1849204",
+		Industry:           "Environmental Services & Logistics",
+		CompanySize:        "51-200",
+		Description:        "Official operations and logistics wing of the Nigerian Ratels Movement, coordinating nationwide environmental sanitation, field team deployment, and equipment supply.",
+		WebsiteUrl:         text("https://ratels.org.ng/careers"),
+		ContactEmail:       "careers@ratels.org.ng",
+		ContactPhone:       "+23480000RATEL",
+		LogoUrl:            text("/images/ratels-logo.png"),
+		StateID:            fctState.ID,
+		LgaID:              text(""),
+		Address:            "Plot 101 Central Business District, Abuja, FCT",
+		VerificationStatus: "verified",
+		VerifiedByUserID:   text(ownerID),
+		VerifiedAt:         timestamptz(time.Now()),
+		RejectionReason:    text(""),
+	})
+	if err != nil {
+		return fmt.Errorf("failed to create baseline careers employer: %w", err)
+	}
+	log.Printf("Careers employer created: %s (%s)\n", emp.OrganizationName, emp.ID)
+
+	// 4. Add Recruiter link
+	recID := security.GenerateUUID()
+	_, _ = qtx.AddCareersRecruiter(ctx, db.AddCareersRecruiterParams{
+		ID:         recID,
+		EmployerID: emp.ID,
+		UserID:     ownerID,
+		Role:       "admin",
+		IsActive:   true,
+	})
+
+	// 5. Create 3 Published Community Jobs
+	type jobSpec struct {
+		title            string
+		slug             string
+		category         string
+		employmentType   string
+		workplaceType    string
+		stateID          string
+		locationSummary  string
+		salaryMin        int64
+		salaryMax        int64
+		skills           []string
+		experience       string
+		description      string
+		responsibilities string
+		requirements     string
+	}
+
+	jobs := []jobSpec{
+		{
+			title:            "Field Environmental Sanitation Supervisor",
+			slug:             "field-environmental-sanitation-supervisor",
+			category:         "Environmental & Sanitation",
+			employmentType:   "full_time",
+			workplaceType:    "on_site",
+			stateID:          fctState.ID,
+			locationSummary:  "Abuja Central, FCT",
+			salaryMin:        20000000,
+			salaryMax:        28000000,
+			skills:           []string{"Waste Sorting", "HSE Compliance", "Team Supervision", "First Aid"},
+			experience:       "mid",
+			description:      "Supervise field volunteer cleanup exercises, manage hazardous waste disposal protocols, and ensure strict health and safety standards across community cleanup sites.",
+			responsibilities: "Coordinate field team leaders, manage protective gear allocation, liaise with local environmental sanitation authorities.",
+			requirements:     "Minimum 2 years experience in municipal waste management, HSE certification, or relevant environmental leadership.",
+		},
+		{
+			title:            "National Warehousing & Materials Logistics Officer",
+			slug:             "national-warehousing-materials-logistics-officer",
+			category:         "Logistics & Supply Chain",
+			employmentType:   "full_time",
+			workplaceType:    "hybrid",
+			stateID:          lagosState.ID,
+			locationSummary:  "Lagos Zonal Depot, Yaba",
+			salaryMin:        25000000,
+			salaryMax:        35000000,
+			skills:           []string{"Inventory Audit", "Stock Accounting", "Fleet Coordination", "Safety Regulations"},
+			experience:       "mid",
+			description:      "Manage stock ledger entries, coordinate regional distribution of cleanup supplies across South West states, and reconcile physical inventory with digital tracking.",
+			responsibilities: "Oversee dispatch manifests, conduct quarterly inventory audits, resolve transfer discrepancies.",
+			requirements:     "HND or B.Sc in Supply Chain, Logistics, or related discipline with hands-on ERP/warehouse tracking experience.",
+		},
+		{
+			title:            "Grassroots Community Mobilization Coordinator",
+			slug:             "grassroots-community-mobilization-coordinator",
+			category:         "Community & Humanitarian",
+			employmentType:   "full_time",
+			workplaceType:    "remote",
+			stateID:          "",
+			locationSummary:  "Remote / Nationwide",
+			salaryMin:        18000000,
+			salaryMax:        24000000,
+			skills:           []string{"Volunteer Management", "Public Advocacy", "Civic Engagement", "Social Media"},
+			experience:       "entry",
+			description:      "Drive grassroots youth engagement, coordinate volunteer signups across all 36 States and the FCT, and support local monthly cleanup mobilizations.",
+			responsibilities: "Engage youth leaders on digital platforms, track cleanup registration metrics, assist coordinator onboarding.",
+			requirements:     "Demonstrated passion for civic empowerment, environmental sanitation, and active community volunteerism.",
+		},
+	}
+
+	for _, js := range jobs {
+		skillsBytes, _ := json.Marshal(js.skills)
+		deadline := time.Now().AddDate(0, 3, 0)
+		var stText pgtype.Text
+		if js.stateID != "" {
+			stText = text(js.stateID)
+		}
+		_, err = qtx.CreateCareersJob(ctx, db.CreateCareersJobParams{
+			ID:                 security.GenerateUUID(),
+			EmployerID:         emp.ID,
+			Title:              js.title,
+			Slug:               js.slug,
+			Category:           js.category,
+			EmploymentType:     js.employmentType,
+			WorkplaceType:      js.workplaceType,
+			StateID:            stText,
+			LgaID:              pgtype.Text{Valid: false},
+			LocationSummary:    js.locationSummary,
+			SalaryMinKobo:      pgtype.Int8{Int64: js.salaryMin, Valid: true},
+			SalaryMaxKobo:      pgtype.Int8{Int64: js.salaryMax, Valid: true},
+			Currency:           "NGN",
+			IsSalaryNegotiable: true,
+			Description:        js.description,
+			Responsibilities:   js.responsibilities,
+			Requirements:       js.requirements,
+			SkillsRequired:     skillsBytes,
+			ExperienceLevel:    js.experience,
+			DeadlineAt:         timestamptz(deadline),
+			Status:             "published",
+		})
+		if err != nil {
+			return fmt.Errorf("failed to create job vacancy %s: %w", js.title, err)
+		}
+	}
+
+	log.Printf("Successfully seeded %d baseline job opportunities under %s.\n", len(jobs), emp.OrganizationName)
 	return nil
 }
 

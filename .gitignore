@@ -50,6 +50,8 @@ Thumbs.db
 
 # Go binaries
 apps/api/server
+apps/api/seed
+apps/api/admin
 *.test
 
 # Include frontend source libraries

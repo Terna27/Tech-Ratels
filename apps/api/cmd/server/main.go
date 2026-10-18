@@ -121,6 +121,7 @@ func main() {
 		log.Println("WARNING: Marketplace payment gateway is UNCONFIGURED. Checkout is safely disabled in this environment.")
 	}
 	marketplaceService := service.NewMarketplaceService(repo, auditService, paymentGateway)
+	careersService := service.NewCareersService(repo, auditService, emailDelivery)
 
 	// Handlers
 	healthH := handler.NewHealthHandler(repo)
@@ -135,6 +136,7 @@ func main() {
 	financeH := handler.NewFinanceHandler(financeService)
 	inventoryH := handler.NewInventoryHandler(inventoryService)
 	marketplaceH := handler.NewMarketplaceHandler(marketplaceService)
+	careersH := handler.NewCareersHandler(careersService)
 
 	router := handler.NewRouter(handler.RouterParams{
 		Config:               cfg,
@@ -151,6 +153,7 @@ func main() {
 		FinanceHandler:       financeH,
 		InventoryHandler:     inventoryH,
 		MarketplaceHandler:   marketplaceH,
+		CareersHandler:       careersH,
 	})
 
 	srv := &http.Server{
