@@ -107,7 +107,6 @@ func main() {
 	partService := service.NewParticipationService(repo, auditService)
 	foundService := service.NewFoundationService(repo, cfg, auditService)
 	adminService := service.NewAdminService(repo)
-	financeService := service.NewFinanceService(repo, auditService)
 	inventoryService := service.NewInventoryService(repo, auditService)
 
 	var paymentGateway payment.PaymentGateway
@@ -149,6 +148,7 @@ func main() {
 		log.Println("WARNING: Marketplace image storage is UNCONFIGURED in production. Image uploads will return 503 until R2 credentials are configured.")
 	}
 
+	financeService := service.NewFinanceService(repo, auditService, paymentGateway, storageService)
 	marketplaceService := service.NewMarketplaceService(repo, auditService, paymentGateway, storageService)
 	careersService := service.NewCareersService(repo, auditService, emailDelivery)
 	heroMediaService := service.NewHeroMediaService(repo, auditService, storageService)

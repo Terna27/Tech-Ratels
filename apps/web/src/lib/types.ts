@@ -304,6 +304,266 @@ export interface FinancialAuthorization {
   updated_at: string;
 }
 
+export interface FinancialDashboardSummary {
+  total_verified_income_kobo: number;
+  total_verified_expenditure_kobo: number;
+  available_cash_balance_kobo: number;
+  outstanding_commitments_kobo: number;
+  available_to_spend_kobo: number;
+  pending_approvals_count: number;
+  pending_reconciliations_count: number;
+  active_budgets_total_kobo: number;
+  project_allocations_total_kobo: number;
+  total_donations_received_kobo: number;
+  monthly_trends: MonthlyTrendItem[];
+  fund_balances: FundBalanceItem[];
+  generated_at: string;
+}
+
+export interface MonthlyTrendItem {
+  month_label: string;
+  income_kobo: number;
+  expenditure_kobo: number;
+  net_savings_kobo: number;
+}
+
+export interface FundBalanceItem {
+  fund_id: string;
+  fund_name: string;
+  balance_kobo: number;
+}
+
+export interface FinancialExpense {
+  id: string;
+  reference: string;
+  title: string;
+  category: string;
+  description: string;
+  amount_kobo: number;
+  currency: string;
+  beneficiary_name: string;
+  beneficiary_bank_name?: string;
+  beneficiary_account_number?: string;
+  zone_id?: string;
+  state_id?: string;
+  lga_id?: string;
+  zone_name?: string;
+  state_name?: string;
+  lga_name?: string;
+  related_project_id?: string;
+  related_campaign_id?: string;
+  supporting_document_url?: string;
+  receipt_url?: string;
+  requested_by_user_id: string;
+  requested_by_name?: string;
+  reviewer_id?: string;
+  reviewer_name?: string;
+  reviewed_at?: string;
+  approved_by_user_id?: string;
+  approved_by_name?: string;
+  approved_at?: string;
+  rejection_reason?: string;
+  authorized_by_user_id?: string;
+  authorized_by_name?: string;
+  authorized_at?: string;
+  paid_by_user_id?: string;
+  paid_by_name?: string;
+  paid_at?: string;
+  payment_reference?: string;
+  transaction_id?: string;
+  budget_id?: string;
+  fund_id?: string;
+  status: "draft" | "submitted" | "under_review" | "approved" | "rejected" | "authorized_for_payment" | "paid" | "reconciled";
+  created_at: string;
+  updated_at: string;
+}
+
+export interface FinancialBudget {
+  id: string;
+  reference: string;
+  title: string;
+  scope_type: "national" | "zone" | "state" | "lga" | "community_project" | "cleanup_campaign" | "foundation";
+  scope_id?: string;
+  zone_id?: string;
+  state_id?: string;
+  lga_id?: string;
+  zone_name?: string;
+  state_name?: string;
+  lga_name?: string;
+  period_type: "quarterly" | "annual" | "project_based" | "event_based";
+  period_label: string;
+  period_start: string;
+  period_end: string;
+  proposed_amount_kobo: number;
+  approved_amount_kobo: number;
+  allocated_amount_kobo: number;
+  committed_amount_kobo: number;
+  spent_amount_kobo: number;
+  currency: string;
+  status: "draft" | "submitted" | "approved" | "closed" | "revised";
+  created_by_user_id: string;
+  created_by_name?: string;
+  approved_by_user_id?: string;
+  approved_by_name?: string;
+  approved_at?: string;
+  notes?: string;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface FinancialBudgetRevision {
+  id: string;
+  budget_id: string;
+  revision_number: number;
+  previous_amount_kobo: number;
+  revised_amount_kobo: number;
+  reason: string;
+  requested_by_user_id: string;
+  requested_by_name?: string;
+  approved_by_user_id?: string;
+  approved_by_name?: string;
+  approved_at?: string;
+  status: "pending" | "approved" | "rejected";
+  created_at: string;
+}
+
+export interface FinancialAllocation {
+  id: string;
+  reference: string;
+  source_type: string;
+  source_id?: string;
+  destination_type: string;
+  destination_id?: string;
+  source_fund_id: string;
+  source_fund_name?: string;
+  destination_fund_id: string;
+  destination_fund_name?: string;
+  amount_kobo: number;
+  currency: string;
+  purpose: string;
+  approval_reference: string;
+  status: "pending" | "disbursed" | "received" | "cancelled";
+  allocated_by_user_id: string;
+  allocated_by_name?: string;
+  allocated_at: string;
+  transaction_id?: string;
+  created_at: string;
+}
+
+export interface FinancialDonation {
+  id: string;
+  reference: string;
+  entity_type: "ratels" | "foundation";
+  campaign_id?: string;
+  campaign_title?: string;
+  donor_name: string;
+  donor_email: string;
+  donor_phone?: string;
+  is_anonymous: boolean;
+  amount_kobo: number;
+  currency: string;
+  payment_method: string;
+  payment_reference?: string;
+  status: "pending" | "verified" | "failed" | "refunded";
+  zone_id?: string;
+  state_id?: string;
+  destination_fund_id: string;
+  transaction_id?: string;
+  receipt_number?: string;
+  verified_at?: string;
+  notes?: string;
+  created_at: string;
+}
+
+export interface FinancialBankAccount {
+  id: string;
+  bank_name: string;
+  account_name: string;
+  account_number: string;
+  currency: string;
+  org_type: "ratels" | "foundation";
+  status: "active" | "inactive" | "pending_verification";
+  is_primary: boolean;
+  notes?: string;
+  created_at: string;
+}
+
+export interface FinancialReconciliationPeriod {
+  id: string;
+  bank_account_id: string;
+  bank_name?: string;
+  account_name?: string;
+  period_start: string;
+  period_end: string;
+  opening_balance_kobo: number;
+  closing_balance_kobo: number;
+  statement_closing_balance_kobo: number;
+  status: "draft" | "in_review" | "reconciled" | "certified";
+  reconciled_by_user_id?: string;
+  reconciled_by_name?: string;
+  reconciled_at?: string;
+  certified_by_user_id?: string;
+  certified_by_name?: string;
+  certified_at?: string;
+  notes?: string;
+  created_at: string;
+  items_count?: number;
+  matched_count?: number;
+}
+
+export interface FinancialStatementItem {
+  id: string;
+  reconciliation_period_id: string;
+  statement_reference: string;
+  transaction_date: string;
+  value_date?: string;
+  description: string;
+  amount_kobo: number;
+  entry_type: "debit" | "credit";
+  matched_transaction_id?: string;
+  matched_tx_reference?: string;
+  status: "unmatched" | "matched" | "flagged" | "manually_reconciled";
+  match_notes?: string;
+  created_at: string;
+}
+
+export interface FinancialDocument {
+  document_type: string;
+  document_reference: string;
+  title: string;
+  organization: string;
+  reporting_period: string;
+  geographic_scope: string;
+  issue_date: string;
+  amount_formatted: string;
+  amount_in_words: string;
+  header_data: Record<string, any>;
+  line_items: Array<{
+    description: string;
+    reference: string;
+    date: string;
+    amount: string;
+  }>;
+  prepared_by: string;
+  certified_by: string;
+  certification_status: string;
+  html_printable_body: string;
+}
+
+export interface PublicTransparencySummary {
+  total_verified_income_kobo: number;
+  total_verified_expenditure_kobo: number;
+  total_project_funding_kobo: number;
+  ratels_donations_total_kobo: number;
+  foundation_donations_total_kobo: number;
+  total_donations_count: number;
+  available_reserve_balance_kobo: number;
+  reporting_currency: string;
+  certified_by: string;
+  last_updated: string;
+}
+
+
 export interface AppointmentHistory {
   id: string;
   appointment_id: string;

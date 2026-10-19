@@ -3,20 +3,25 @@
 import React, { useEffect, useState } from "react";
 import { Heart, ShieldCheck, Lock, AlertCircle, FileCheck, Landmark } from "lucide-react";
 import { apiRequest } from "@/lib/api";
-import { PublicFoundation } from "@/lib/types";
+import { PublicFoundation, PublicTransparencySummary } from "@/lib/types";
 import { Badge } from "@/components/ui/Badge";
 import { Alert } from "@/components/ui/Alert";
 import { Spinner } from "@/components/ui/Spinner";
 
 export default function FoundationPage() {
   const [foundation, setFoundation] = useState<PublicFoundation | null>(null);
+  const [transparency, setTransparency] = useState<PublicTransparencySummary | null>(null);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
     async function loadFoundation() {
       try {
-        const data = await apiRequest<PublicFoundation>("/foundation");
-        setFoundation(data);
+        const [foundData, transData] = await Promise.all([
+          apiRequest<PublicFoundation>("/foundation"),
+          apiRequest<PublicTransparencySummary>("/finance/transparency").catch(() => null),
+        ]);
+        setFoundation(foundData);
+        setTransparency(transData);
       } catch (err) {
         console.error("Failed to load foundation info", err);
       } finally {
@@ -59,6 +64,48 @@ export default function FoundationPage() {
             "Dedicated to grassroots humanitarian relief, community empowerment, and environmental sanitation interventions across Nigeria."}
         </p>
       </section>
+
+      {/* Public Financial Transparency Summary */}
+      {transparency && (
+        <section className="bg-gradient-to-br from-slate-900 to-slate-950 text-white p-6 sm:p-8 rounded-2xl border border-slate-800 shadow-lg space-y-5">
+          <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2 border-b border-slate-800 pb-4">
+            <div>
+              <div className="text-emerald-400 text-xs font-semibold uppercase tracking-wider">Public Accountability</div>
+              <h2 className="text-xl font-bold text-white flex items-center gap-2 mt-0.5">
+                <ShieldCheck className="w-5 h-5 text-emerald-400" /> Verified Financial Stewardship
+              </h2>
+            </div>
+            <span className="text-xs text-slate-400">Certified by {transparency.certified_by}</span>
+          </div>
+
+          <div className="grid grid-cols-2 sm:grid-cols-4 gap-4 pt-1">
+            <div className="bg-slate-800/60 p-4 rounded-xl border border-slate-700/60">
+              <div className="text-xs text-slate-400">Verified Income</div>
+              <div className="text-lg font-bold text-emerald-400 mt-1 font-mono">
+                ₦{(transparency.total_verified_income_kobo / 100).toLocaleString("en-NG", { minimumFractionDigits: 2 })}
+              </div>
+            </div>
+            <div className="bg-slate-800/60 p-4 rounded-xl border border-slate-700/60">
+              <div className="text-xs text-slate-400">Verified Projects</div>
+              <div className="text-lg font-bold text-blue-400 mt-1 font-mono">
+                ₦{(transparency.total_project_funding_kobo / 100).toLocaleString("en-NG", { minimumFractionDigits: 2 })}
+              </div>
+            </div>
+            <div className="bg-slate-800/60 p-4 rounded-xl border border-slate-700/60">
+              <div className="text-xs text-slate-400">Foundation Donations</div>
+              <div className="text-lg font-bold text-purple-400 mt-1 font-mono">
+                ₦{(transparency.foundation_donations_total_kobo / 100).toLocaleString("en-NG", { minimumFractionDigits: 2 })}
+              </div>
+            </div>
+            <div className="bg-slate-800/60 p-4 rounded-xl border border-slate-700/60">
+              <div className="text-xs text-slate-400">Available Reserves</div>
+              <div className="text-lg font-bold text-amber-400 mt-1 font-mono">
+                ₦{(transparency.available_reserve_balance_kobo / 100).toLocaleString("en-NG", { minimumFractionDigits: 2 })}
+              </div>
+            </div>
+          </div>
+        </section>
+      )}
 
       {/* Official Bank Account Verification Framework */}
       <section className="bg-white p-6 sm:p-8 rounded-2xl border border-gray-200 shadow-sm space-y-6">

@@ -9,8 +9,10 @@ import (
 
 	"github.com/jackc/pgx/v5/pgtype"
 	"ratels-api/internal/db"
+	"ratels-api/internal/payment"
 	"ratels-api/internal/repository"
 	"ratels-api/internal/security"
+	"ratels-api/internal/storage"
 )
 
 var (
@@ -22,15 +24,39 @@ var (
 	ErrFinancialApprovalRestricted = errors.New("APPROVAL_RESTRICTED: Only the Super Admin may approve, finalize, or authorize corrections to financial documentation")
 	ErrImmutableFinancialRecord    = errors.New("IMMUTABLE_RECORD: Posted financial records cannot be edited or deleted; corrections require a linked reversal entry")
 	ErrInvalidFund                 = errors.New("invalid or inactive financial fund specified")
+	ErrSelfApprovalProhibited      = errors.New("SELF_APPROVAL_PROHIBITED: A user cannot review, approve, or certify their own financial request")
+	ErrExpenseNotFound             = errors.New("expense request not found")
+	ErrBudgetNotFound              = errors.New("budget not found")
+	ErrBudgetExceeded              = errors.New("BUDGET_EXCEEDED: Requested expenditure exceeds available approved budget")
+	ErrBankAccountNotFound         = errors.New("bank account not found")
+	ErrReconciliationNotFound      = errors.New("reconciliation period not found")
+	ErrDonationNotFound            = errors.New("donation record not found")
+	ErrInvalidStatusTransition     = errors.New("invalid status transition for this record")
 )
 
 type FinanceService struct {
-	repo  *repository.Repository
-	audit *AuditService
+	repo    *repository.Repository
+	audit   *AuditService
+	payment payment.PaymentGateway
+	storage storage.StorageService
 }
 
-func NewFinanceService(repo *repository.Repository, audit *AuditService) *FinanceService {
-	return &FinanceService{repo: repo, audit: audit}
+func NewFinanceService(repo *repository.Repository, audit *AuditService, opts ...interface{}) *FinanceService {
+	s := &FinanceService{
+		repo:    repo,
+		audit:   audit,
+		payment: payment.NewUnconfiguredGateway(),
+		storage: storage.NewUnconfiguredStorageService(),
+	}
+	for _, opt := range opts {
+		if p, ok := opt.(payment.PaymentGateway); ok && p != nil {
+			s.payment = p
+		}
+		if st, ok := opt.(storage.StorageService); ok && st != nil {
+			s.storage = st
+		}
+	}
+	return s
 }
 
 type CreateTransactionRequest struct {
@@ -108,8 +134,8 @@ func (s *FinanceService) AuthorizeStaffAccess(ctx context.Context, superAdminID,
 		return nil, ErrFinancialApprovalRestricted
 	}
 
-	if accessLevel != "viewer" && accessLevel != "submitter" {
-		return nil, errors.New("access_level must be 'viewer' or 'submitter'")
+	if accessLevel != "viewer" && accessLevel != "submitter" && accessLevel != "finance_officer" {
+		return nil, errors.New("access_level must be 'viewer', 'submitter', or 'finance_officer'")
 	}
 
 	authID := security.GenerateUUID()

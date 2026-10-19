@@ -102,6 +102,11 @@ func NewRouter(p RouterParams) http.Handler {
 
 		// Financial Records & Fund Movements
 		api.Route("/finance", func(fin chi.Router) {
+			// Dashboard & Summary
+			fin.With(RequireAuth).Get("/dashboard/summary", p.FinanceHandler.GetDashboardSummary)
+			fin.With(RequireAuth).Get("/overview", p.FinanceHandler.GetDashboardSummary)
+
+			// Funds & Core Ledger
 			fin.With(RequireAuth).Get("/funds", p.FinanceHandler.ListFunds)
 			fin.With(RequireAuth).Get("/transactions", p.FinanceHandler.ListTransactions)
 			fin.With(RequireAuth).Get("/transactions/{id}", p.FinanceHandler.GetTransaction)
@@ -116,6 +121,57 @@ func NewRouter(p RouterParams) http.Handler {
 			fin.With(RequireRole("super_admin")).Post("/authorizations", p.FinanceHandler.AuthorizeStaff)
 			fin.With(RequireRole("super_admin")).Post("/authorizations/{id}/revoke", p.FinanceHandler.RevokeStaff)
 			fin.With(RequireRole("super_admin")).Delete("/authorizations/{id}", p.FinanceHandler.RevokeStaff)
+
+			// Income Management
+			fin.With(RequireAuth).Post("/income", p.FinanceHandler.RecordIncome)
+			fin.With(RequireAuth).Post("/income/{id}/verify", p.FinanceHandler.VerifyIncome)
+
+			// Expense Management
+			fin.With(RequireAuth).Get("/expenses", p.FinanceHandler.ListExpenses)
+			fin.With(RequireAuth).Get("/expenses/{id}", p.FinanceHandler.GetExpense)
+			fin.With(RequireAuth).Post("/expenses", p.FinanceHandler.CreateExpense)
+			fin.With(RequireAuth).Post("/expenses/{id}/review", p.FinanceHandler.ReviewExpense)
+			fin.With(RequireAuth).Post("/expenses/{id}/authorize", p.FinanceHandler.AuthorizeExpense)
+			fin.With(RequireAuth).Post("/expenses/{id}/pay", p.FinanceHandler.RecordExpensePayment)
+
+			// Budget Management
+			fin.With(RequireAuth).Get("/budgets", p.FinanceHandler.ListBudgets)
+			fin.With(RequireAuth).Get("/budgets/{id}", p.FinanceHandler.GetBudget)
+			fin.With(RequireAuth).Post("/budgets", p.FinanceHandler.CreateBudget)
+			fin.With(RequireRole("super_admin")).Post("/budgets/{id}/approve", p.FinanceHandler.ApproveBudget)
+			fin.With(RequireAuth).Post("/budgets/{id}/revisions", p.FinanceHandler.RequestBudgetRevision)
+			fin.With(RequireRole("super_admin")).Post("/budgets/revisions/{id}/approve", p.FinanceHandler.ApproveBudgetRevision)
+
+			// Allocations & Transfers
+			fin.With(RequireAuth).Get("/allocations", p.FinanceHandler.ListAllocations)
+			fin.With(RequireAuth).Post("/allocations", p.FinanceHandler.CreateAllocation)
+
+			// Donations & Public Transparency
+			fin.Get("/donations", p.FinanceHandler.ListDonations)
+			fin.Get("/donations/{id}", p.FinanceHandler.GetDonation)
+			fin.Post("/donations/initiate", p.FinanceHandler.InitiateDonation)
+			fin.Post("/donations/verify", p.FinanceHandler.VerifyDonation)
+			fin.Get("/transparency", p.FinanceHandler.GetPublicTransparencySummary)
+			fin.Get("/transparency/summary", p.FinanceHandler.GetPublicTransparencySummary)
+
+			// Bank Accounts
+			fin.Get("/bank-accounts", p.FinanceHandler.ListBankAccounts)
+			fin.With(RequireRole("super_admin")).Post("/bank-accounts", p.FinanceHandler.CreateBankAccount)
+			fin.With(RequireRole("super_admin")).Post("/bank-accounts/{id}/activate", p.FinanceHandler.ActivateBankAccount)
+
+			// Reconciliation
+			fin.With(RequireAuth).Get("/reconciliation", p.FinanceHandler.ListReconciliationPeriods)
+			fin.With(RequireAuth).Get("/reconciliation/periods", p.FinanceHandler.ListReconciliationPeriods)
+			fin.With(RequireAuth).Get("/reconciliation/periods/{id}", p.FinanceHandler.GetReconciliationPeriod)
+			fin.With(RequireAuth).Post("/reconciliation/periods", p.FinanceHandler.CreateReconciliationPeriod)
+			fin.With(RequireAuth).Post("/reconciliation/periods/{id}/import-csv", p.FinanceHandler.ImportBankStatementCSV)
+			fin.With(RequireAuth).Post("/reconciliation/periods/{id}/auto-match", p.FinanceHandler.AutoMatchStatement)
+			fin.With(RequireAuth).Post("/reconciliation/statement-items/{id}/match", p.FinanceHandler.ManualMatchStatementItem)
+			fin.With(RequireRole("super_admin")).Post("/reconciliation/periods/{id}/certify", p.FinanceHandler.CertifyReconciliation)
+
+			// Official Printable Documents
+			fin.With(RequireAuth).Get("/documents/{type}/{id}", p.FinanceHandler.GetFinancialDocument)
+			fin.With(RequireAuth).Get("/documents/{type}/{id}/print", p.FinanceHandler.GetDocumentPrintableHTML)
 		})
 
 		// Activities & Cleanups

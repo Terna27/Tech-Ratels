@@ -12,6 +12,40 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 )
 
+const activateBankAccount = `-- name: ActivateBankAccount :one
+UPDATE financial_bank_accounts
+SET status = 'active', activated_by_user_id = $2, updated_at = CURRENT_TIMESTAMP
+WHERE id = $1
+RETURNING id, bank_name, account_name, account_number, currency, org_type, status, is_primary, notes, created_by_user_id, activated_by_user_id, created_at, updated_at, version
+`
+
+type ActivateBankAccountParams struct {
+	ID                string      `json:"id"`
+	ActivatedByUserID pgtype.Text `json:"activated_by_user_id"`
+}
+
+func (q *Queries) ActivateBankAccount(ctx context.Context, arg ActivateBankAccountParams) (FinancialBankAccount, error) {
+	row := q.db.QueryRow(ctx, activateBankAccount, arg.ID, arg.ActivatedByUserID)
+	var i FinancialBankAccount
+	err := row.Scan(
+		&i.ID,
+		&i.BankName,
+		&i.AccountName,
+		&i.AccountNumber,
+		&i.Currency,
+		&i.OrgType,
+		&i.Status,
+		&i.IsPrimary,
+		&i.Notes,
+		&i.CreatedByUserID,
+		&i.ActivatedByUserID,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+		&i.Version,
+	)
+	return i, err
+}
+
 const calculateExternalInflowsAndOutflows = `-- name: CalculateExternalInflowsAndOutflows :one
 SELECT
     COALESCE(SUM(CASE WHEN is_external_income = true AND status = 'posted' THEN amount ELSE 0 END), 0)::bigint as external_inflows,
@@ -76,6 +110,483 @@ func (q *Queries) CalculateFundBalanceBeforeDate(ctx context.Context, arg Calcul
 	var balance int64
 	err := row.Scan(&balance)
 	return balance, err
+}
+
+const createAllocation = `-- name: CreateAllocation :one
+INSERT INTO financial_allocations (
+    id, reference, source_type, source_id, destination_type, destination_id,
+    source_fund_id, destination_fund_id, amount_kobo, currency, purpose,
+    approval_reference, transaction_id, allocated_by_user_id, status, created_at
+) VALUES (
+    $1, $2, $3, $4, $5, $6,
+    $7, $8, $9, $10, $11,
+    $12, $13, $14, $15, CURRENT_TIMESTAMP
+) RETURNING id, reference, source_type, source_id, destination_type, destination_id, source_fund_id, destination_fund_id, amount_kobo, currency, purpose, approval_reference, transaction_id, allocated_by_user_id, status, created_at
+`
+
+type CreateAllocationParams struct {
+	ID                string      `json:"id"`
+	Reference         string      `json:"reference"`
+	SourceType        string      `json:"source_type"`
+	SourceID          pgtype.Text `json:"source_id"`
+	DestinationType   string      `json:"destination_type"`
+	DestinationID     pgtype.Text `json:"destination_id"`
+	SourceFundID      string      `json:"source_fund_id"`
+	DestinationFundID string      `json:"destination_fund_id"`
+	AmountKobo        int64       `json:"amount_kobo"`
+	Currency          string      `json:"currency"`
+	Purpose           string      `json:"purpose"`
+	ApprovalReference pgtype.Text `json:"approval_reference"`
+	TransactionID     pgtype.Text `json:"transaction_id"`
+	AllocatedByUserID string      `json:"allocated_by_user_id"`
+	Status            string      `json:"status"`
+}
+
+func (q *Queries) CreateAllocation(ctx context.Context, arg CreateAllocationParams) (FinancialAllocation, error) {
+	row := q.db.QueryRow(ctx, createAllocation,
+		arg.ID,
+		arg.Reference,
+		arg.SourceType,
+		arg.SourceID,
+		arg.DestinationType,
+		arg.DestinationID,
+		arg.SourceFundID,
+		arg.DestinationFundID,
+		arg.AmountKobo,
+		arg.Currency,
+		arg.Purpose,
+		arg.ApprovalReference,
+		arg.TransactionID,
+		arg.AllocatedByUserID,
+		arg.Status,
+	)
+	var i FinancialAllocation
+	err := row.Scan(
+		&i.ID,
+		&i.Reference,
+		&i.SourceType,
+		&i.SourceID,
+		&i.DestinationType,
+		&i.DestinationID,
+		&i.SourceFundID,
+		&i.DestinationFundID,
+		&i.AmountKobo,
+		&i.Currency,
+		&i.Purpose,
+		&i.ApprovalReference,
+		&i.TransactionID,
+		&i.AllocatedByUserID,
+		&i.Status,
+		&i.CreatedAt,
+	)
+	return i, err
+}
+
+const createBankAccount = `-- name: CreateBankAccount :one
+INSERT INTO financial_bank_accounts (
+    id, bank_name, account_name, account_number, currency, org_type, status, is_primary, notes,
+    created_by_user_id, activated_by_user_id, created_at, updated_at, version
+) VALUES (
+    $1, $2, $3, $4, $5, $6, $7, $8, $9,
+    $10, $11, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, 1
+) RETURNING id, bank_name, account_name, account_number, currency, org_type, status, is_primary, notes, created_by_user_id, activated_by_user_id, created_at, updated_at, version
+`
+
+type CreateBankAccountParams struct {
+	ID                string      `json:"id"`
+	BankName          string      `json:"bank_name"`
+	AccountName       string      `json:"account_name"`
+	AccountNumber     string      `json:"account_number"`
+	Currency          string      `json:"currency"`
+	OrgType           string      `json:"org_type"`
+	Status            string      `json:"status"`
+	IsPrimary         bool        `json:"is_primary"`
+	Notes             pgtype.Text `json:"notes"`
+	CreatedByUserID   pgtype.Text `json:"created_by_user_id"`
+	ActivatedByUserID pgtype.Text `json:"activated_by_user_id"`
+}
+
+func (q *Queries) CreateBankAccount(ctx context.Context, arg CreateBankAccountParams) (FinancialBankAccount, error) {
+	row := q.db.QueryRow(ctx, createBankAccount,
+		arg.ID,
+		arg.BankName,
+		arg.AccountName,
+		arg.AccountNumber,
+		arg.Currency,
+		arg.OrgType,
+		arg.Status,
+		arg.IsPrimary,
+		arg.Notes,
+		arg.CreatedByUserID,
+		arg.ActivatedByUserID,
+	)
+	var i FinancialBankAccount
+	err := row.Scan(
+		&i.ID,
+		&i.BankName,
+		&i.AccountName,
+		&i.AccountNumber,
+		&i.Currency,
+		&i.OrgType,
+		&i.Status,
+		&i.IsPrimary,
+		&i.Notes,
+		&i.CreatedByUserID,
+		&i.ActivatedByUserID,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+		&i.Version,
+	)
+	return i, err
+}
+
+const createBudget = `-- name: CreateBudget :one
+INSERT INTO financial_budgets (
+    id, reference, title, scope_type, scope_id, zone_id, state_id, lga_id,
+    period_type, period_label, period_start, period_end, proposed_amount_kobo,
+    approved_amount_kobo, allocated_amount_kobo, committed_amount_kobo, spent_amount_kobo,
+    currency, status, created_by_user_id, approved_by_user_id, approved_at, notes,
+    created_at, updated_at, version
+) VALUES (
+    $1, $2, $3, $4, $5, $6, $7, $8,
+    $9, $10, $11, $12, $13,
+    $14, $15, $16, $17,
+    $18, $19, $20, $21, $22, $23,
+    CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, 1
+) RETURNING id, reference, title, scope_type, scope_id, zone_id, state_id, lga_id, period_type, period_label, period_start, period_end, proposed_amount_kobo, approved_amount_kobo, allocated_amount_kobo, committed_amount_kobo, spent_amount_kobo, currency, status, created_by_user_id, approved_by_user_id, approved_at, notes, created_at, updated_at, version
+`
+
+type CreateBudgetParams struct {
+	ID                  string             `json:"id"`
+	Reference           string             `json:"reference"`
+	Title               string             `json:"title"`
+	ScopeType           string             `json:"scope_type"`
+	ScopeID             pgtype.Text        `json:"scope_id"`
+	ZoneID              pgtype.Text        `json:"zone_id"`
+	StateID             pgtype.Text        `json:"state_id"`
+	LgaID               pgtype.Text        `json:"lga_id"`
+	PeriodType          string             `json:"period_type"`
+	PeriodLabel         string             `json:"period_label"`
+	PeriodStart         pgtype.Date        `json:"period_start"`
+	PeriodEnd           pgtype.Date        `json:"period_end"`
+	ProposedAmountKobo  int64              `json:"proposed_amount_kobo"`
+	ApprovedAmountKobo  int64              `json:"approved_amount_kobo"`
+	AllocatedAmountKobo int64              `json:"allocated_amount_kobo"`
+	CommittedAmountKobo int64              `json:"committed_amount_kobo"`
+	SpentAmountKobo     int64              `json:"spent_amount_kobo"`
+	Currency            string             `json:"currency"`
+	Status              string             `json:"status"`
+	CreatedByUserID     string             `json:"created_by_user_id"`
+	ApprovedByUserID    pgtype.Text        `json:"approved_by_user_id"`
+	ApprovedAt          pgtype.Timestamptz `json:"approved_at"`
+	Notes               pgtype.Text        `json:"notes"`
+}
+
+func (q *Queries) CreateBudget(ctx context.Context, arg CreateBudgetParams) (FinancialBudget, error) {
+	row := q.db.QueryRow(ctx, createBudget,
+		arg.ID,
+		arg.Reference,
+		arg.Title,
+		arg.ScopeType,
+		arg.ScopeID,
+		arg.ZoneID,
+		arg.StateID,
+		arg.LgaID,
+		arg.PeriodType,
+		arg.PeriodLabel,
+		arg.PeriodStart,
+		arg.PeriodEnd,
+		arg.ProposedAmountKobo,
+		arg.ApprovedAmountKobo,
+		arg.AllocatedAmountKobo,
+		arg.CommittedAmountKobo,
+		arg.SpentAmountKobo,
+		arg.Currency,
+		arg.Status,
+		arg.CreatedByUserID,
+		arg.ApprovedByUserID,
+		arg.ApprovedAt,
+		arg.Notes,
+	)
+	var i FinancialBudget
+	err := row.Scan(
+		&i.ID,
+		&i.Reference,
+		&i.Title,
+		&i.ScopeType,
+		&i.ScopeID,
+		&i.ZoneID,
+		&i.StateID,
+		&i.LgaID,
+		&i.PeriodType,
+		&i.PeriodLabel,
+		&i.PeriodStart,
+		&i.PeriodEnd,
+		&i.ProposedAmountKobo,
+		&i.ApprovedAmountKobo,
+		&i.AllocatedAmountKobo,
+		&i.CommittedAmountKobo,
+		&i.SpentAmountKobo,
+		&i.Currency,
+		&i.Status,
+		&i.CreatedByUserID,
+		&i.ApprovedByUserID,
+		&i.ApprovedAt,
+		&i.Notes,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+		&i.Version,
+	)
+	return i, err
+}
+
+const createBudgetRevision = `-- name: CreateBudgetRevision :one
+INSERT INTO financial_budget_revisions (
+    id, budget_id, revision_number, previous_amount_kobo, revised_amount_kobo,
+    reason, requested_by_user_id, approved_by_user_id, approved_at, status, created_at
+) VALUES (
+    $1, $2, $3, $4, $5,
+    $6, $7, $8, $9, $10, CURRENT_TIMESTAMP
+) RETURNING id, budget_id, revision_number, previous_amount_kobo, revised_amount_kobo, reason, requested_by_user_id, approved_by_user_id, approved_at, status, created_at
+`
+
+type CreateBudgetRevisionParams struct {
+	ID                 string             `json:"id"`
+	BudgetID           string             `json:"budget_id"`
+	RevisionNumber     int32              `json:"revision_number"`
+	PreviousAmountKobo int64              `json:"previous_amount_kobo"`
+	RevisedAmountKobo  int64              `json:"revised_amount_kobo"`
+	Reason             string             `json:"reason"`
+	RequestedByUserID  string             `json:"requested_by_user_id"`
+	ApprovedByUserID   pgtype.Text        `json:"approved_by_user_id"`
+	ApprovedAt         pgtype.Timestamptz `json:"approved_at"`
+	Status             string             `json:"status"`
+}
+
+func (q *Queries) CreateBudgetRevision(ctx context.Context, arg CreateBudgetRevisionParams) (FinancialBudgetRevision, error) {
+	row := q.db.QueryRow(ctx, createBudgetRevision,
+		arg.ID,
+		arg.BudgetID,
+		arg.RevisionNumber,
+		arg.PreviousAmountKobo,
+		arg.RevisedAmountKobo,
+		arg.Reason,
+		arg.RequestedByUserID,
+		arg.ApprovedByUserID,
+		arg.ApprovedAt,
+		arg.Status,
+	)
+	var i FinancialBudgetRevision
+	err := row.Scan(
+		&i.ID,
+		&i.BudgetID,
+		&i.RevisionNumber,
+		&i.PreviousAmountKobo,
+		&i.RevisedAmountKobo,
+		&i.Reason,
+		&i.RequestedByUserID,
+		&i.ApprovedByUserID,
+		&i.ApprovedAt,
+		&i.Status,
+		&i.CreatedAt,
+	)
+	return i, err
+}
+
+const createDonation = `-- name: CreateDonation :one
+INSERT INTO financial_donations (
+    id, reference, entity_type, campaign_id, donor_name, donor_email, donor_phone,
+    is_anonymous, amount_kobo, currency, payment_method, payment_reference, provider_channel,
+    status, zone_id, state_id, destination_fund_id, transaction_id, verified_at,
+    receipt_number, notes, created_at, updated_at
+) VALUES (
+    $1, $2, $3, $4, $5, $6, $7,
+    $8, $9, $10, $11, $12, $13,
+    $14, $15, $16, $17, $18, $19,
+    $20, $21, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP
+) RETURNING id, reference, entity_type, campaign_id, donor_name, donor_email, donor_phone, is_anonymous, amount_kobo, currency, payment_method, payment_reference, provider_channel, status, zone_id, state_id, destination_fund_id, transaction_id, verified_at, receipt_number, notes, created_at, updated_at
+`
+
+type CreateDonationParams struct {
+	ID                string             `json:"id"`
+	Reference         string             `json:"reference"`
+	EntityType        string             `json:"entity_type"`
+	CampaignID        pgtype.Text        `json:"campaign_id"`
+	DonorName         string             `json:"donor_name"`
+	DonorEmail        string             `json:"donor_email"`
+	DonorPhone        pgtype.Text        `json:"donor_phone"`
+	IsAnonymous       bool               `json:"is_anonymous"`
+	AmountKobo        int64              `json:"amount_kobo"`
+	Currency          string             `json:"currency"`
+	PaymentMethod     string             `json:"payment_method"`
+	PaymentReference  pgtype.Text        `json:"payment_reference"`
+	ProviderChannel   pgtype.Text        `json:"provider_channel"`
+	Status            string             `json:"status"`
+	ZoneID            pgtype.Text        `json:"zone_id"`
+	StateID           pgtype.Text        `json:"state_id"`
+	DestinationFundID string             `json:"destination_fund_id"`
+	TransactionID     pgtype.Text        `json:"transaction_id"`
+	VerifiedAt        pgtype.Timestamptz `json:"verified_at"`
+	ReceiptNumber     pgtype.Text        `json:"receipt_number"`
+	Notes             pgtype.Text        `json:"notes"`
+}
+
+func (q *Queries) CreateDonation(ctx context.Context, arg CreateDonationParams) (FinancialDonation, error) {
+	row := q.db.QueryRow(ctx, createDonation,
+		arg.ID,
+		arg.Reference,
+		arg.EntityType,
+		arg.CampaignID,
+		arg.DonorName,
+		arg.DonorEmail,
+		arg.DonorPhone,
+		arg.IsAnonymous,
+		arg.AmountKobo,
+		arg.Currency,
+		arg.PaymentMethod,
+		arg.PaymentReference,
+		arg.ProviderChannel,
+		arg.Status,
+		arg.ZoneID,
+		arg.StateID,
+		arg.DestinationFundID,
+		arg.TransactionID,
+		arg.VerifiedAt,
+		arg.ReceiptNumber,
+		arg.Notes,
+	)
+	var i FinancialDonation
+	err := row.Scan(
+		&i.ID,
+		&i.Reference,
+		&i.EntityType,
+		&i.CampaignID,
+		&i.DonorName,
+		&i.DonorEmail,
+		&i.DonorPhone,
+		&i.IsAnonymous,
+		&i.AmountKobo,
+		&i.Currency,
+		&i.PaymentMethod,
+		&i.PaymentReference,
+		&i.ProviderChannel,
+		&i.Status,
+		&i.ZoneID,
+		&i.StateID,
+		&i.DestinationFundID,
+		&i.TransactionID,
+		&i.VerifiedAt,
+		&i.ReceiptNumber,
+		&i.Notes,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+	)
+	return i, err
+}
+
+const createExpense = `-- name: CreateExpense :one
+INSERT INTO financial_expenses (
+    id, reference, title, category, description, amount_kobo, currency,
+    beneficiary_name, beneficiary_bank_name, beneficiary_account_number,
+    zone_id, state_id, lga_id, related_project_id, related_campaign_id,
+    supporting_document_url, receipt_url, requested_by_user_id,
+    budget_id, fund_id, status, created_at, updated_at, version
+) VALUES (
+    $1, $2, $3, $4, $5, $6, $7,
+    $8, $9, $10,
+    $11, $12, $13, $14, $15,
+    $16, $17, $18,
+    $19, $20, $21, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, 1
+) RETURNING id, reference, title, category, description, amount_kobo, currency, beneficiary_name, beneficiary_bank_name, beneficiary_account_number, zone_id, state_id, lga_id, related_project_id, related_campaign_id, supporting_document_url, receipt_url, requested_by_user_id, reviewer_id, reviewed_at, approved_by_user_id, approved_at, rejection_reason, authorized_by_user_id, authorized_at, paid_by_user_id, paid_at, payment_reference, transaction_id, budget_id, fund_id, status, created_at, updated_at, version
+`
+
+type CreateExpenseParams struct {
+	ID                       string      `json:"id"`
+	Reference                string      `json:"reference"`
+	Title                    string      `json:"title"`
+	Category                 string      `json:"category"`
+	Description              string      `json:"description"`
+	AmountKobo               int64       `json:"amount_kobo"`
+	Currency                 string      `json:"currency"`
+	BeneficiaryName          string      `json:"beneficiary_name"`
+	BeneficiaryBankName      pgtype.Text `json:"beneficiary_bank_name"`
+	BeneficiaryAccountNumber pgtype.Text `json:"beneficiary_account_number"`
+	ZoneID                   pgtype.Text `json:"zone_id"`
+	StateID                  pgtype.Text `json:"state_id"`
+	LgaID                    pgtype.Text `json:"lga_id"`
+	RelatedProjectID         pgtype.Text `json:"related_project_id"`
+	RelatedCampaignID        pgtype.Text `json:"related_campaign_id"`
+	SupportingDocumentUrl    pgtype.Text `json:"supporting_document_url"`
+	ReceiptUrl               pgtype.Text `json:"receipt_url"`
+	RequestedByUserID        string      `json:"requested_by_user_id"`
+	BudgetID                 pgtype.Text `json:"budget_id"`
+	FundID                   pgtype.Text `json:"fund_id"`
+	Status                   string      `json:"status"`
+}
+
+func (q *Queries) CreateExpense(ctx context.Context, arg CreateExpenseParams) (FinancialExpense, error) {
+	row := q.db.QueryRow(ctx, createExpense,
+		arg.ID,
+		arg.Reference,
+		arg.Title,
+		arg.Category,
+		arg.Description,
+		arg.AmountKobo,
+		arg.Currency,
+		arg.BeneficiaryName,
+		arg.BeneficiaryBankName,
+		arg.BeneficiaryAccountNumber,
+		arg.ZoneID,
+		arg.StateID,
+		arg.LgaID,
+		arg.RelatedProjectID,
+		arg.RelatedCampaignID,
+		arg.SupportingDocumentUrl,
+		arg.ReceiptUrl,
+		arg.RequestedByUserID,
+		arg.BudgetID,
+		arg.FundID,
+		arg.Status,
+	)
+	var i FinancialExpense
+	err := row.Scan(
+		&i.ID,
+		&i.Reference,
+		&i.Title,
+		&i.Category,
+		&i.Description,
+		&i.AmountKobo,
+		&i.Currency,
+		&i.BeneficiaryName,
+		&i.BeneficiaryBankName,
+		&i.BeneficiaryAccountNumber,
+		&i.ZoneID,
+		&i.StateID,
+		&i.LgaID,
+		&i.RelatedProjectID,
+		&i.RelatedCampaignID,
+		&i.SupportingDocumentUrl,
+		&i.ReceiptUrl,
+		&i.RequestedByUserID,
+		&i.ReviewerID,
+		&i.ReviewedAt,
+		&i.ApprovedByUserID,
+		&i.ApprovedAt,
+		&i.RejectionReason,
+		&i.AuthorizedByUserID,
+		&i.AuthorizedAt,
+		&i.PaidByUserID,
+		&i.PaidAt,
+		&i.PaymentReference,
+		&i.TransactionID,
+		&i.BudgetID,
+		&i.FundID,
+		&i.Status,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+		&i.Version,
+	)
+	return i, err
 }
 
 const createFinancialAuthorization = `-- name: CreateFinancialAuthorization :one
@@ -184,7 +695,7 @@ INSERT INTO financial_transactions (
     $17, $18, $19, $20,
     $21, $22, CURRENT_TIMESTAMP, $23,
     $24, $25, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, 1
-) RETURNING id, reference, idempotency_key, transaction_type, status, amount, currency, source_fund_id, destination_fund_id, related_campaign_id, related_project_id, state_id, zone_id, provider_reference, supporting_evidence_url, notes, initiating_actor_id, initiating_actor_type, approved_by_user_id, approved_at, is_external_income, occurred_at, recorded_at, reversal_of_transaction_id, is_reversal, reversal_reason, created_at, updated_at, version
+) RETURNING id, reference, idempotency_key, transaction_type, status, amount, currency, source_fund_id, destination_fund_id, related_campaign_id, related_project_id, state_id, zone_id, provider_reference, supporting_evidence_url, notes, initiating_actor_id, initiating_actor_type, approved_by_user_id, approved_at, is_external_income, occurred_at, recorded_at, reversal_of_transaction_id, is_reversal, reversal_reason, created_at, updated_at, version, income_category, payment_method, funding_source, lga_id, receiving_account_id, verification_status, verified_by_user_id, verified_at
 `
 
 type CreateFinancialTransactionParams struct {
@@ -274,6 +785,151 @@ func (q *Queries) CreateFinancialTransaction(ctx context.Context, arg CreateFina
 		&i.CreatedAt,
 		&i.UpdatedAt,
 		&i.Version,
+		&i.IncomeCategory,
+		&i.PaymentMethod,
+		&i.FundingSource,
+		&i.LgaID,
+		&i.ReceivingAccountID,
+		&i.VerificationStatus,
+		&i.VerifiedByUserID,
+		&i.VerifiedAt,
+	)
+	return i, err
+}
+
+const createFinancialTransactionWithIncome = `-- name: CreateFinancialTransactionWithIncome :one
+INSERT INTO financial_transactions (
+    id, reference, idempotency_key, transaction_type, status, amount, currency,
+    source_fund_id, destination_fund_id, related_campaign_id, related_project_id,
+    state_id, zone_id, lga_id, provider_reference, supporting_evidence_url, notes,
+    initiating_actor_id, initiating_actor_type, approved_by_user_id, approved_at,
+    is_external_income, occurred_at, recorded_at, reversal_of_transaction_id,
+    is_reversal, reversal_reason, income_category, payment_method, funding_source,
+    receiving_account_id, verification_status, verified_by_user_id, verified_at,
+    created_at, updated_at, version
+) VALUES (
+    $1, $2, $3, $4, $5, $6, $7,
+    $8, $9, $10, $11,
+    $12, $13, $14, $15, $16, $17,
+    $18, $19, $20, $21,
+    $22, $23, CURRENT_TIMESTAMP, $24,
+    $25, $26, $27, $28, $29,
+    $30, $31, $32, $33,
+    CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, 1
+) RETURNING id, reference, idempotency_key, transaction_type, status, amount, currency, source_fund_id, destination_fund_id, related_campaign_id, related_project_id, state_id, zone_id, provider_reference, supporting_evidence_url, notes, initiating_actor_id, initiating_actor_type, approved_by_user_id, approved_at, is_external_income, occurred_at, recorded_at, reversal_of_transaction_id, is_reversal, reversal_reason, created_at, updated_at, version, income_category, payment_method, funding_source, lga_id, receiving_account_id, verification_status, verified_by_user_id, verified_at
+`
+
+type CreateFinancialTransactionWithIncomeParams struct {
+	ID                      string             `json:"id"`
+	Reference               string             `json:"reference"`
+	IdempotencyKey          pgtype.Text        `json:"idempotency_key"`
+	TransactionType         string             `json:"transaction_type"`
+	Status                  string             `json:"status"`
+	Amount                  int64              `json:"amount"`
+	Currency                string             `json:"currency"`
+	SourceFundID            pgtype.Text        `json:"source_fund_id"`
+	DestinationFundID       pgtype.Text        `json:"destination_fund_id"`
+	RelatedCampaignID       pgtype.Text        `json:"related_campaign_id"`
+	RelatedProjectID        pgtype.Text        `json:"related_project_id"`
+	StateID                 pgtype.Text        `json:"state_id"`
+	ZoneID                  pgtype.Text        `json:"zone_id"`
+	LgaID                   pgtype.Text        `json:"lga_id"`
+	ProviderReference       pgtype.Text        `json:"provider_reference"`
+	SupportingEvidenceUrl   pgtype.Text        `json:"supporting_evidence_url"`
+	Notes                   pgtype.Text        `json:"notes"`
+	InitiatingActorID       pgtype.Text        `json:"initiating_actor_id"`
+	InitiatingActorType     string             `json:"initiating_actor_type"`
+	ApprovedByUserID        pgtype.Text        `json:"approved_by_user_id"`
+	ApprovedAt              pgtype.Timestamptz `json:"approved_at"`
+	IsExternalIncome        bool               `json:"is_external_income"`
+	OccurredAt              pgtype.Timestamptz `json:"occurred_at"`
+	ReversalOfTransactionID pgtype.Text        `json:"reversal_of_transaction_id"`
+	IsReversal              bool               `json:"is_reversal"`
+	ReversalReason          pgtype.Text        `json:"reversal_reason"`
+	IncomeCategory          pgtype.Text        `json:"income_category"`
+	PaymentMethod           pgtype.Text        `json:"payment_method"`
+	FundingSource           pgtype.Text        `json:"funding_source"`
+	ReceivingAccountID      pgtype.Text        `json:"receiving_account_id"`
+	VerificationStatus      string             `json:"verification_status"`
+	VerifiedByUserID        pgtype.Text        `json:"verified_by_user_id"`
+	VerifiedAt              pgtype.Timestamptz `json:"verified_at"`
+}
+
+func (q *Queries) CreateFinancialTransactionWithIncome(ctx context.Context, arg CreateFinancialTransactionWithIncomeParams) (FinancialTransaction, error) {
+	row := q.db.QueryRow(ctx, createFinancialTransactionWithIncome,
+		arg.ID,
+		arg.Reference,
+		arg.IdempotencyKey,
+		arg.TransactionType,
+		arg.Status,
+		arg.Amount,
+		arg.Currency,
+		arg.SourceFundID,
+		arg.DestinationFundID,
+		arg.RelatedCampaignID,
+		arg.RelatedProjectID,
+		arg.StateID,
+		arg.ZoneID,
+		arg.LgaID,
+		arg.ProviderReference,
+		arg.SupportingEvidenceUrl,
+		arg.Notes,
+		arg.InitiatingActorID,
+		arg.InitiatingActorType,
+		arg.ApprovedByUserID,
+		arg.ApprovedAt,
+		arg.IsExternalIncome,
+		arg.OccurredAt,
+		arg.ReversalOfTransactionID,
+		arg.IsReversal,
+		arg.ReversalReason,
+		arg.IncomeCategory,
+		arg.PaymentMethod,
+		arg.FundingSource,
+		arg.ReceivingAccountID,
+		arg.VerificationStatus,
+		arg.VerifiedByUserID,
+		arg.VerifiedAt,
+	)
+	var i FinancialTransaction
+	err := row.Scan(
+		&i.ID,
+		&i.Reference,
+		&i.IdempotencyKey,
+		&i.TransactionType,
+		&i.Status,
+		&i.Amount,
+		&i.Currency,
+		&i.SourceFundID,
+		&i.DestinationFundID,
+		&i.RelatedCampaignID,
+		&i.RelatedProjectID,
+		&i.StateID,
+		&i.ZoneID,
+		&i.ProviderReference,
+		&i.SupportingEvidenceUrl,
+		&i.Notes,
+		&i.InitiatingActorID,
+		&i.InitiatingActorType,
+		&i.ApprovedByUserID,
+		&i.ApprovedAt,
+		&i.IsExternalIncome,
+		&i.OccurredAt,
+		&i.RecordedAt,
+		&i.ReversalOfTransactionID,
+		&i.IsReversal,
+		&i.ReversalReason,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+		&i.Version,
+		&i.IncomeCategory,
+		&i.PaymentMethod,
+		&i.FundingSource,
+		&i.LgaID,
+		&i.ReceivingAccountID,
+		&i.VerificationStatus,
+		&i.VerifiedByUserID,
+		&i.VerifiedAt,
 	)
 	return i, err
 }
@@ -320,6 +976,121 @@ func (q *Queries) CreateLedgerEntry(ctx context.Context, arg CreateLedgerEntryPa
 	return i, err
 }
 
+const createReconciliationPeriod = `-- name: CreateReconciliationPeriod :one
+INSERT INTO financial_reconciliation_periods (
+    id, bank_account_id, period_start, period_end, opening_balance_kobo,
+    closing_balance_kobo, statement_closing_balance_kobo, status, notes,
+    created_at, updated_at
+) VALUES (
+    $1, $2, $3, $4, $5,
+    $6, $7, $8, $9,
+    CURRENT_TIMESTAMP, CURRENT_TIMESTAMP
+) RETURNING id, bank_account_id, period_start, period_end, opening_balance_kobo, closing_balance_kobo, statement_closing_balance_kobo, status, reconciled_by_user_id, reconciled_at, certified_by_user_id, certified_at, notes, created_at, updated_at
+`
+
+type CreateReconciliationPeriodParams struct {
+	ID                          string      `json:"id"`
+	BankAccountID               string      `json:"bank_account_id"`
+	PeriodStart                 pgtype.Date `json:"period_start"`
+	PeriodEnd                   pgtype.Date `json:"period_end"`
+	OpeningBalanceKobo          int64       `json:"opening_balance_kobo"`
+	ClosingBalanceKobo          int64       `json:"closing_balance_kobo"`
+	StatementClosingBalanceKobo int64       `json:"statement_closing_balance_kobo"`
+	Status                      string      `json:"status"`
+	Notes                       pgtype.Text `json:"notes"`
+}
+
+func (q *Queries) CreateReconciliationPeriod(ctx context.Context, arg CreateReconciliationPeriodParams) (FinancialReconciliationPeriod, error) {
+	row := q.db.QueryRow(ctx, createReconciliationPeriod,
+		arg.ID,
+		arg.BankAccountID,
+		arg.PeriodStart,
+		arg.PeriodEnd,
+		arg.OpeningBalanceKobo,
+		arg.ClosingBalanceKobo,
+		arg.StatementClosingBalanceKobo,
+		arg.Status,
+		arg.Notes,
+	)
+	var i FinancialReconciliationPeriod
+	err := row.Scan(
+		&i.ID,
+		&i.BankAccountID,
+		&i.PeriodStart,
+		&i.PeriodEnd,
+		&i.OpeningBalanceKobo,
+		&i.ClosingBalanceKobo,
+		&i.StatementClosingBalanceKobo,
+		&i.Status,
+		&i.ReconciledByUserID,
+		&i.ReconciledAt,
+		&i.CertifiedByUserID,
+		&i.CertifiedAt,
+		&i.Notes,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+	)
+	return i, err
+}
+
+const createStatementItem = `-- name: CreateStatementItem :one
+INSERT INTO financial_statement_items (
+    id, reconciliation_period_id, statement_reference, transaction_date,
+    value_date, description, amount_kobo, entry_type, matched_transaction_id,
+    status, match_notes, created_at
+) VALUES (
+    $1, $2, $3, $4,
+    $5, $6, $7, $8, $9,
+    $10, $11, CURRENT_TIMESTAMP
+) RETURNING id, reconciliation_period_id, statement_reference, transaction_date, value_date, description, amount_kobo, entry_type, matched_transaction_id, status, match_notes, created_at
+`
+
+type CreateStatementItemParams struct {
+	ID                     string      `json:"id"`
+	ReconciliationPeriodID string      `json:"reconciliation_period_id"`
+	StatementReference     string      `json:"statement_reference"`
+	TransactionDate        pgtype.Date `json:"transaction_date"`
+	ValueDate              pgtype.Date `json:"value_date"`
+	Description            string      `json:"description"`
+	AmountKobo             int64       `json:"amount_kobo"`
+	EntryType              string      `json:"entry_type"`
+	MatchedTransactionID   pgtype.Text `json:"matched_transaction_id"`
+	Status                 string      `json:"status"`
+	MatchNotes             pgtype.Text `json:"match_notes"`
+}
+
+func (q *Queries) CreateStatementItem(ctx context.Context, arg CreateStatementItemParams) (FinancialStatementItem, error) {
+	row := q.db.QueryRow(ctx, createStatementItem,
+		arg.ID,
+		arg.ReconciliationPeriodID,
+		arg.StatementReference,
+		arg.TransactionDate,
+		arg.ValueDate,
+		arg.Description,
+		arg.AmountKobo,
+		arg.EntryType,
+		arg.MatchedTransactionID,
+		arg.Status,
+		arg.MatchNotes,
+	)
+	var i FinancialStatementItem
+	err := row.Scan(
+		&i.ID,
+		&i.ReconciliationPeriodID,
+		&i.StatementReference,
+		&i.TransactionDate,
+		&i.ValueDate,
+		&i.Description,
+		&i.AmountKobo,
+		&i.EntryType,
+		&i.MatchedTransactionID,
+		&i.Status,
+		&i.MatchNotes,
+		&i.CreatedAt,
+	)
+	return i, err
+}
+
 const getActiveFinancialAuthorization = `-- name: GetActiveFinancialAuthorization :one
 SELECT id, user_id, granted_by_user_id, access_level, status, notes, created_at, revoked_at, version FROM financial_authorizations
 WHERE user_id = $1 AND status = 'active'
@@ -343,6 +1114,611 @@ func (q *Queries) GetActiveFinancialAuthorization(ctx context.Context, userID st
 	return i, err
 }
 
+const getAllocationByID = `-- name: GetAllocationByID :one
+SELECT a.id, a.reference, a.source_type, a.source_id, a.destination_type, a.destination_id, a.source_fund_id, a.destination_fund_id, a.amount_kobo, a.currency, a.purpose, a.approval_reference, a.transaction_id, a.allocated_by_user_id, a.status, a.created_at,
+       sf.name as source_fund_name,
+       df.name as destination_fund_name,
+       u.display_name as allocated_by_name
+FROM financial_allocations a
+LEFT JOIN financial_funds sf ON a.source_fund_id = sf.id
+LEFT JOIN financial_funds df ON a.destination_fund_id = df.id
+LEFT JOIN users u ON a.allocated_by_user_id = u.id
+WHERE a.id = $1
+`
+
+type GetAllocationByIDRow struct {
+	ID                  string             `json:"id"`
+	Reference           string             `json:"reference"`
+	SourceType          string             `json:"source_type"`
+	SourceID            pgtype.Text        `json:"source_id"`
+	DestinationType     string             `json:"destination_type"`
+	DestinationID       pgtype.Text        `json:"destination_id"`
+	SourceFundID        string             `json:"source_fund_id"`
+	DestinationFundID   string             `json:"destination_fund_id"`
+	AmountKobo          int64              `json:"amount_kobo"`
+	Currency            string             `json:"currency"`
+	Purpose             string             `json:"purpose"`
+	ApprovalReference   pgtype.Text        `json:"approval_reference"`
+	TransactionID       pgtype.Text        `json:"transaction_id"`
+	AllocatedByUserID   string             `json:"allocated_by_user_id"`
+	Status              string             `json:"status"`
+	CreatedAt           pgtype.Timestamptz `json:"created_at"`
+	SourceFundName      pgtype.Text        `json:"source_fund_name"`
+	DestinationFundName pgtype.Text        `json:"destination_fund_name"`
+	AllocatedByName     pgtype.Text        `json:"allocated_by_name"`
+}
+
+func (q *Queries) GetAllocationByID(ctx context.Context, id string) (GetAllocationByIDRow, error) {
+	row := q.db.QueryRow(ctx, getAllocationByID, id)
+	var i GetAllocationByIDRow
+	err := row.Scan(
+		&i.ID,
+		&i.Reference,
+		&i.SourceType,
+		&i.SourceID,
+		&i.DestinationType,
+		&i.DestinationID,
+		&i.SourceFundID,
+		&i.DestinationFundID,
+		&i.AmountKobo,
+		&i.Currency,
+		&i.Purpose,
+		&i.ApprovalReference,
+		&i.TransactionID,
+		&i.AllocatedByUserID,
+		&i.Status,
+		&i.CreatedAt,
+		&i.SourceFundName,
+		&i.DestinationFundName,
+		&i.AllocatedByName,
+	)
+	return i, err
+}
+
+const getBankAccountByID = `-- name: GetBankAccountByID :one
+SELECT id, bank_name, account_name, account_number, currency, org_type, status, is_primary, notes, created_by_user_id, activated_by_user_id, created_at, updated_at, version FROM financial_bank_accounts WHERE id = $1
+`
+
+func (q *Queries) GetBankAccountByID(ctx context.Context, id string) (FinancialBankAccount, error) {
+	row := q.db.QueryRow(ctx, getBankAccountByID, id)
+	var i FinancialBankAccount
+	err := row.Scan(
+		&i.ID,
+		&i.BankName,
+		&i.AccountName,
+		&i.AccountNumber,
+		&i.Currency,
+		&i.OrgType,
+		&i.Status,
+		&i.IsPrimary,
+		&i.Notes,
+		&i.CreatedByUserID,
+		&i.ActivatedByUserID,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+		&i.Version,
+	)
+	return i, err
+}
+
+const getBudgetByID = `-- name: GetBudgetByID :one
+SELECT b.id, b.reference, b.title, b.scope_type, b.scope_id, b.zone_id, b.state_id, b.lga_id, b.period_type, b.period_label, b.period_start, b.period_end, b.proposed_amount_kobo, b.approved_amount_kobo, b.allocated_amount_kobo, b.committed_amount_kobo, b.spent_amount_kobo, b.currency, b.status, b.created_by_user_id, b.approved_by_user_id, b.approved_at, b.notes, b.created_at, b.updated_at, b.version,
+       z.name as zone_name,
+       s.name as state_name,
+       l.name as lga_name,
+       u_creator.display_name as creator_name,
+       u_approver.display_name as approver_name
+FROM financial_budgets b
+LEFT JOIN zones z ON b.zone_id = z.id
+LEFT JOIN states s ON b.state_id = s.id
+LEFT JOIN lgas l ON b.lga_id = l.id
+LEFT JOIN users u_creator ON b.created_by_user_id = u_creator.id
+LEFT JOIN users u_approver ON b.approved_by_user_id = u_approver.id
+WHERE b.id = $1
+`
+
+type GetBudgetByIDRow struct {
+	ID                  string             `json:"id"`
+	Reference           string             `json:"reference"`
+	Title               string             `json:"title"`
+	ScopeType           string             `json:"scope_type"`
+	ScopeID             pgtype.Text        `json:"scope_id"`
+	ZoneID              pgtype.Text        `json:"zone_id"`
+	StateID             pgtype.Text        `json:"state_id"`
+	LgaID               pgtype.Text        `json:"lga_id"`
+	PeriodType          string             `json:"period_type"`
+	PeriodLabel         string             `json:"period_label"`
+	PeriodStart         pgtype.Date        `json:"period_start"`
+	PeriodEnd           pgtype.Date        `json:"period_end"`
+	ProposedAmountKobo  int64              `json:"proposed_amount_kobo"`
+	ApprovedAmountKobo  int64              `json:"approved_amount_kobo"`
+	AllocatedAmountKobo int64              `json:"allocated_amount_kobo"`
+	CommittedAmountKobo int64              `json:"committed_amount_kobo"`
+	SpentAmountKobo     int64              `json:"spent_amount_kobo"`
+	Currency            string             `json:"currency"`
+	Status              string             `json:"status"`
+	CreatedByUserID     string             `json:"created_by_user_id"`
+	ApprovedByUserID    pgtype.Text        `json:"approved_by_user_id"`
+	ApprovedAt          pgtype.Timestamptz `json:"approved_at"`
+	Notes               pgtype.Text        `json:"notes"`
+	CreatedAt           pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt           pgtype.Timestamptz `json:"updated_at"`
+	Version             int32              `json:"version"`
+	ZoneName            pgtype.Text        `json:"zone_name"`
+	StateName           pgtype.Text        `json:"state_name"`
+	LgaName             pgtype.Text        `json:"lga_name"`
+	CreatorName         pgtype.Text        `json:"creator_name"`
+	ApproverName        pgtype.Text        `json:"approver_name"`
+}
+
+func (q *Queries) GetBudgetByID(ctx context.Context, id string) (GetBudgetByIDRow, error) {
+	row := q.db.QueryRow(ctx, getBudgetByID, id)
+	var i GetBudgetByIDRow
+	err := row.Scan(
+		&i.ID,
+		&i.Reference,
+		&i.Title,
+		&i.ScopeType,
+		&i.ScopeID,
+		&i.ZoneID,
+		&i.StateID,
+		&i.LgaID,
+		&i.PeriodType,
+		&i.PeriodLabel,
+		&i.PeriodStart,
+		&i.PeriodEnd,
+		&i.ProposedAmountKobo,
+		&i.ApprovedAmountKobo,
+		&i.AllocatedAmountKobo,
+		&i.CommittedAmountKobo,
+		&i.SpentAmountKobo,
+		&i.Currency,
+		&i.Status,
+		&i.CreatedByUserID,
+		&i.ApprovedByUserID,
+		&i.ApprovedAt,
+		&i.Notes,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+		&i.Version,
+		&i.ZoneName,
+		&i.StateName,
+		&i.LgaName,
+		&i.CreatorName,
+		&i.ApproverName,
+	)
+	return i, err
+}
+
+const getBudgetByReference = `-- name: GetBudgetByReference :one
+SELECT id, reference, title, scope_type, scope_id, zone_id, state_id, lga_id, period_type, period_label, period_start, period_end, proposed_amount_kobo, approved_amount_kobo, allocated_amount_kobo, committed_amount_kobo, spent_amount_kobo, currency, status, created_by_user_id, approved_by_user_id, approved_at, notes, created_at, updated_at, version FROM financial_budgets WHERE reference = $1
+`
+
+func (q *Queries) GetBudgetByReference(ctx context.Context, reference string) (FinancialBudget, error) {
+	row := q.db.QueryRow(ctx, getBudgetByReference, reference)
+	var i FinancialBudget
+	err := row.Scan(
+		&i.ID,
+		&i.Reference,
+		&i.Title,
+		&i.ScopeType,
+		&i.ScopeID,
+		&i.ZoneID,
+		&i.StateID,
+		&i.LgaID,
+		&i.PeriodType,
+		&i.PeriodLabel,
+		&i.PeriodStart,
+		&i.PeriodEnd,
+		&i.ProposedAmountKobo,
+		&i.ApprovedAmountKobo,
+		&i.AllocatedAmountKobo,
+		&i.CommittedAmountKobo,
+		&i.SpentAmountKobo,
+		&i.Currency,
+		&i.Status,
+		&i.CreatedByUserID,
+		&i.ApprovedByUserID,
+		&i.ApprovedAt,
+		&i.Notes,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+		&i.Version,
+	)
+	return i, err
+}
+
+const getDonationByID = `-- name: GetDonationByID :one
+SELECT d.id, d.reference, d.entity_type, d.campaign_id, d.donor_name, d.donor_email, d.donor_phone, d.is_anonymous, d.amount_kobo, d.currency, d.payment_method, d.payment_reference, d.provider_channel, d.status, d.zone_id, d.state_id, d.destination_fund_id, d.transaction_id, d.verified_at, d.receipt_number, d.notes, d.created_at, d.updated_at,
+       fc.title as campaign_title,
+       z.name as zone_name,
+       s.name as state_name,
+       df.name as destination_fund_name
+FROM financial_donations d
+LEFT JOIN foundation_campaigns fc ON d.campaign_id = fc.id
+LEFT JOIN zones z ON d.zone_id = z.id
+LEFT JOIN states s ON d.state_id = s.id
+LEFT JOIN financial_funds df ON d.destination_fund_id = df.id
+WHERE d.id = $1
+`
+
+type GetDonationByIDRow struct {
+	ID                  string             `json:"id"`
+	Reference           string             `json:"reference"`
+	EntityType          string             `json:"entity_type"`
+	CampaignID          pgtype.Text        `json:"campaign_id"`
+	DonorName           string             `json:"donor_name"`
+	DonorEmail          string             `json:"donor_email"`
+	DonorPhone          pgtype.Text        `json:"donor_phone"`
+	IsAnonymous         bool               `json:"is_anonymous"`
+	AmountKobo          int64              `json:"amount_kobo"`
+	Currency            string             `json:"currency"`
+	PaymentMethod       string             `json:"payment_method"`
+	PaymentReference    pgtype.Text        `json:"payment_reference"`
+	ProviderChannel     pgtype.Text        `json:"provider_channel"`
+	Status              string             `json:"status"`
+	ZoneID              pgtype.Text        `json:"zone_id"`
+	StateID             pgtype.Text        `json:"state_id"`
+	DestinationFundID   string             `json:"destination_fund_id"`
+	TransactionID       pgtype.Text        `json:"transaction_id"`
+	VerifiedAt          pgtype.Timestamptz `json:"verified_at"`
+	ReceiptNumber       pgtype.Text        `json:"receipt_number"`
+	Notes               pgtype.Text        `json:"notes"`
+	CreatedAt           pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt           pgtype.Timestamptz `json:"updated_at"`
+	CampaignTitle       pgtype.Text        `json:"campaign_title"`
+	ZoneName            pgtype.Text        `json:"zone_name"`
+	StateName           pgtype.Text        `json:"state_name"`
+	DestinationFundName pgtype.Text        `json:"destination_fund_name"`
+}
+
+func (q *Queries) GetDonationByID(ctx context.Context, id string) (GetDonationByIDRow, error) {
+	row := q.db.QueryRow(ctx, getDonationByID, id)
+	var i GetDonationByIDRow
+	err := row.Scan(
+		&i.ID,
+		&i.Reference,
+		&i.EntityType,
+		&i.CampaignID,
+		&i.DonorName,
+		&i.DonorEmail,
+		&i.DonorPhone,
+		&i.IsAnonymous,
+		&i.AmountKobo,
+		&i.Currency,
+		&i.PaymentMethod,
+		&i.PaymentReference,
+		&i.ProviderChannel,
+		&i.Status,
+		&i.ZoneID,
+		&i.StateID,
+		&i.DestinationFundID,
+		&i.TransactionID,
+		&i.VerifiedAt,
+		&i.ReceiptNumber,
+		&i.Notes,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+		&i.CampaignTitle,
+		&i.ZoneName,
+		&i.StateName,
+		&i.DestinationFundName,
+	)
+	return i, err
+}
+
+const getDonationByPaymentReference = `-- name: GetDonationByPaymentReference :one
+SELECT id, reference, entity_type, campaign_id, donor_name, donor_email, donor_phone, is_anonymous, amount_kobo, currency, payment_method, payment_reference, provider_channel, status, zone_id, state_id, destination_fund_id, transaction_id, verified_at, receipt_number, notes, created_at, updated_at FROM financial_donations WHERE payment_reference = $1
+`
+
+func (q *Queries) GetDonationByPaymentReference(ctx context.Context, paymentReference pgtype.Text) (FinancialDonation, error) {
+	row := q.db.QueryRow(ctx, getDonationByPaymentReference, paymentReference)
+	var i FinancialDonation
+	err := row.Scan(
+		&i.ID,
+		&i.Reference,
+		&i.EntityType,
+		&i.CampaignID,
+		&i.DonorName,
+		&i.DonorEmail,
+		&i.DonorPhone,
+		&i.IsAnonymous,
+		&i.AmountKobo,
+		&i.Currency,
+		&i.PaymentMethod,
+		&i.PaymentReference,
+		&i.ProviderChannel,
+		&i.Status,
+		&i.ZoneID,
+		&i.StateID,
+		&i.DestinationFundID,
+		&i.TransactionID,
+		&i.VerifiedAt,
+		&i.ReceiptNumber,
+		&i.Notes,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+	)
+	return i, err
+}
+
+const getDonationByReference = `-- name: GetDonationByReference :one
+SELECT id, reference, entity_type, campaign_id, donor_name, donor_email, donor_phone, is_anonymous, amount_kobo, currency, payment_method, payment_reference, provider_channel, status, zone_id, state_id, destination_fund_id, transaction_id, verified_at, receipt_number, notes, created_at, updated_at FROM financial_donations WHERE reference = $1
+`
+
+func (q *Queries) GetDonationByReference(ctx context.Context, reference string) (FinancialDonation, error) {
+	row := q.db.QueryRow(ctx, getDonationByReference, reference)
+	var i FinancialDonation
+	err := row.Scan(
+		&i.ID,
+		&i.Reference,
+		&i.EntityType,
+		&i.CampaignID,
+		&i.DonorName,
+		&i.DonorEmail,
+		&i.DonorPhone,
+		&i.IsAnonymous,
+		&i.AmountKobo,
+		&i.Currency,
+		&i.PaymentMethod,
+		&i.PaymentReference,
+		&i.ProviderChannel,
+		&i.Status,
+		&i.ZoneID,
+		&i.StateID,
+		&i.DestinationFundID,
+		&i.TransactionID,
+		&i.VerifiedAt,
+		&i.ReceiptNumber,
+		&i.Notes,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+	)
+	return i, err
+}
+
+const getDonationCampaignTotals = `-- name: GetDonationCampaignTotals :one
+SELECT
+    COUNT(*)::bigint as total_count,
+    COALESCE(SUM(CASE WHEN status = 'verified' THEN amount_kobo ELSE 0 END), 0)::bigint as verified_total_kobo
+FROM financial_donations
+WHERE campaign_id = $1
+`
+
+type GetDonationCampaignTotalsRow struct {
+	TotalCount        int64 `json:"total_count"`
+	VerifiedTotalKobo int64 `json:"verified_total_kobo"`
+}
+
+func (q *Queries) GetDonationCampaignTotals(ctx context.Context, campaignID pgtype.Text) (GetDonationCampaignTotalsRow, error) {
+	row := q.db.QueryRow(ctx, getDonationCampaignTotals, campaignID)
+	var i GetDonationCampaignTotalsRow
+	err := row.Scan(&i.TotalCount, &i.VerifiedTotalKobo)
+	return i, err
+}
+
+const getExpenseByID = `-- name: GetExpenseByID :one
+SELECT e.id, e.reference, e.title, e.category, e.description, e.amount_kobo, e.currency, e.beneficiary_name, e.beneficiary_bank_name, e.beneficiary_account_number, e.zone_id, e.state_id, e.lga_id, e.related_project_id, e.related_campaign_id, e.supporting_document_url, e.receipt_url, e.requested_by_user_id, e.reviewer_id, e.reviewed_at, e.approved_by_user_id, e.approved_at, e.rejection_reason, e.authorized_by_user_id, e.authorized_at, e.paid_by_user_id, e.paid_at, e.payment_reference, e.transaction_id, e.budget_id, e.fund_id, e.status, e.created_at, e.updated_at, e.version,
+       z.name as zone_name,
+       s.name as state_name,
+       l.name as lga_name,
+       cp.title as related_project_title,
+       cc.title as related_campaign_title,
+       u_req.display_name as requested_by_name,
+       u_rev.display_name as reviewer_name,
+       u_app.display_name as approved_by_name,
+       u_auth.display_name as authorized_by_name,
+       u_paid.display_name as paid_by_name,
+       f.name as fund_name
+FROM financial_expenses e
+LEFT JOIN zones z ON e.zone_id = z.id
+LEFT JOIN states s ON e.state_id = s.id
+LEFT JOIN lgas l ON e.lga_id = l.id
+LEFT JOIN community_projects cp ON e.related_project_id = cp.id
+LEFT JOIN cleanup_campaigns cc ON e.related_campaign_id = cc.id
+LEFT JOIN users u_req ON e.requested_by_user_id = u_req.id
+LEFT JOIN users u_rev ON e.reviewer_id = u_rev.id
+LEFT JOIN users u_app ON e.approved_by_user_id = u_app.id
+LEFT JOIN users u_auth ON e.authorized_by_user_id = u_auth.id
+LEFT JOIN users u_paid ON e.paid_by_user_id = u_paid.id
+LEFT JOIN financial_funds f ON e.fund_id = f.id
+WHERE e.id = $1
+`
+
+type GetExpenseByIDRow struct {
+	ID                       string             `json:"id"`
+	Reference                string             `json:"reference"`
+	Title                    string             `json:"title"`
+	Category                 string             `json:"category"`
+	Description              string             `json:"description"`
+	AmountKobo               int64              `json:"amount_kobo"`
+	Currency                 string             `json:"currency"`
+	BeneficiaryName          string             `json:"beneficiary_name"`
+	BeneficiaryBankName      pgtype.Text        `json:"beneficiary_bank_name"`
+	BeneficiaryAccountNumber pgtype.Text        `json:"beneficiary_account_number"`
+	ZoneID                   pgtype.Text        `json:"zone_id"`
+	StateID                  pgtype.Text        `json:"state_id"`
+	LgaID                    pgtype.Text        `json:"lga_id"`
+	RelatedProjectID         pgtype.Text        `json:"related_project_id"`
+	RelatedCampaignID        pgtype.Text        `json:"related_campaign_id"`
+	SupportingDocumentUrl    pgtype.Text        `json:"supporting_document_url"`
+	ReceiptUrl               pgtype.Text        `json:"receipt_url"`
+	RequestedByUserID        string             `json:"requested_by_user_id"`
+	ReviewerID               pgtype.Text        `json:"reviewer_id"`
+	ReviewedAt               pgtype.Timestamptz `json:"reviewed_at"`
+	ApprovedByUserID         pgtype.Text        `json:"approved_by_user_id"`
+	ApprovedAt               pgtype.Timestamptz `json:"approved_at"`
+	RejectionReason          pgtype.Text        `json:"rejection_reason"`
+	AuthorizedByUserID       pgtype.Text        `json:"authorized_by_user_id"`
+	AuthorizedAt             pgtype.Timestamptz `json:"authorized_at"`
+	PaidByUserID             pgtype.Text        `json:"paid_by_user_id"`
+	PaidAt                   pgtype.Timestamptz `json:"paid_at"`
+	PaymentReference         pgtype.Text        `json:"payment_reference"`
+	TransactionID            pgtype.Text        `json:"transaction_id"`
+	BudgetID                 pgtype.Text        `json:"budget_id"`
+	FundID                   pgtype.Text        `json:"fund_id"`
+	Status                   string             `json:"status"`
+	CreatedAt                pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt                pgtype.Timestamptz `json:"updated_at"`
+	Version                  int32              `json:"version"`
+	ZoneName                 pgtype.Text        `json:"zone_name"`
+	StateName                pgtype.Text        `json:"state_name"`
+	LgaName                  pgtype.Text        `json:"lga_name"`
+	RelatedProjectTitle      pgtype.Text        `json:"related_project_title"`
+	RelatedCampaignTitle     pgtype.Text        `json:"related_campaign_title"`
+	RequestedByName          pgtype.Text        `json:"requested_by_name"`
+	ReviewerName             pgtype.Text        `json:"reviewer_name"`
+	ApprovedByName           pgtype.Text        `json:"approved_by_name"`
+	AuthorizedByName         pgtype.Text        `json:"authorized_by_name"`
+	PaidByName               pgtype.Text        `json:"paid_by_name"`
+	FundName                 pgtype.Text        `json:"fund_name"`
+}
+
+func (q *Queries) GetExpenseByID(ctx context.Context, id string) (GetExpenseByIDRow, error) {
+	row := q.db.QueryRow(ctx, getExpenseByID, id)
+	var i GetExpenseByIDRow
+	err := row.Scan(
+		&i.ID,
+		&i.Reference,
+		&i.Title,
+		&i.Category,
+		&i.Description,
+		&i.AmountKobo,
+		&i.Currency,
+		&i.BeneficiaryName,
+		&i.BeneficiaryBankName,
+		&i.BeneficiaryAccountNumber,
+		&i.ZoneID,
+		&i.StateID,
+		&i.LgaID,
+		&i.RelatedProjectID,
+		&i.RelatedCampaignID,
+		&i.SupportingDocumentUrl,
+		&i.ReceiptUrl,
+		&i.RequestedByUserID,
+		&i.ReviewerID,
+		&i.ReviewedAt,
+		&i.ApprovedByUserID,
+		&i.ApprovedAt,
+		&i.RejectionReason,
+		&i.AuthorizedByUserID,
+		&i.AuthorizedAt,
+		&i.PaidByUserID,
+		&i.PaidAt,
+		&i.PaymentReference,
+		&i.TransactionID,
+		&i.BudgetID,
+		&i.FundID,
+		&i.Status,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+		&i.Version,
+		&i.ZoneName,
+		&i.StateName,
+		&i.LgaName,
+		&i.RelatedProjectTitle,
+		&i.RelatedCampaignTitle,
+		&i.RequestedByName,
+		&i.ReviewerName,
+		&i.ApprovedByName,
+		&i.AuthorizedByName,
+		&i.PaidByName,
+		&i.FundName,
+	)
+	return i, err
+}
+
+const getExpenseByReference = `-- name: GetExpenseByReference :one
+SELECT id, reference, title, category, description, amount_kobo, currency, beneficiary_name, beneficiary_bank_name, beneficiary_account_number, zone_id, state_id, lga_id, related_project_id, related_campaign_id, supporting_document_url, receipt_url, requested_by_user_id, reviewer_id, reviewed_at, approved_by_user_id, approved_at, rejection_reason, authorized_by_user_id, authorized_at, paid_by_user_id, paid_at, payment_reference, transaction_id, budget_id, fund_id, status, created_at, updated_at, version FROM financial_expenses WHERE reference = $1
+`
+
+func (q *Queries) GetExpenseByReference(ctx context.Context, reference string) (FinancialExpense, error) {
+	row := q.db.QueryRow(ctx, getExpenseByReference, reference)
+	var i FinancialExpense
+	err := row.Scan(
+		&i.ID,
+		&i.Reference,
+		&i.Title,
+		&i.Category,
+		&i.Description,
+		&i.AmountKobo,
+		&i.Currency,
+		&i.BeneficiaryName,
+		&i.BeneficiaryBankName,
+		&i.BeneficiaryAccountNumber,
+		&i.ZoneID,
+		&i.StateID,
+		&i.LgaID,
+		&i.RelatedProjectID,
+		&i.RelatedCampaignID,
+		&i.SupportingDocumentUrl,
+		&i.ReceiptUrl,
+		&i.RequestedByUserID,
+		&i.ReviewerID,
+		&i.ReviewedAt,
+		&i.ApprovedByUserID,
+		&i.ApprovedAt,
+		&i.RejectionReason,
+		&i.AuthorizedByUserID,
+		&i.AuthorizedAt,
+		&i.PaidByUserID,
+		&i.PaidAt,
+		&i.PaymentReference,
+		&i.TransactionID,
+		&i.BudgetID,
+		&i.FundID,
+		&i.Status,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+		&i.Version,
+	)
+	return i, err
+}
+
+const getFinancialDashboardSummary = `-- name: GetFinancialDashboardSummary :one
+SELECT
+    COALESCE(SUM(CASE WHEN t.is_external_income = true AND t.status = 'posted' THEN t.amount ELSE 0 END), 0)::bigint as total_verified_income,
+    COALESCE(SUM(CASE WHEN t.transaction_type IN ('disbursement', 'expense') AND t.status = 'posted' THEN t.amount ELSE 0 END), 0)::bigint as total_verified_expenditure,
+    COALESCE(SUM(CASE WHEN e.status IN ('submitted', 'under_review') THEN e.amount_kobo ELSE 0 END), 0)::bigint as outstanding_commitments,
+    COALESCE((SELECT COUNT(*) FROM financial_expenses WHERE status IN ('submitted', 'under_review')), 0)::bigint as pending_expenses_count,
+    COALESCE((SELECT COUNT(*) FROM financial_transactions WHERE status = 'pending'), 0)::bigint as pending_transactions_count,
+    COALESCE((SELECT COUNT(*) FROM financial_reconciliation_periods WHERE status IN ('draft', 'in_progress')), 0)::bigint as pending_reconciliations_count,
+    COALESCE((SELECT SUM(approved_amount_kobo) FROM financial_budgets WHERE status = 'approved'), 0)::bigint as active_budgets_total,
+    COALESCE((SELECT SUM(allocated_funding) FROM community_projects), 0)::bigint as project_allocations_total,
+    COALESCE((SELECT SUM(amount_kobo) FROM financial_donations WHERE status = 'verified'), 0)::bigint as total_donations_received
+FROM financial_transactions t
+FULL OUTER JOIN financial_expenses e ON FALSE
+`
+
+type GetFinancialDashboardSummaryRow struct {
+	TotalVerifiedIncome         int64 `json:"total_verified_income"`
+	TotalVerifiedExpenditure    int64 `json:"total_verified_expenditure"`
+	OutstandingCommitments      int64 `json:"outstanding_commitments"`
+	PendingExpensesCount        int64 `json:"pending_expenses_count"`
+	PendingTransactionsCount    int64 `json:"pending_transactions_count"`
+	PendingReconciliationsCount int64 `json:"pending_reconciliations_count"`
+	ActiveBudgetsTotal          int64 `json:"active_budgets_total"`
+	ProjectAllocationsTotal     int64 `json:"project_allocations_total"`
+	TotalDonationsReceived      int64 `json:"total_donations_received"`
+}
+
+func (q *Queries) GetFinancialDashboardSummary(ctx context.Context) (GetFinancialDashboardSummaryRow, error) {
+	row := q.db.QueryRow(ctx, getFinancialDashboardSummary)
+	var i GetFinancialDashboardSummaryRow
+	err := row.Scan(
+		&i.TotalVerifiedIncome,
+		&i.TotalVerifiedExpenditure,
+		&i.OutstandingCommitments,
+		&i.PendingExpensesCount,
+		&i.PendingTransactionsCount,
+		&i.PendingReconciliationsCount,
+		&i.ActiveBudgetsTotal,
+		&i.ProjectAllocationsTotal,
+		&i.TotalDonationsReceived,
+	)
+	return i, err
+}
+
 const getFinancialFundByID = `-- name: GetFinancialFundByID :one
 SELECT id, name, description, fund_type, is_active, created_at FROM financial_funds WHERE id = $1
 `
@@ -362,7 +1738,7 @@ func (q *Queries) GetFinancialFundByID(ctx context.Context, id string) (Financia
 }
 
 const getFinancialTransactionByID = `-- name: GetFinancialTransactionByID :one
-SELECT t.id, t.reference, t.idempotency_key, t.transaction_type, t.status, t.amount, t.currency, t.source_fund_id, t.destination_fund_id, t.related_campaign_id, t.related_project_id, t.state_id, t.zone_id, t.provider_reference, t.supporting_evidence_url, t.notes, t.initiating_actor_id, t.initiating_actor_type, t.approved_by_user_id, t.approved_at, t.is_external_income, t.occurred_at, t.recorded_at, t.reversal_of_transaction_id, t.is_reversal, t.reversal_reason, t.created_at, t.updated_at, t.version,
+SELECT t.id, t.reference, t.idempotency_key, t.transaction_type, t.status, t.amount, t.currency, t.source_fund_id, t.destination_fund_id, t.related_campaign_id, t.related_project_id, t.state_id, t.zone_id, t.provider_reference, t.supporting_evidence_url, t.notes, t.initiating_actor_id, t.initiating_actor_type, t.approved_by_user_id, t.approved_at, t.is_external_income, t.occurred_at, t.recorded_at, t.reversal_of_transaction_id, t.is_reversal, t.reversal_reason, t.created_at, t.updated_at, t.version, t.income_category, t.payment_method, t.funding_source, t.lga_id, t.receiving_account_id, t.verification_status, t.verified_by_user_id, t.verified_at,
        sf.name as source_fund_name,
        df.name as destination_fund_name,
        s.name as state_name,
@@ -409,6 +1785,14 @@ type GetFinancialTransactionByIDRow struct {
 	CreatedAt               pgtype.Timestamptz `json:"created_at"`
 	UpdatedAt               pgtype.Timestamptz `json:"updated_at"`
 	Version                 int32              `json:"version"`
+	IncomeCategory          pgtype.Text        `json:"income_category"`
+	PaymentMethod           pgtype.Text        `json:"payment_method"`
+	FundingSource           pgtype.Text        `json:"funding_source"`
+	LgaID                   pgtype.Text        `json:"lga_id"`
+	ReceivingAccountID      pgtype.Text        `json:"receiving_account_id"`
+	VerificationStatus      string             `json:"verification_status"`
+	VerifiedByUserID        pgtype.Text        `json:"verified_by_user_id"`
+	VerifiedAt              pgtype.Timestamptz `json:"verified_at"`
 	SourceFundName          pgtype.Text        `json:"source_fund_name"`
 	DestinationFundName     pgtype.Text        `json:"destination_fund_name"`
 	StateName               pgtype.Text        `json:"state_name"`
@@ -450,6 +1834,14 @@ func (q *Queries) GetFinancialTransactionByID(ctx context.Context, id string) (G
 		&i.CreatedAt,
 		&i.UpdatedAt,
 		&i.Version,
+		&i.IncomeCategory,
+		&i.PaymentMethod,
+		&i.FundingSource,
+		&i.LgaID,
+		&i.ReceivingAccountID,
+		&i.VerificationStatus,
+		&i.VerifiedByUserID,
+		&i.VerifiedAt,
 		&i.SourceFundName,
 		&i.DestinationFundName,
 		&i.StateName,
@@ -461,7 +1853,7 @@ func (q *Queries) GetFinancialTransactionByID(ctx context.Context, id string) (G
 }
 
 const getFinancialTransactionByIdempotencyKey = `-- name: GetFinancialTransactionByIdempotencyKey :one
-SELECT id, reference, idempotency_key, transaction_type, status, amount, currency, source_fund_id, destination_fund_id, related_campaign_id, related_project_id, state_id, zone_id, provider_reference, supporting_evidence_url, notes, initiating_actor_id, initiating_actor_type, approved_by_user_id, approved_at, is_external_income, occurred_at, recorded_at, reversal_of_transaction_id, is_reversal, reversal_reason, created_at, updated_at, version FROM financial_transactions WHERE idempotency_key = $1
+SELECT id, reference, idempotency_key, transaction_type, status, amount, currency, source_fund_id, destination_fund_id, related_campaign_id, related_project_id, state_id, zone_id, provider_reference, supporting_evidence_url, notes, initiating_actor_id, initiating_actor_type, approved_by_user_id, approved_at, is_external_income, occurred_at, recorded_at, reversal_of_transaction_id, is_reversal, reversal_reason, created_at, updated_at, version, income_category, payment_method, funding_source, lga_id, receiving_account_id, verification_status, verified_by_user_id, verified_at FROM financial_transactions WHERE idempotency_key = $1
 `
 
 func (q *Queries) GetFinancialTransactionByIdempotencyKey(ctx context.Context, idempotencyKey pgtype.Text) (FinancialTransaction, error) {
@@ -497,12 +1889,20 @@ func (q *Queries) GetFinancialTransactionByIdempotencyKey(ctx context.Context, i
 		&i.CreatedAt,
 		&i.UpdatedAt,
 		&i.Version,
+		&i.IncomeCategory,
+		&i.PaymentMethod,
+		&i.FundingSource,
+		&i.LgaID,
+		&i.ReceivingAccountID,
+		&i.VerificationStatus,
+		&i.VerifiedByUserID,
+		&i.VerifiedAt,
 	)
 	return i, err
 }
 
 const getFinancialTransactionByReference = `-- name: GetFinancialTransactionByReference :one
-SELECT id, reference, idempotency_key, transaction_type, status, amount, currency, source_fund_id, destination_fund_id, related_campaign_id, related_project_id, state_id, zone_id, provider_reference, supporting_evidence_url, notes, initiating_actor_id, initiating_actor_type, approved_by_user_id, approved_at, is_external_income, occurred_at, recorded_at, reversal_of_transaction_id, is_reversal, reversal_reason, created_at, updated_at, version FROM financial_transactions WHERE reference = $1
+SELECT id, reference, idempotency_key, transaction_type, status, amount, currency, source_fund_id, destination_fund_id, related_campaign_id, related_project_id, state_id, zone_id, provider_reference, supporting_evidence_url, notes, initiating_actor_id, initiating_actor_type, approved_by_user_id, approved_at, is_external_income, occurred_at, recorded_at, reversal_of_transaction_id, is_reversal, reversal_reason, created_at, updated_at, version, income_category, payment_method, funding_source, lga_id, receiving_account_id, verification_status, verified_by_user_id, verified_at FROM financial_transactions WHERE reference = $1
 `
 
 func (q *Queries) GetFinancialTransactionByReference(ctx context.Context, reference string) (FinancialTransaction, error) {
@@ -538,8 +1938,654 @@ func (q *Queries) GetFinancialTransactionByReference(ctx context.Context, refere
 		&i.CreatedAt,
 		&i.UpdatedAt,
 		&i.Version,
+		&i.IncomeCategory,
+		&i.PaymentMethod,
+		&i.FundingSource,
+		&i.LgaID,
+		&i.ReceivingAccountID,
+		&i.VerificationStatus,
+		&i.VerifiedByUserID,
+		&i.VerifiedAt,
 	)
 	return i, err
+}
+
+const getReconciliationPeriodByID = `-- name: GetReconciliationPeriodByID :one
+SELECT rp.id, rp.bank_account_id, rp.period_start, rp.period_end, rp.opening_balance_kobo, rp.closing_balance_kobo, rp.statement_closing_balance_kobo, rp.status, rp.reconciled_by_user_id, rp.reconciled_at, rp.certified_by_user_id, rp.certified_at, rp.notes, rp.created_at, rp.updated_at,
+       ba.bank_name,
+       ba.account_name,
+       ba.account_number,
+       ba.org_type,
+       u_rec.display_name as reconciled_by_name,
+       u_cert.display_name as certified_by_name
+FROM financial_reconciliation_periods rp
+JOIN financial_bank_accounts ba ON rp.bank_account_id = ba.id
+LEFT JOIN users u_rec ON rp.reconciled_by_user_id = u_rec.id
+LEFT JOIN users u_cert ON rp.certified_by_user_id = u_cert.id
+WHERE rp.id = $1
+`
+
+type GetReconciliationPeriodByIDRow struct {
+	ID                          string             `json:"id"`
+	BankAccountID               string             `json:"bank_account_id"`
+	PeriodStart                 pgtype.Date        `json:"period_start"`
+	PeriodEnd                   pgtype.Date        `json:"period_end"`
+	OpeningBalanceKobo          int64              `json:"opening_balance_kobo"`
+	ClosingBalanceKobo          int64              `json:"closing_balance_kobo"`
+	StatementClosingBalanceKobo int64              `json:"statement_closing_balance_kobo"`
+	Status                      string             `json:"status"`
+	ReconciledByUserID          pgtype.Text        `json:"reconciled_by_user_id"`
+	ReconciledAt                pgtype.Timestamptz `json:"reconciled_at"`
+	CertifiedByUserID           pgtype.Text        `json:"certified_by_user_id"`
+	CertifiedAt                 pgtype.Timestamptz `json:"certified_at"`
+	Notes                       pgtype.Text        `json:"notes"`
+	CreatedAt                   pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt                   pgtype.Timestamptz `json:"updated_at"`
+	BankName                    string             `json:"bank_name"`
+	AccountName                 string             `json:"account_name"`
+	AccountNumber               string             `json:"account_number"`
+	OrgType                     string             `json:"org_type"`
+	ReconciledByName            pgtype.Text        `json:"reconciled_by_name"`
+	CertifiedByName             pgtype.Text        `json:"certified_by_name"`
+}
+
+func (q *Queries) GetReconciliationPeriodByID(ctx context.Context, id string) (GetReconciliationPeriodByIDRow, error) {
+	row := q.db.QueryRow(ctx, getReconciliationPeriodByID, id)
+	var i GetReconciliationPeriodByIDRow
+	err := row.Scan(
+		&i.ID,
+		&i.BankAccountID,
+		&i.PeriodStart,
+		&i.PeriodEnd,
+		&i.OpeningBalanceKobo,
+		&i.ClosingBalanceKobo,
+		&i.StatementClosingBalanceKobo,
+		&i.Status,
+		&i.ReconciledByUserID,
+		&i.ReconciledAt,
+		&i.CertifiedByUserID,
+		&i.CertifiedAt,
+		&i.Notes,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+		&i.BankName,
+		&i.AccountName,
+		&i.AccountNumber,
+		&i.OrgType,
+		&i.ReconciledByName,
+		&i.CertifiedByName,
+	)
+	return i, err
+}
+
+const listAllocationsFiltered = `-- name: ListAllocationsFiltered :many
+SELECT a.id, a.reference, a.source_type, a.source_id, a.destination_type, a.destination_id, a.source_fund_id, a.destination_fund_id, a.amount_kobo, a.currency, a.purpose, a.approval_reference, a.transaction_id, a.allocated_by_user_id, a.status, a.created_at,
+       sf.name as source_fund_name,
+       df.name as destination_fund_name,
+       u.display_name as allocated_by_name
+FROM financial_allocations a
+LEFT JOIN financial_funds sf ON a.source_fund_id = sf.id
+LEFT JOIN financial_funds df ON a.destination_fund_id = df.id
+LEFT JOIN users u ON a.allocated_by_user_id = u.id
+WHERE ($1::varchar IS NULL OR a.source_type = $1::varchar)
+  AND ($2::varchar IS NULL OR a.destination_type = $2::varchar)
+  AND ($3::varchar IS NULL OR a.status = $3::varchar)
+ORDER BY a.created_at DESC
+`
+
+type ListAllocationsFilteredParams struct {
+	SourceType      pgtype.Text `json:"source_type"`
+	DestinationType pgtype.Text `json:"destination_type"`
+	Status          pgtype.Text `json:"status"`
+}
+
+type ListAllocationsFilteredRow struct {
+	ID                  string             `json:"id"`
+	Reference           string             `json:"reference"`
+	SourceType          string             `json:"source_type"`
+	SourceID            pgtype.Text        `json:"source_id"`
+	DestinationType     string             `json:"destination_type"`
+	DestinationID       pgtype.Text        `json:"destination_id"`
+	SourceFundID        string             `json:"source_fund_id"`
+	DestinationFundID   string             `json:"destination_fund_id"`
+	AmountKobo          int64              `json:"amount_kobo"`
+	Currency            string             `json:"currency"`
+	Purpose             string             `json:"purpose"`
+	ApprovalReference   pgtype.Text        `json:"approval_reference"`
+	TransactionID       pgtype.Text        `json:"transaction_id"`
+	AllocatedByUserID   string             `json:"allocated_by_user_id"`
+	Status              string             `json:"status"`
+	CreatedAt           pgtype.Timestamptz `json:"created_at"`
+	SourceFundName      pgtype.Text        `json:"source_fund_name"`
+	DestinationFundName pgtype.Text        `json:"destination_fund_name"`
+	AllocatedByName     pgtype.Text        `json:"allocated_by_name"`
+}
+
+func (q *Queries) ListAllocationsFiltered(ctx context.Context, arg ListAllocationsFilteredParams) ([]ListAllocationsFilteredRow, error) {
+	rows, err := q.db.Query(ctx, listAllocationsFiltered, arg.SourceType, arg.DestinationType, arg.Status)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []ListAllocationsFilteredRow
+	for rows.Next() {
+		var i ListAllocationsFilteredRow
+		if err := rows.Scan(
+			&i.ID,
+			&i.Reference,
+			&i.SourceType,
+			&i.SourceID,
+			&i.DestinationType,
+			&i.DestinationID,
+			&i.SourceFundID,
+			&i.DestinationFundID,
+			&i.AmountKobo,
+			&i.Currency,
+			&i.Purpose,
+			&i.ApprovalReference,
+			&i.TransactionID,
+			&i.AllocatedByUserID,
+			&i.Status,
+			&i.CreatedAt,
+			&i.SourceFundName,
+			&i.DestinationFundName,
+			&i.AllocatedByName,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listBankAccounts = `-- name: ListBankAccounts :many
+SELECT id, bank_name, account_name, account_number, currency, org_type, status, is_primary, notes, created_by_user_id, activated_by_user_id, created_at, updated_at, version FROM financial_bank_accounts
+WHERE ($1::varchar IS NULL OR org_type = $1::varchar)
+  AND ($2::varchar IS NULL OR status = $2::varchar)
+ORDER BY is_primary DESC, created_at ASC
+`
+
+type ListBankAccountsParams struct {
+	OrgType pgtype.Text `json:"org_type"`
+	Status  pgtype.Text `json:"status"`
+}
+
+func (q *Queries) ListBankAccounts(ctx context.Context, arg ListBankAccountsParams) ([]FinancialBankAccount, error) {
+	rows, err := q.db.Query(ctx, listBankAccounts, arg.OrgType, arg.Status)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []FinancialBankAccount
+	for rows.Next() {
+		var i FinancialBankAccount
+		if err := rows.Scan(
+			&i.ID,
+			&i.BankName,
+			&i.AccountName,
+			&i.AccountNumber,
+			&i.Currency,
+			&i.OrgType,
+			&i.Status,
+			&i.IsPrimary,
+			&i.Notes,
+			&i.CreatedByUserID,
+			&i.ActivatedByUserID,
+			&i.CreatedAt,
+			&i.UpdatedAt,
+			&i.Version,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listBudgetRevisions = `-- name: ListBudgetRevisions :many
+SELECT r.id, r.budget_id, r.revision_number, r.previous_amount_kobo, r.revised_amount_kobo, r.reason, r.requested_by_user_id, r.approved_by_user_id, r.approved_at, r.status, r.created_at,
+       u_req.display_name as requester_name,
+       u_app.display_name as approver_name
+FROM financial_budget_revisions r
+LEFT JOIN users u_req ON r.requested_by_user_id = u_req.id
+LEFT JOIN users u_app ON r.approved_by_user_id = u_app.id
+WHERE r.budget_id = $1
+ORDER BY r.revision_number DESC
+`
+
+type ListBudgetRevisionsRow struct {
+	ID                 string             `json:"id"`
+	BudgetID           string             `json:"budget_id"`
+	RevisionNumber     int32              `json:"revision_number"`
+	PreviousAmountKobo int64              `json:"previous_amount_kobo"`
+	RevisedAmountKobo  int64              `json:"revised_amount_kobo"`
+	Reason             string             `json:"reason"`
+	RequestedByUserID  string             `json:"requested_by_user_id"`
+	ApprovedByUserID   pgtype.Text        `json:"approved_by_user_id"`
+	ApprovedAt         pgtype.Timestamptz `json:"approved_at"`
+	Status             string             `json:"status"`
+	CreatedAt          pgtype.Timestamptz `json:"created_at"`
+	RequesterName      pgtype.Text        `json:"requester_name"`
+	ApproverName       pgtype.Text        `json:"approver_name"`
+}
+
+func (q *Queries) ListBudgetRevisions(ctx context.Context, budgetID string) ([]ListBudgetRevisionsRow, error) {
+	rows, err := q.db.Query(ctx, listBudgetRevisions, budgetID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []ListBudgetRevisionsRow
+	for rows.Next() {
+		var i ListBudgetRevisionsRow
+		if err := rows.Scan(
+			&i.ID,
+			&i.BudgetID,
+			&i.RevisionNumber,
+			&i.PreviousAmountKobo,
+			&i.RevisedAmountKobo,
+			&i.Reason,
+			&i.RequestedByUserID,
+			&i.ApprovedByUserID,
+			&i.ApprovedAt,
+			&i.Status,
+			&i.CreatedAt,
+			&i.RequesterName,
+			&i.ApproverName,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listBudgetsFiltered = `-- name: ListBudgetsFiltered :many
+SELECT b.id, b.reference, b.title, b.scope_type, b.scope_id, b.zone_id, b.state_id, b.lga_id, b.period_type, b.period_label, b.period_start, b.period_end, b.proposed_amount_kobo, b.approved_amount_kobo, b.allocated_amount_kobo, b.committed_amount_kobo, b.spent_amount_kobo, b.currency, b.status, b.created_by_user_id, b.approved_by_user_id, b.approved_at, b.notes, b.created_at, b.updated_at, b.version,
+       z.name as zone_name,
+       s.name as state_name,
+       l.name as lga_name,
+       u_creator.display_name as creator_name,
+       u_approver.display_name as approver_name
+FROM financial_budgets b
+LEFT JOIN zones z ON b.zone_id = z.id
+LEFT JOIN states s ON b.state_id = s.id
+LEFT JOIN lgas l ON b.lga_id = l.id
+LEFT JOIN users u_creator ON b.created_by_user_id = u_creator.id
+LEFT JOIN users u_approver ON b.approved_by_user_id = u_approver.id
+WHERE ($1::varchar IS NULL OR b.scope_type = $1::varchar)
+  AND ($2::varchar IS NULL OR b.scope_id = $2::varchar)
+  AND ($3::varchar IS NULL OR b.period_label = $3::varchar)
+  AND ($4::varchar IS NULL OR b.status = $4::varchar)
+  AND ($5::varchar IS NULL OR b.zone_id = $5::varchar)
+  AND ($6::varchar IS NULL OR b.state_id = $6::varchar)
+ORDER BY b.created_at DESC
+`
+
+type ListBudgetsFilteredParams struct {
+	ScopeType   pgtype.Text `json:"scope_type"`
+	ScopeID     pgtype.Text `json:"scope_id"`
+	PeriodLabel pgtype.Text `json:"period_label"`
+	Status      pgtype.Text `json:"status"`
+	ZoneID      pgtype.Text `json:"zone_id"`
+	StateID     pgtype.Text `json:"state_id"`
+}
+
+type ListBudgetsFilteredRow struct {
+	ID                  string             `json:"id"`
+	Reference           string             `json:"reference"`
+	Title               string             `json:"title"`
+	ScopeType           string             `json:"scope_type"`
+	ScopeID             pgtype.Text        `json:"scope_id"`
+	ZoneID              pgtype.Text        `json:"zone_id"`
+	StateID             pgtype.Text        `json:"state_id"`
+	LgaID               pgtype.Text        `json:"lga_id"`
+	PeriodType          string             `json:"period_type"`
+	PeriodLabel         string             `json:"period_label"`
+	PeriodStart         pgtype.Date        `json:"period_start"`
+	PeriodEnd           pgtype.Date        `json:"period_end"`
+	ProposedAmountKobo  int64              `json:"proposed_amount_kobo"`
+	ApprovedAmountKobo  int64              `json:"approved_amount_kobo"`
+	AllocatedAmountKobo int64              `json:"allocated_amount_kobo"`
+	CommittedAmountKobo int64              `json:"committed_amount_kobo"`
+	SpentAmountKobo     int64              `json:"spent_amount_kobo"`
+	Currency            string             `json:"currency"`
+	Status              string             `json:"status"`
+	CreatedByUserID     string             `json:"created_by_user_id"`
+	ApprovedByUserID    pgtype.Text        `json:"approved_by_user_id"`
+	ApprovedAt          pgtype.Timestamptz `json:"approved_at"`
+	Notes               pgtype.Text        `json:"notes"`
+	CreatedAt           pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt           pgtype.Timestamptz `json:"updated_at"`
+	Version             int32              `json:"version"`
+	ZoneName            pgtype.Text        `json:"zone_name"`
+	StateName           pgtype.Text        `json:"state_name"`
+	LgaName             pgtype.Text        `json:"lga_name"`
+	CreatorName         pgtype.Text        `json:"creator_name"`
+	ApproverName        pgtype.Text        `json:"approver_name"`
+}
+
+func (q *Queries) ListBudgetsFiltered(ctx context.Context, arg ListBudgetsFilteredParams) ([]ListBudgetsFilteredRow, error) {
+	rows, err := q.db.Query(ctx, listBudgetsFiltered,
+		arg.ScopeType,
+		arg.ScopeID,
+		arg.PeriodLabel,
+		arg.Status,
+		arg.ZoneID,
+		arg.StateID,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []ListBudgetsFilteredRow
+	for rows.Next() {
+		var i ListBudgetsFilteredRow
+		if err := rows.Scan(
+			&i.ID,
+			&i.Reference,
+			&i.Title,
+			&i.ScopeType,
+			&i.ScopeID,
+			&i.ZoneID,
+			&i.StateID,
+			&i.LgaID,
+			&i.PeriodType,
+			&i.PeriodLabel,
+			&i.PeriodStart,
+			&i.PeriodEnd,
+			&i.ProposedAmountKobo,
+			&i.ApprovedAmountKobo,
+			&i.AllocatedAmountKobo,
+			&i.CommittedAmountKobo,
+			&i.SpentAmountKobo,
+			&i.Currency,
+			&i.Status,
+			&i.CreatedByUserID,
+			&i.ApprovedByUserID,
+			&i.ApprovedAt,
+			&i.Notes,
+			&i.CreatedAt,
+			&i.UpdatedAt,
+			&i.Version,
+			&i.ZoneName,
+			&i.StateName,
+			&i.LgaName,
+			&i.CreatorName,
+			&i.ApproverName,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listDonationsFiltered = `-- name: ListDonationsFiltered :many
+SELECT d.id, d.reference, d.entity_type, d.campaign_id, d.donor_name, d.donor_email, d.donor_phone, d.is_anonymous, d.amount_kobo, d.currency, d.payment_method, d.payment_reference, d.provider_channel, d.status, d.zone_id, d.state_id, d.destination_fund_id, d.transaction_id, d.verified_at, d.receipt_number, d.notes, d.created_at, d.updated_at,
+       fc.title as campaign_title,
+       z.name as zone_name,
+       s.name as state_name
+FROM financial_donations d
+LEFT JOIN foundation_campaigns fc ON d.campaign_id = fc.id
+LEFT JOIN zones z ON d.zone_id = z.id
+LEFT JOIN states s ON d.state_id = s.id
+WHERE ($1::varchar IS NULL OR d.entity_type = $1::varchar)
+  AND ($2::varchar IS NULL OR d.campaign_id = $2::varchar)
+  AND ($3::varchar IS NULL OR d.status = $3::varchar)
+  AND ($4::varchar IS NULL OR d.zone_id = $4::varchar)
+  AND ($5::varchar IS NULL OR d.state_id = $5::varchar)
+ORDER BY d.created_at DESC
+`
+
+type ListDonationsFilteredParams struct {
+	EntityType pgtype.Text `json:"entity_type"`
+	CampaignID pgtype.Text `json:"campaign_id"`
+	Status     pgtype.Text `json:"status"`
+	ZoneID     pgtype.Text `json:"zone_id"`
+	StateID    pgtype.Text `json:"state_id"`
+}
+
+type ListDonationsFilteredRow struct {
+	ID                string             `json:"id"`
+	Reference         string             `json:"reference"`
+	EntityType        string             `json:"entity_type"`
+	CampaignID        pgtype.Text        `json:"campaign_id"`
+	DonorName         string             `json:"donor_name"`
+	DonorEmail        string             `json:"donor_email"`
+	DonorPhone        pgtype.Text        `json:"donor_phone"`
+	IsAnonymous       bool               `json:"is_anonymous"`
+	AmountKobo        int64              `json:"amount_kobo"`
+	Currency          string             `json:"currency"`
+	PaymentMethod     string             `json:"payment_method"`
+	PaymentReference  pgtype.Text        `json:"payment_reference"`
+	ProviderChannel   pgtype.Text        `json:"provider_channel"`
+	Status            string             `json:"status"`
+	ZoneID            pgtype.Text        `json:"zone_id"`
+	StateID           pgtype.Text        `json:"state_id"`
+	DestinationFundID string             `json:"destination_fund_id"`
+	TransactionID     pgtype.Text        `json:"transaction_id"`
+	VerifiedAt        pgtype.Timestamptz `json:"verified_at"`
+	ReceiptNumber     pgtype.Text        `json:"receipt_number"`
+	Notes             pgtype.Text        `json:"notes"`
+	CreatedAt         pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt         pgtype.Timestamptz `json:"updated_at"`
+	CampaignTitle     pgtype.Text        `json:"campaign_title"`
+	ZoneName          pgtype.Text        `json:"zone_name"`
+	StateName         pgtype.Text        `json:"state_name"`
+}
+
+func (q *Queries) ListDonationsFiltered(ctx context.Context, arg ListDonationsFilteredParams) ([]ListDonationsFilteredRow, error) {
+	rows, err := q.db.Query(ctx, listDonationsFiltered,
+		arg.EntityType,
+		arg.CampaignID,
+		arg.Status,
+		arg.ZoneID,
+		arg.StateID,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []ListDonationsFilteredRow
+	for rows.Next() {
+		var i ListDonationsFilteredRow
+		if err := rows.Scan(
+			&i.ID,
+			&i.Reference,
+			&i.EntityType,
+			&i.CampaignID,
+			&i.DonorName,
+			&i.DonorEmail,
+			&i.DonorPhone,
+			&i.IsAnonymous,
+			&i.AmountKobo,
+			&i.Currency,
+			&i.PaymentMethod,
+			&i.PaymentReference,
+			&i.ProviderChannel,
+			&i.Status,
+			&i.ZoneID,
+			&i.StateID,
+			&i.DestinationFundID,
+			&i.TransactionID,
+			&i.VerifiedAt,
+			&i.ReceiptNumber,
+			&i.Notes,
+			&i.CreatedAt,
+			&i.UpdatedAt,
+			&i.CampaignTitle,
+			&i.ZoneName,
+			&i.StateName,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listExpensesFiltered = `-- name: ListExpensesFiltered :many
+SELECT e.id, e.reference, e.title, e.category, e.description, e.amount_kobo, e.currency, e.beneficiary_name, e.beneficiary_bank_name, e.beneficiary_account_number, e.zone_id, e.state_id, e.lga_id, e.related_project_id, e.related_campaign_id, e.supporting_document_url, e.receipt_url, e.requested_by_user_id, e.reviewer_id, e.reviewed_at, e.approved_by_user_id, e.approved_at, e.rejection_reason, e.authorized_by_user_id, e.authorized_at, e.paid_by_user_id, e.paid_at, e.payment_reference, e.transaction_id, e.budget_id, e.fund_id, e.status, e.created_at, e.updated_at, e.version,
+       z.name as zone_name,
+       s.name as state_name,
+       l.name as lga_name,
+       u_req.display_name as requested_by_name,
+       u_app.display_name as approved_by_name
+FROM financial_expenses e
+LEFT JOIN zones z ON e.zone_id = z.id
+LEFT JOIN states s ON e.state_id = s.id
+LEFT JOIN lgas l ON e.lga_id = l.id
+LEFT JOIN users u_req ON e.requested_by_user_id = u_req.id
+LEFT JOIN users u_app ON e.approved_by_user_id = u_app.id
+WHERE ($1::varchar IS NULL OR e.category = $1::varchar)
+  AND ($2::varchar IS NULL OR e.status = $2::varchar)
+  AND ($3::varchar IS NULL OR e.zone_id = $3::varchar)
+  AND ($4::varchar IS NULL OR e.state_id = $4::varchar)
+  AND ($5::varchar IS NULL OR e.lga_id = $5::varchar)
+  AND ($6::varchar IS NULL OR e.related_project_id = $6::varchar)
+  AND ($7::varchar IS NULL OR e.budget_id = $7::varchar)
+  AND ($8::varchar IS NULL OR e.requested_by_user_id = $8::varchar)
+ORDER BY e.created_at DESC
+`
+
+type ListExpensesFilteredParams struct {
+	Category          pgtype.Text `json:"category"`
+	Status            pgtype.Text `json:"status"`
+	ZoneID            pgtype.Text `json:"zone_id"`
+	StateID           pgtype.Text `json:"state_id"`
+	LgaID             pgtype.Text `json:"lga_id"`
+	RelatedProjectID  pgtype.Text `json:"related_project_id"`
+	BudgetID          pgtype.Text `json:"budget_id"`
+	RequestedByUserID pgtype.Text `json:"requested_by_user_id"`
+}
+
+type ListExpensesFilteredRow struct {
+	ID                       string             `json:"id"`
+	Reference                string             `json:"reference"`
+	Title                    string             `json:"title"`
+	Category                 string             `json:"category"`
+	Description              string             `json:"description"`
+	AmountKobo               int64              `json:"amount_kobo"`
+	Currency                 string             `json:"currency"`
+	BeneficiaryName          string             `json:"beneficiary_name"`
+	BeneficiaryBankName      pgtype.Text        `json:"beneficiary_bank_name"`
+	BeneficiaryAccountNumber pgtype.Text        `json:"beneficiary_account_number"`
+	ZoneID                   pgtype.Text        `json:"zone_id"`
+	StateID                  pgtype.Text        `json:"state_id"`
+	LgaID                    pgtype.Text        `json:"lga_id"`
+	RelatedProjectID         pgtype.Text        `json:"related_project_id"`
+	RelatedCampaignID        pgtype.Text        `json:"related_campaign_id"`
+	SupportingDocumentUrl    pgtype.Text        `json:"supporting_document_url"`
+	ReceiptUrl               pgtype.Text        `json:"receipt_url"`
+	RequestedByUserID        string             `json:"requested_by_user_id"`
+	ReviewerID               pgtype.Text        `json:"reviewer_id"`
+	ReviewedAt               pgtype.Timestamptz `json:"reviewed_at"`
+	ApprovedByUserID         pgtype.Text        `json:"approved_by_user_id"`
+	ApprovedAt               pgtype.Timestamptz `json:"approved_at"`
+	RejectionReason          pgtype.Text        `json:"rejection_reason"`
+	AuthorizedByUserID       pgtype.Text        `json:"authorized_by_user_id"`
+	AuthorizedAt             pgtype.Timestamptz `json:"authorized_at"`
+	PaidByUserID             pgtype.Text        `json:"paid_by_user_id"`
+	PaidAt                   pgtype.Timestamptz `json:"paid_at"`
+	PaymentReference         pgtype.Text        `json:"payment_reference"`
+	TransactionID            pgtype.Text        `json:"transaction_id"`
+	BudgetID                 pgtype.Text        `json:"budget_id"`
+	FundID                   pgtype.Text        `json:"fund_id"`
+	Status                   string             `json:"status"`
+	CreatedAt                pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt                pgtype.Timestamptz `json:"updated_at"`
+	Version                  int32              `json:"version"`
+	ZoneName                 pgtype.Text        `json:"zone_name"`
+	StateName                pgtype.Text        `json:"state_name"`
+	LgaName                  pgtype.Text        `json:"lga_name"`
+	RequestedByName          pgtype.Text        `json:"requested_by_name"`
+	ApprovedByName           pgtype.Text        `json:"approved_by_name"`
+}
+
+func (q *Queries) ListExpensesFiltered(ctx context.Context, arg ListExpensesFilteredParams) ([]ListExpensesFilteredRow, error) {
+	rows, err := q.db.Query(ctx, listExpensesFiltered,
+		arg.Category,
+		arg.Status,
+		arg.ZoneID,
+		arg.StateID,
+		arg.LgaID,
+		arg.RelatedProjectID,
+		arg.BudgetID,
+		arg.RequestedByUserID,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []ListExpensesFilteredRow
+	for rows.Next() {
+		var i ListExpensesFilteredRow
+		if err := rows.Scan(
+			&i.ID,
+			&i.Reference,
+			&i.Title,
+			&i.Category,
+			&i.Description,
+			&i.AmountKobo,
+			&i.Currency,
+			&i.BeneficiaryName,
+			&i.BeneficiaryBankName,
+			&i.BeneficiaryAccountNumber,
+			&i.ZoneID,
+			&i.StateID,
+			&i.LgaID,
+			&i.RelatedProjectID,
+			&i.RelatedCampaignID,
+			&i.SupportingDocumentUrl,
+			&i.ReceiptUrl,
+			&i.RequestedByUserID,
+			&i.ReviewerID,
+			&i.ReviewedAt,
+			&i.ApprovedByUserID,
+			&i.ApprovedAt,
+			&i.RejectionReason,
+			&i.AuthorizedByUserID,
+			&i.AuthorizedAt,
+			&i.PaidByUserID,
+			&i.PaidAt,
+			&i.PaymentReference,
+			&i.TransactionID,
+			&i.BudgetID,
+			&i.FundID,
+			&i.Status,
+			&i.CreatedAt,
+			&i.UpdatedAt,
+			&i.Version,
+			&i.ZoneName,
+			&i.StateName,
+			&i.LgaName,
+			&i.RequestedByName,
+			&i.ApprovedByName,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
 }
 
 const listFinancialAuthorizations = `-- name: ListFinancialAuthorizations :many
@@ -687,7 +2733,7 @@ func (q *Queries) ListFinancialReportLogs(ctx context.Context) ([]ListFinancialR
 }
 
 const listFinancialTransactionsFiltered = `-- name: ListFinancialTransactionsFiltered :many
-SELECT t.id, t.reference, t.idempotency_key, t.transaction_type, t.status, t.amount, t.currency, t.source_fund_id, t.destination_fund_id, t.related_campaign_id, t.related_project_id, t.state_id, t.zone_id, t.provider_reference, t.supporting_evidence_url, t.notes, t.initiating_actor_id, t.initiating_actor_type, t.approved_by_user_id, t.approved_at, t.is_external_income, t.occurred_at, t.recorded_at, t.reversal_of_transaction_id, t.is_reversal, t.reversal_reason, t.created_at, t.updated_at, t.version,
+SELECT t.id, t.reference, t.idempotency_key, t.transaction_type, t.status, t.amount, t.currency, t.source_fund_id, t.destination_fund_id, t.related_campaign_id, t.related_project_id, t.state_id, t.zone_id, t.provider_reference, t.supporting_evidence_url, t.notes, t.initiating_actor_id, t.initiating_actor_type, t.approved_by_user_id, t.approved_at, t.is_external_income, t.occurred_at, t.recorded_at, t.reversal_of_transaction_id, t.is_reversal, t.reversal_reason, t.created_at, t.updated_at, t.version, t.income_category, t.payment_method, t.funding_source, t.lga_id, t.receiving_account_id, t.verification_status, t.verified_by_user_id, t.verified_at,
        sf.name as source_fund_name,
        df.name as destination_fund_name,
        s.name as state_name,
@@ -755,6 +2801,14 @@ type ListFinancialTransactionsFilteredRow struct {
 	CreatedAt               pgtype.Timestamptz `json:"created_at"`
 	UpdatedAt               pgtype.Timestamptz `json:"updated_at"`
 	Version                 int32              `json:"version"`
+	IncomeCategory          pgtype.Text        `json:"income_category"`
+	PaymentMethod           pgtype.Text        `json:"payment_method"`
+	FundingSource           pgtype.Text        `json:"funding_source"`
+	LgaID                   pgtype.Text        `json:"lga_id"`
+	ReceivingAccountID      pgtype.Text        `json:"receiving_account_id"`
+	VerificationStatus      string             `json:"verification_status"`
+	VerifiedByUserID        pgtype.Text        `json:"verified_by_user_id"`
+	VerifiedAt              pgtype.Timestamptz `json:"verified_at"`
 	SourceFundName          pgtype.Text        `json:"source_fund_name"`
 	DestinationFundName     pgtype.Text        `json:"destination_fund_name"`
 	StateName               pgtype.Text        `json:"state_name"`
@@ -812,6 +2866,14 @@ func (q *Queries) ListFinancialTransactionsFiltered(ctx context.Context, arg Lis
 			&i.CreatedAt,
 			&i.UpdatedAt,
 			&i.Version,
+			&i.IncomeCategory,
+			&i.PaymentMethod,
+			&i.FundingSource,
+			&i.LgaID,
+			&i.ReceivingAccountID,
+			&i.VerificationStatus,
+			&i.VerifiedByUserID,
+			&i.VerifiedAt,
 			&i.SourceFundName,
 			&i.DestinationFundName,
 			&i.StateName,
@@ -879,6 +2941,156 @@ func (q *Queries) ListLedgerEntriesByTransaction(ctx context.Context, transactio
 	return items, nil
 }
 
+const listReconciliationPeriodsByAccount = `-- name: ListReconciliationPeriodsByAccount :many
+SELECT rp.id, rp.bank_account_id, rp.period_start, rp.period_end, rp.opening_balance_kobo, rp.closing_balance_kobo, rp.statement_closing_balance_kobo, rp.status, rp.reconciled_by_user_id, rp.reconciled_at, rp.certified_by_user_id, rp.certified_at, rp.notes, rp.created_at, rp.updated_at,
+       ba.bank_name,
+       ba.account_name,
+       u_rec.display_name as reconciled_by_name,
+       u_cert.display_name as certified_by_name
+FROM financial_reconciliation_periods rp
+JOIN financial_bank_accounts ba ON rp.bank_account_id = ba.id
+LEFT JOIN users u_rec ON rp.reconciled_by_user_id = u_rec.id
+LEFT JOIN users u_cert ON rp.certified_by_user_id = u_cert.id
+WHERE ($1::varchar IS NULL OR rp.bank_account_id = $1::varchar)
+  AND ($2::varchar IS NULL OR rp.status = $2::varchar)
+ORDER BY rp.period_start DESC
+`
+
+type ListReconciliationPeriodsByAccountParams struct {
+	BankAccountID pgtype.Text `json:"bank_account_id"`
+	Status        pgtype.Text `json:"status"`
+}
+
+type ListReconciliationPeriodsByAccountRow struct {
+	ID                          string             `json:"id"`
+	BankAccountID               string             `json:"bank_account_id"`
+	PeriodStart                 pgtype.Date        `json:"period_start"`
+	PeriodEnd                   pgtype.Date        `json:"period_end"`
+	OpeningBalanceKobo          int64              `json:"opening_balance_kobo"`
+	ClosingBalanceKobo          int64              `json:"closing_balance_kobo"`
+	StatementClosingBalanceKobo int64              `json:"statement_closing_balance_kobo"`
+	Status                      string             `json:"status"`
+	ReconciledByUserID          pgtype.Text        `json:"reconciled_by_user_id"`
+	ReconciledAt                pgtype.Timestamptz `json:"reconciled_at"`
+	CertifiedByUserID           pgtype.Text        `json:"certified_by_user_id"`
+	CertifiedAt                 pgtype.Timestamptz `json:"certified_at"`
+	Notes                       pgtype.Text        `json:"notes"`
+	CreatedAt                   pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt                   pgtype.Timestamptz `json:"updated_at"`
+	BankName                    string             `json:"bank_name"`
+	AccountName                 string             `json:"account_name"`
+	ReconciledByName            pgtype.Text        `json:"reconciled_by_name"`
+	CertifiedByName             pgtype.Text        `json:"certified_by_name"`
+}
+
+func (q *Queries) ListReconciliationPeriodsByAccount(ctx context.Context, arg ListReconciliationPeriodsByAccountParams) ([]ListReconciliationPeriodsByAccountRow, error) {
+	rows, err := q.db.Query(ctx, listReconciliationPeriodsByAccount, arg.BankAccountID, arg.Status)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []ListReconciliationPeriodsByAccountRow
+	for rows.Next() {
+		var i ListReconciliationPeriodsByAccountRow
+		if err := rows.Scan(
+			&i.ID,
+			&i.BankAccountID,
+			&i.PeriodStart,
+			&i.PeriodEnd,
+			&i.OpeningBalanceKobo,
+			&i.ClosingBalanceKobo,
+			&i.StatementClosingBalanceKobo,
+			&i.Status,
+			&i.ReconciledByUserID,
+			&i.ReconciledAt,
+			&i.CertifiedByUserID,
+			&i.CertifiedAt,
+			&i.Notes,
+			&i.CreatedAt,
+			&i.UpdatedAt,
+			&i.BankName,
+			&i.AccountName,
+			&i.ReconciledByName,
+			&i.CertifiedByName,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listStatementItemsByPeriod = `-- name: ListStatementItemsByPeriod :many
+SELECT si.id, si.reconciliation_period_id, si.statement_reference, si.transaction_date, si.value_date, si.description, si.amount_kobo, si.entry_type, si.matched_transaction_id, si.status, si.match_notes, si.created_at,
+       ft.reference as matched_tx_reference,
+       ft.amount as matched_tx_amount
+FROM financial_statement_items si
+LEFT JOIN financial_transactions ft ON si.matched_transaction_id = ft.id
+WHERE si.reconciliation_period_id = $1
+  AND ($2::varchar IS NULL OR si.status = $2::varchar)
+ORDER BY si.transaction_date ASC, si.created_at ASC
+`
+
+type ListStatementItemsByPeriodParams struct {
+	ReconciliationPeriodID string      `json:"reconciliation_period_id"`
+	Status                 pgtype.Text `json:"status"`
+}
+
+type ListStatementItemsByPeriodRow struct {
+	ID                     string             `json:"id"`
+	ReconciliationPeriodID string             `json:"reconciliation_period_id"`
+	StatementReference     string             `json:"statement_reference"`
+	TransactionDate        pgtype.Date        `json:"transaction_date"`
+	ValueDate              pgtype.Date        `json:"value_date"`
+	Description            string             `json:"description"`
+	AmountKobo             int64              `json:"amount_kobo"`
+	EntryType              string             `json:"entry_type"`
+	MatchedTransactionID   pgtype.Text        `json:"matched_transaction_id"`
+	Status                 string             `json:"status"`
+	MatchNotes             pgtype.Text        `json:"match_notes"`
+	CreatedAt              pgtype.Timestamptz `json:"created_at"`
+	MatchedTxReference     pgtype.Text        `json:"matched_tx_reference"`
+	MatchedTxAmount        pgtype.Int8        `json:"matched_tx_amount"`
+}
+
+func (q *Queries) ListStatementItemsByPeriod(ctx context.Context, arg ListStatementItemsByPeriodParams) ([]ListStatementItemsByPeriodRow, error) {
+	rows, err := q.db.Query(ctx, listStatementItemsByPeriod, arg.ReconciliationPeriodID, arg.Status)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []ListStatementItemsByPeriodRow
+	for rows.Next() {
+		var i ListStatementItemsByPeriodRow
+		if err := rows.Scan(
+			&i.ID,
+			&i.ReconciliationPeriodID,
+			&i.StatementReference,
+			&i.TransactionDate,
+			&i.ValueDate,
+			&i.Description,
+			&i.AmountKobo,
+			&i.EntryType,
+			&i.MatchedTransactionID,
+			&i.Status,
+			&i.MatchNotes,
+			&i.CreatedAt,
+			&i.MatchedTxReference,
+			&i.MatchedTxAmount,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const revokeFinancialAuthorization = `-- name: RevokeFinancialAuthorization :one
 UPDATE financial_authorizations
 SET status = 'revoked', revoked_at = CURRENT_TIMESTAMP
@@ -903,11 +3115,519 @@ func (q *Queries) RevokeFinancialAuthorization(ctx context.Context, id string) (
 	return i, err
 }
 
+const updateBudgetAmounts = `-- name: UpdateBudgetAmounts :one
+UPDATE financial_budgets
+SET allocated_amount_kobo = allocated_amount_kobo + $2,
+    committed_amount_kobo = committed_amount_kobo + $3,
+    spent_amount_kobo = spent_amount_kobo + $4,
+    updated_at = CURRENT_TIMESTAMP
+WHERE id = $1
+RETURNING id, reference, title, scope_type, scope_id, zone_id, state_id, lga_id, period_type, period_label, period_start, period_end, proposed_amount_kobo, approved_amount_kobo, allocated_amount_kobo, committed_amount_kobo, spent_amount_kobo, currency, status, created_by_user_id, approved_by_user_id, approved_at, notes, created_at, updated_at, version
+`
+
+type UpdateBudgetAmountsParams struct {
+	ID                  string `json:"id"`
+	AllocatedAmountKobo int64  `json:"allocated_amount_kobo"`
+	CommittedAmountKobo int64  `json:"committed_amount_kobo"`
+	SpentAmountKobo     int64  `json:"spent_amount_kobo"`
+}
+
+func (q *Queries) UpdateBudgetAmounts(ctx context.Context, arg UpdateBudgetAmountsParams) (FinancialBudget, error) {
+	row := q.db.QueryRow(ctx, updateBudgetAmounts,
+		arg.ID,
+		arg.AllocatedAmountKobo,
+		arg.CommittedAmountKobo,
+		arg.SpentAmountKobo,
+	)
+	var i FinancialBudget
+	err := row.Scan(
+		&i.ID,
+		&i.Reference,
+		&i.Title,
+		&i.ScopeType,
+		&i.ScopeID,
+		&i.ZoneID,
+		&i.StateID,
+		&i.LgaID,
+		&i.PeriodType,
+		&i.PeriodLabel,
+		&i.PeriodStart,
+		&i.PeriodEnd,
+		&i.ProposedAmountKobo,
+		&i.ApprovedAmountKobo,
+		&i.AllocatedAmountKobo,
+		&i.CommittedAmountKobo,
+		&i.SpentAmountKobo,
+		&i.Currency,
+		&i.Status,
+		&i.CreatedByUserID,
+		&i.ApprovedByUserID,
+		&i.ApprovedAt,
+		&i.Notes,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+		&i.Version,
+	)
+	return i, err
+}
+
+const updateBudgetApprovedAmount = `-- name: UpdateBudgetApprovedAmount :one
+UPDATE financial_budgets
+SET approved_amount_kobo = $2,
+    status = 'approved',
+    approved_by_user_id = $3,
+    approved_at = $4,
+    updated_at = CURRENT_TIMESTAMP
+WHERE id = $1
+RETURNING id, reference, title, scope_type, scope_id, zone_id, state_id, lga_id, period_type, period_label, period_start, period_end, proposed_amount_kobo, approved_amount_kobo, allocated_amount_kobo, committed_amount_kobo, spent_amount_kobo, currency, status, created_by_user_id, approved_by_user_id, approved_at, notes, created_at, updated_at, version
+`
+
+type UpdateBudgetApprovedAmountParams struct {
+	ID                 string             `json:"id"`
+	ApprovedAmountKobo int64              `json:"approved_amount_kobo"`
+	ApprovedByUserID   pgtype.Text        `json:"approved_by_user_id"`
+	ApprovedAt         pgtype.Timestamptz `json:"approved_at"`
+}
+
+func (q *Queries) UpdateBudgetApprovedAmount(ctx context.Context, arg UpdateBudgetApprovedAmountParams) (FinancialBudget, error) {
+	row := q.db.QueryRow(ctx, updateBudgetApprovedAmount,
+		arg.ID,
+		arg.ApprovedAmountKobo,
+		arg.ApprovedByUserID,
+		arg.ApprovedAt,
+	)
+	var i FinancialBudget
+	err := row.Scan(
+		&i.ID,
+		&i.Reference,
+		&i.Title,
+		&i.ScopeType,
+		&i.ScopeID,
+		&i.ZoneID,
+		&i.StateID,
+		&i.LgaID,
+		&i.PeriodType,
+		&i.PeriodLabel,
+		&i.PeriodStart,
+		&i.PeriodEnd,
+		&i.ProposedAmountKobo,
+		&i.ApprovedAmountKobo,
+		&i.AllocatedAmountKobo,
+		&i.CommittedAmountKobo,
+		&i.SpentAmountKobo,
+		&i.Currency,
+		&i.Status,
+		&i.CreatedByUserID,
+		&i.ApprovedByUserID,
+		&i.ApprovedAt,
+		&i.Notes,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+		&i.Version,
+	)
+	return i, err
+}
+
+const updateBudgetRevisionStatus = `-- name: UpdateBudgetRevisionStatus :one
+UPDATE financial_budget_revisions
+SET status = $2, approved_by_user_id = $3, approved_at = $4
+WHERE id = $1
+RETURNING id, budget_id, revision_number, previous_amount_kobo, revised_amount_kobo, reason, requested_by_user_id, approved_by_user_id, approved_at, status, created_at
+`
+
+type UpdateBudgetRevisionStatusParams struct {
+	ID               string             `json:"id"`
+	Status           string             `json:"status"`
+	ApprovedByUserID pgtype.Text        `json:"approved_by_user_id"`
+	ApprovedAt       pgtype.Timestamptz `json:"approved_at"`
+}
+
+func (q *Queries) UpdateBudgetRevisionStatus(ctx context.Context, arg UpdateBudgetRevisionStatusParams) (FinancialBudgetRevision, error) {
+	row := q.db.QueryRow(ctx, updateBudgetRevisionStatus,
+		arg.ID,
+		arg.Status,
+		arg.ApprovedByUserID,
+		arg.ApprovedAt,
+	)
+	var i FinancialBudgetRevision
+	err := row.Scan(
+		&i.ID,
+		&i.BudgetID,
+		&i.RevisionNumber,
+		&i.PreviousAmountKobo,
+		&i.RevisedAmountKobo,
+		&i.Reason,
+		&i.RequestedByUserID,
+		&i.ApprovedByUserID,
+		&i.ApprovedAt,
+		&i.Status,
+		&i.CreatedAt,
+	)
+	return i, err
+}
+
+const updateBudgetStatus = `-- name: UpdateBudgetStatus :one
+UPDATE financial_budgets
+SET status = $4::varchar,
+    approved_amount_kobo = CASE WHEN $4::varchar = 'approved' AND approved_amount_kobo = 0 THEN proposed_amount_kobo ELSE approved_amount_kobo END,
+    approved_by_user_id = $2,
+    approved_at = $3,
+    updated_at = CURRENT_TIMESTAMP
+WHERE id = $1
+RETURNING id, reference, title, scope_type, scope_id, zone_id, state_id, lga_id, period_type, period_label, period_start, period_end, proposed_amount_kobo, approved_amount_kobo, allocated_amount_kobo, committed_amount_kobo, spent_amount_kobo, currency, status, created_by_user_id, approved_by_user_id, approved_at, notes, created_at, updated_at, version
+`
+
+type UpdateBudgetStatusParams struct {
+	ID               string             `json:"id"`
+	ApprovedByUserID pgtype.Text        `json:"approved_by_user_id"`
+	ApprovedAt       pgtype.Timestamptz `json:"approved_at"`
+	Status           string             `json:"status"`
+}
+
+func (q *Queries) UpdateBudgetStatus(ctx context.Context, arg UpdateBudgetStatusParams) (FinancialBudget, error) {
+	row := q.db.QueryRow(ctx, updateBudgetStatus,
+		arg.ID,
+		arg.ApprovedByUserID,
+		arg.ApprovedAt,
+		arg.Status,
+	)
+	var i FinancialBudget
+	err := row.Scan(
+		&i.ID,
+		&i.Reference,
+		&i.Title,
+		&i.ScopeType,
+		&i.ScopeID,
+		&i.ZoneID,
+		&i.StateID,
+		&i.LgaID,
+		&i.PeriodType,
+		&i.PeriodLabel,
+		&i.PeriodStart,
+		&i.PeriodEnd,
+		&i.ProposedAmountKobo,
+		&i.ApprovedAmountKobo,
+		&i.AllocatedAmountKobo,
+		&i.CommittedAmountKobo,
+		&i.SpentAmountKobo,
+		&i.Currency,
+		&i.Status,
+		&i.CreatedByUserID,
+		&i.ApprovedByUserID,
+		&i.ApprovedAt,
+		&i.Notes,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+		&i.Version,
+	)
+	return i, err
+}
+
+const updateDonationStatus = `-- name: UpdateDonationStatus :one
+UPDATE financial_donations
+SET status = $2, verified_at = $3, transaction_id = $4, receipt_number = $5, updated_at = CURRENT_TIMESTAMP
+WHERE id = $1
+RETURNING id, reference, entity_type, campaign_id, donor_name, donor_email, donor_phone, is_anonymous, amount_kobo, currency, payment_method, payment_reference, provider_channel, status, zone_id, state_id, destination_fund_id, transaction_id, verified_at, receipt_number, notes, created_at, updated_at
+`
+
+type UpdateDonationStatusParams struct {
+	ID            string             `json:"id"`
+	Status        string             `json:"status"`
+	VerifiedAt    pgtype.Timestamptz `json:"verified_at"`
+	TransactionID pgtype.Text        `json:"transaction_id"`
+	ReceiptNumber pgtype.Text        `json:"receipt_number"`
+}
+
+func (q *Queries) UpdateDonationStatus(ctx context.Context, arg UpdateDonationStatusParams) (FinancialDonation, error) {
+	row := q.db.QueryRow(ctx, updateDonationStatus,
+		arg.ID,
+		arg.Status,
+		arg.VerifiedAt,
+		arg.TransactionID,
+		arg.ReceiptNumber,
+	)
+	var i FinancialDonation
+	err := row.Scan(
+		&i.ID,
+		&i.Reference,
+		&i.EntityType,
+		&i.CampaignID,
+		&i.DonorName,
+		&i.DonorEmail,
+		&i.DonorPhone,
+		&i.IsAnonymous,
+		&i.AmountKobo,
+		&i.Currency,
+		&i.PaymentMethod,
+		&i.PaymentReference,
+		&i.ProviderChannel,
+		&i.Status,
+		&i.ZoneID,
+		&i.StateID,
+		&i.DestinationFundID,
+		&i.TransactionID,
+		&i.VerifiedAt,
+		&i.ReceiptNumber,
+		&i.Notes,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+	)
+	return i, err
+}
+
+const updateExpenseApproval = `-- name: UpdateExpenseApproval :one
+UPDATE financial_expenses
+SET status = $2, approved_by_user_id = $3, approved_at = $4, rejection_reason = $5, updated_at = CURRENT_TIMESTAMP
+WHERE id = $1
+RETURNING id, reference, title, category, description, amount_kobo, currency, beneficiary_name, beneficiary_bank_name, beneficiary_account_number, zone_id, state_id, lga_id, related_project_id, related_campaign_id, supporting_document_url, receipt_url, requested_by_user_id, reviewer_id, reviewed_at, approved_by_user_id, approved_at, rejection_reason, authorized_by_user_id, authorized_at, paid_by_user_id, paid_at, payment_reference, transaction_id, budget_id, fund_id, status, created_at, updated_at, version
+`
+
+type UpdateExpenseApprovalParams struct {
+	ID               string             `json:"id"`
+	Status           string             `json:"status"`
+	ApprovedByUserID pgtype.Text        `json:"approved_by_user_id"`
+	ApprovedAt       pgtype.Timestamptz `json:"approved_at"`
+	RejectionReason  pgtype.Text        `json:"rejection_reason"`
+}
+
+func (q *Queries) UpdateExpenseApproval(ctx context.Context, arg UpdateExpenseApprovalParams) (FinancialExpense, error) {
+	row := q.db.QueryRow(ctx, updateExpenseApproval,
+		arg.ID,
+		arg.Status,
+		arg.ApprovedByUserID,
+		arg.ApprovedAt,
+		arg.RejectionReason,
+	)
+	var i FinancialExpense
+	err := row.Scan(
+		&i.ID,
+		&i.Reference,
+		&i.Title,
+		&i.Category,
+		&i.Description,
+		&i.AmountKobo,
+		&i.Currency,
+		&i.BeneficiaryName,
+		&i.BeneficiaryBankName,
+		&i.BeneficiaryAccountNumber,
+		&i.ZoneID,
+		&i.StateID,
+		&i.LgaID,
+		&i.RelatedProjectID,
+		&i.RelatedCampaignID,
+		&i.SupportingDocumentUrl,
+		&i.ReceiptUrl,
+		&i.RequestedByUserID,
+		&i.ReviewerID,
+		&i.ReviewedAt,
+		&i.ApprovedByUserID,
+		&i.ApprovedAt,
+		&i.RejectionReason,
+		&i.AuthorizedByUserID,
+		&i.AuthorizedAt,
+		&i.PaidByUserID,
+		&i.PaidAt,
+		&i.PaymentReference,
+		&i.TransactionID,
+		&i.BudgetID,
+		&i.FundID,
+		&i.Status,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+		&i.Version,
+	)
+	return i, err
+}
+
+const updateExpenseAuthorization = `-- name: UpdateExpenseAuthorization :one
+UPDATE financial_expenses
+SET status = 'authorized_for_payment', authorized_by_user_id = $2, authorized_at = $3, updated_at = CURRENT_TIMESTAMP
+WHERE id = $1
+RETURNING id, reference, title, category, description, amount_kobo, currency, beneficiary_name, beneficiary_bank_name, beneficiary_account_number, zone_id, state_id, lga_id, related_project_id, related_campaign_id, supporting_document_url, receipt_url, requested_by_user_id, reviewer_id, reviewed_at, approved_by_user_id, approved_at, rejection_reason, authorized_by_user_id, authorized_at, paid_by_user_id, paid_at, payment_reference, transaction_id, budget_id, fund_id, status, created_at, updated_at, version
+`
+
+type UpdateExpenseAuthorizationParams struct {
+	ID                 string             `json:"id"`
+	AuthorizedByUserID pgtype.Text        `json:"authorized_by_user_id"`
+	AuthorizedAt       pgtype.Timestamptz `json:"authorized_at"`
+}
+
+func (q *Queries) UpdateExpenseAuthorization(ctx context.Context, arg UpdateExpenseAuthorizationParams) (FinancialExpense, error) {
+	row := q.db.QueryRow(ctx, updateExpenseAuthorization, arg.ID, arg.AuthorizedByUserID, arg.AuthorizedAt)
+	var i FinancialExpense
+	err := row.Scan(
+		&i.ID,
+		&i.Reference,
+		&i.Title,
+		&i.Category,
+		&i.Description,
+		&i.AmountKobo,
+		&i.Currency,
+		&i.BeneficiaryName,
+		&i.BeneficiaryBankName,
+		&i.BeneficiaryAccountNumber,
+		&i.ZoneID,
+		&i.StateID,
+		&i.LgaID,
+		&i.RelatedProjectID,
+		&i.RelatedCampaignID,
+		&i.SupportingDocumentUrl,
+		&i.ReceiptUrl,
+		&i.RequestedByUserID,
+		&i.ReviewerID,
+		&i.ReviewedAt,
+		&i.ApprovedByUserID,
+		&i.ApprovedAt,
+		&i.RejectionReason,
+		&i.AuthorizedByUserID,
+		&i.AuthorizedAt,
+		&i.PaidByUserID,
+		&i.PaidAt,
+		&i.PaymentReference,
+		&i.TransactionID,
+		&i.BudgetID,
+		&i.FundID,
+		&i.Status,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+		&i.Version,
+	)
+	return i, err
+}
+
+const updateExpensePayment = `-- name: UpdateExpensePayment :one
+UPDATE financial_expenses
+SET status = 'paid', paid_by_user_id = $2, paid_at = $3, payment_reference = $4, transaction_id = $5, updated_at = CURRENT_TIMESTAMP
+WHERE id = $1
+RETURNING id, reference, title, category, description, amount_kobo, currency, beneficiary_name, beneficiary_bank_name, beneficiary_account_number, zone_id, state_id, lga_id, related_project_id, related_campaign_id, supporting_document_url, receipt_url, requested_by_user_id, reviewer_id, reviewed_at, approved_by_user_id, approved_at, rejection_reason, authorized_by_user_id, authorized_at, paid_by_user_id, paid_at, payment_reference, transaction_id, budget_id, fund_id, status, created_at, updated_at, version
+`
+
+type UpdateExpensePaymentParams struct {
+	ID               string             `json:"id"`
+	PaidByUserID     pgtype.Text        `json:"paid_by_user_id"`
+	PaidAt           pgtype.Timestamptz `json:"paid_at"`
+	PaymentReference pgtype.Text        `json:"payment_reference"`
+	TransactionID    pgtype.Text        `json:"transaction_id"`
+}
+
+func (q *Queries) UpdateExpensePayment(ctx context.Context, arg UpdateExpensePaymentParams) (FinancialExpense, error) {
+	row := q.db.QueryRow(ctx, updateExpensePayment,
+		arg.ID,
+		arg.PaidByUserID,
+		arg.PaidAt,
+		arg.PaymentReference,
+		arg.TransactionID,
+	)
+	var i FinancialExpense
+	err := row.Scan(
+		&i.ID,
+		&i.Reference,
+		&i.Title,
+		&i.Category,
+		&i.Description,
+		&i.AmountKobo,
+		&i.Currency,
+		&i.BeneficiaryName,
+		&i.BeneficiaryBankName,
+		&i.BeneficiaryAccountNumber,
+		&i.ZoneID,
+		&i.StateID,
+		&i.LgaID,
+		&i.RelatedProjectID,
+		&i.RelatedCampaignID,
+		&i.SupportingDocumentUrl,
+		&i.ReceiptUrl,
+		&i.RequestedByUserID,
+		&i.ReviewerID,
+		&i.ReviewedAt,
+		&i.ApprovedByUserID,
+		&i.ApprovedAt,
+		&i.RejectionReason,
+		&i.AuthorizedByUserID,
+		&i.AuthorizedAt,
+		&i.PaidByUserID,
+		&i.PaidAt,
+		&i.PaymentReference,
+		&i.TransactionID,
+		&i.BudgetID,
+		&i.FundID,
+		&i.Status,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+		&i.Version,
+	)
+	return i, err
+}
+
+const updateExpenseReview = `-- name: UpdateExpenseReview :one
+UPDATE financial_expenses
+SET status = $2, reviewer_id = $3, reviewed_at = $4, rejection_reason = $5, updated_at = CURRENT_TIMESTAMP
+WHERE id = $1
+RETURNING id, reference, title, category, description, amount_kobo, currency, beneficiary_name, beneficiary_bank_name, beneficiary_account_number, zone_id, state_id, lga_id, related_project_id, related_campaign_id, supporting_document_url, receipt_url, requested_by_user_id, reviewer_id, reviewed_at, approved_by_user_id, approved_at, rejection_reason, authorized_by_user_id, authorized_at, paid_by_user_id, paid_at, payment_reference, transaction_id, budget_id, fund_id, status, created_at, updated_at, version
+`
+
+type UpdateExpenseReviewParams struct {
+	ID              string             `json:"id"`
+	Status          string             `json:"status"`
+	ReviewerID      pgtype.Text        `json:"reviewer_id"`
+	ReviewedAt      pgtype.Timestamptz `json:"reviewed_at"`
+	RejectionReason pgtype.Text        `json:"rejection_reason"`
+}
+
+func (q *Queries) UpdateExpenseReview(ctx context.Context, arg UpdateExpenseReviewParams) (FinancialExpense, error) {
+	row := q.db.QueryRow(ctx, updateExpenseReview,
+		arg.ID,
+		arg.Status,
+		arg.ReviewerID,
+		arg.ReviewedAt,
+		arg.RejectionReason,
+	)
+	var i FinancialExpense
+	err := row.Scan(
+		&i.ID,
+		&i.Reference,
+		&i.Title,
+		&i.Category,
+		&i.Description,
+		&i.AmountKobo,
+		&i.Currency,
+		&i.BeneficiaryName,
+		&i.BeneficiaryBankName,
+		&i.BeneficiaryAccountNumber,
+		&i.ZoneID,
+		&i.StateID,
+		&i.LgaID,
+		&i.RelatedProjectID,
+		&i.RelatedCampaignID,
+		&i.SupportingDocumentUrl,
+		&i.ReceiptUrl,
+		&i.RequestedByUserID,
+		&i.ReviewerID,
+		&i.ReviewedAt,
+		&i.ApprovedByUserID,
+		&i.ApprovedAt,
+		&i.RejectionReason,
+		&i.AuthorizedByUserID,
+		&i.AuthorizedAt,
+		&i.PaidByUserID,
+		&i.PaidAt,
+		&i.PaymentReference,
+		&i.TransactionID,
+		&i.BudgetID,
+		&i.FundID,
+		&i.Status,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+		&i.Version,
+	)
+	return i, err
+}
+
 const updateFinancialTransactionStatus = `-- name: UpdateFinancialTransactionStatus :one
 UPDATE financial_transactions
 SET status = $2, approved_by_user_id = $3, approved_at = $4, updated_at = CURRENT_TIMESTAMP
 WHERE id = $1
-RETURNING id, reference, idempotency_key, transaction_type, status, amount, currency, source_fund_id, destination_fund_id, related_campaign_id, related_project_id, state_id, zone_id, provider_reference, supporting_evidence_url, notes, initiating_actor_id, initiating_actor_type, approved_by_user_id, approved_at, is_external_income, occurred_at, recorded_at, reversal_of_transaction_id, is_reversal, reversal_reason, created_at, updated_at, version
+RETURNING id, reference, idempotency_key, transaction_type, status, amount, currency, source_fund_id, destination_fund_id, related_campaign_id, related_project_id, state_id, zone_id, provider_reference, supporting_evidence_url, notes, initiating_actor_id, initiating_actor_type, approved_by_user_id, approved_at, is_external_income, occurred_at, recorded_at, reversal_of_transaction_id, is_reversal, reversal_reason, created_at, updated_at, version, income_category, payment_method, funding_source, lga_id, receiving_account_id, verification_status, verified_by_user_id, verified_at
 `
 
 type UpdateFinancialTransactionStatusParams struct {
@@ -955,6 +3675,176 @@ func (q *Queries) UpdateFinancialTransactionStatus(ctx context.Context, arg Upda
 		&i.CreatedAt,
 		&i.UpdatedAt,
 		&i.Version,
+		&i.IncomeCategory,
+		&i.PaymentMethod,
+		&i.FundingSource,
+		&i.LgaID,
+		&i.ReceivingAccountID,
+		&i.VerificationStatus,
+		&i.VerifiedByUserID,
+		&i.VerifiedAt,
+	)
+	return i, err
+}
+
+const updateReconciliationPeriodStatus = `-- name: UpdateReconciliationPeriodStatus :one
+UPDATE financial_reconciliation_periods
+SET status = $2,
+    reconciled_by_user_id = COALESCE($3, reconciled_by_user_id),
+    reconciled_at = COALESCE($4, reconciled_at),
+    certified_by_user_id = COALESCE($5, certified_by_user_id),
+    certified_at = COALESCE($6, certified_at),
+    updated_at = CURRENT_TIMESTAMP
+WHERE id = $1
+RETURNING id, bank_account_id, period_start, period_end, opening_balance_kobo, closing_balance_kobo, statement_closing_balance_kobo, status, reconciled_by_user_id, reconciled_at, certified_by_user_id, certified_at, notes, created_at, updated_at
+`
+
+type UpdateReconciliationPeriodStatusParams struct {
+	ID                 string             `json:"id"`
+	Status             string             `json:"status"`
+	ReconciledByUserID pgtype.Text        `json:"reconciled_by_user_id"`
+	ReconciledAt       pgtype.Timestamptz `json:"reconciled_at"`
+	CertifiedByUserID  pgtype.Text        `json:"certified_by_user_id"`
+	CertifiedAt        pgtype.Timestamptz `json:"certified_at"`
+}
+
+func (q *Queries) UpdateReconciliationPeriodStatus(ctx context.Context, arg UpdateReconciliationPeriodStatusParams) (FinancialReconciliationPeriod, error) {
+	row := q.db.QueryRow(ctx, updateReconciliationPeriodStatus,
+		arg.ID,
+		arg.Status,
+		arg.ReconciledByUserID,
+		arg.ReconciledAt,
+		arg.CertifiedByUserID,
+		arg.CertifiedAt,
+	)
+	var i FinancialReconciliationPeriod
+	err := row.Scan(
+		&i.ID,
+		&i.BankAccountID,
+		&i.PeriodStart,
+		&i.PeriodEnd,
+		&i.OpeningBalanceKobo,
+		&i.ClosingBalanceKobo,
+		&i.StatementClosingBalanceKobo,
+		&i.Status,
+		&i.ReconciledByUserID,
+		&i.ReconciledAt,
+		&i.CertifiedByUserID,
+		&i.CertifiedAt,
+		&i.Notes,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+	)
+	return i, err
+}
+
+const updateStatementItemMatch = `-- name: UpdateStatementItemMatch :one
+UPDATE financial_statement_items
+SET status = $2, matched_transaction_id = $3, match_notes = $4
+WHERE id = $1
+RETURNING id, reconciliation_period_id, statement_reference, transaction_date, value_date, description, amount_kobo, entry_type, matched_transaction_id, status, match_notes, created_at
+`
+
+type UpdateStatementItemMatchParams struct {
+	ID                   string      `json:"id"`
+	Status               string      `json:"status"`
+	MatchedTransactionID pgtype.Text `json:"matched_transaction_id"`
+	MatchNotes           pgtype.Text `json:"match_notes"`
+}
+
+func (q *Queries) UpdateStatementItemMatch(ctx context.Context, arg UpdateStatementItemMatchParams) (FinancialStatementItem, error) {
+	row := q.db.QueryRow(ctx, updateStatementItemMatch,
+		arg.ID,
+		arg.Status,
+		arg.MatchedTransactionID,
+		arg.MatchNotes,
+	)
+	var i FinancialStatementItem
+	err := row.Scan(
+		&i.ID,
+		&i.ReconciliationPeriodID,
+		&i.StatementReference,
+		&i.TransactionDate,
+		&i.ValueDate,
+		&i.Description,
+		&i.AmountKobo,
+		&i.EntryType,
+		&i.MatchedTransactionID,
+		&i.Status,
+		&i.MatchNotes,
+		&i.CreatedAt,
+	)
+	return i, err
+}
+
+const verifyFinancialIncomeTransaction = `-- name: VerifyFinancialIncomeTransaction :one
+UPDATE financial_transactions
+SET verification_status = $2,
+    status = $3,
+    verified_by_user_id = $4,
+    verified_at = $5,
+    approved_by_user_id = $4,
+    approved_at = $5,
+    updated_at = CURRENT_TIMESTAMP
+WHERE id = $1
+RETURNING id, reference, idempotency_key, transaction_type, status, amount, currency, source_fund_id, destination_fund_id, related_campaign_id, related_project_id, state_id, zone_id, provider_reference, supporting_evidence_url, notes, initiating_actor_id, initiating_actor_type, approved_by_user_id, approved_at, is_external_income, occurred_at, recorded_at, reversal_of_transaction_id, is_reversal, reversal_reason, created_at, updated_at, version, income_category, payment_method, funding_source, lga_id, receiving_account_id, verification_status, verified_by_user_id, verified_at
+`
+
+type VerifyFinancialIncomeTransactionParams struct {
+	ID                 string             `json:"id"`
+	VerificationStatus string             `json:"verification_status"`
+	Status             string             `json:"status"`
+	VerifiedByUserID   pgtype.Text        `json:"verified_by_user_id"`
+	VerifiedAt         pgtype.Timestamptz `json:"verified_at"`
+}
+
+func (q *Queries) VerifyFinancialIncomeTransaction(ctx context.Context, arg VerifyFinancialIncomeTransactionParams) (FinancialTransaction, error) {
+	row := q.db.QueryRow(ctx, verifyFinancialIncomeTransaction,
+		arg.ID,
+		arg.VerificationStatus,
+		arg.Status,
+		arg.VerifiedByUserID,
+		arg.VerifiedAt,
+	)
+	var i FinancialTransaction
+	err := row.Scan(
+		&i.ID,
+		&i.Reference,
+		&i.IdempotencyKey,
+		&i.TransactionType,
+		&i.Status,
+		&i.Amount,
+		&i.Currency,
+		&i.SourceFundID,
+		&i.DestinationFundID,
+		&i.RelatedCampaignID,
+		&i.RelatedProjectID,
+		&i.StateID,
+		&i.ZoneID,
+		&i.ProviderReference,
+		&i.SupportingEvidenceUrl,
+		&i.Notes,
+		&i.InitiatingActorID,
+		&i.InitiatingActorType,
+		&i.ApprovedByUserID,
+		&i.ApprovedAt,
+		&i.IsExternalIncome,
+		&i.OccurredAt,
+		&i.RecordedAt,
+		&i.ReversalOfTransactionID,
+		&i.IsReversal,
+		&i.ReversalReason,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+		&i.Version,
+		&i.IncomeCategory,
+		&i.PaymentMethod,
+		&i.FundingSource,
+		&i.LgaID,
+		&i.ReceivingAccountID,
+		&i.VerificationStatus,
+		&i.VerifiedByUserID,
+		&i.VerifiedAt,
 	)
 	return i, err
 }

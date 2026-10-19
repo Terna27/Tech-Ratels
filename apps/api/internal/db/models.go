@@ -412,6 +412,25 @@ type EventRegistration struct {
 	Version      int32              `json:"version"`
 }
 
+type FinancialAllocation struct {
+	ID                string             `json:"id"`
+	Reference         string             `json:"reference"`
+	SourceType        string             `json:"source_type"`
+	SourceID          pgtype.Text        `json:"source_id"`
+	DestinationType   string             `json:"destination_type"`
+	DestinationID     pgtype.Text        `json:"destination_id"`
+	SourceFundID      string             `json:"source_fund_id"`
+	DestinationFundID string             `json:"destination_fund_id"`
+	AmountKobo        int64              `json:"amount_kobo"`
+	Currency          string             `json:"currency"`
+	Purpose           string             `json:"purpose"`
+	ApprovalReference pgtype.Text        `json:"approval_reference"`
+	TransactionID     pgtype.Text        `json:"transaction_id"`
+	AllocatedByUserID string             `json:"allocated_by_user_id"`
+	Status            string             `json:"status"`
+	CreatedAt         pgtype.Timestamptz `json:"created_at"`
+}
+
 type FinancialAuthorization struct {
 	ID              string             `json:"id"`
 	UserID          string             `json:"user_id"`
@@ -422,6 +441,130 @@ type FinancialAuthorization struct {
 	CreatedAt       pgtype.Timestamptz `json:"created_at"`
 	RevokedAt       pgtype.Timestamptz `json:"revoked_at"`
 	Version         int32              `json:"version"`
+}
+
+type FinancialBankAccount struct {
+	ID                string             `json:"id"`
+	BankName          string             `json:"bank_name"`
+	AccountName       string             `json:"account_name"`
+	AccountNumber     string             `json:"account_number"`
+	Currency          string             `json:"currency"`
+	OrgType           string             `json:"org_type"`
+	Status            string             `json:"status"`
+	IsPrimary         bool               `json:"is_primary"`
+	Notes             pgtype.Text        `json:"notes"`
+	CreatedByUserID   pgtype.Text        `json:"created_by_user_id"`
+	ActivatedByUserID pgtype.Text        `json:"activated_by_user_id"`
+	CreatedAt         pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt         pgtype.Timestamptz `json:"updated_at"`
+	Version           int32              `json:"version"`
+}
+
+type FinancialBudget struct {
+	ID                  string             `json:"id"`
+	Reference           string             `json:"reference"`
+	Title               string             `json:"title"`
+	ScopeType           string             `json:"scope_type"`
+	ScopeID             pgtype.Text        `json:"scope_id"`
+	ZoneID              pgtype.Text        `json:"zone_id"`
+	StateID             pgtype.Text        `json:"state_id"`
+	LgaID               pgtype.Text        `json:"lga_id"`
+	PeriodType          string             `json:"period_type"`
+	PeriodLabel         string             `json:"period_label"`
+	PeriodStart         pgtype.Date        `json:"period_start"`
+	PeriodEnd           pgtype.Date        `json:"period_end"`
+	ProposedAmountKobo  int64              `json:"proposed_amount_kobo"`
+	ApprovedAmountKobo  int64              `json:"approved_amount_kobo"`
+	AllocatedAmountKobo int64              `json:"allocated_amount_kobo"`
+	CommittedAmountKobo int64              `json:"committed_amount_kobo"`
+	SpentAmountKobo     int64              `json:"spent_amount_kobo"`
+	Currency            string             `json:"currency"`
+	Status              string             `json:"status"`
+	CreatedByUserID     string             `json:"created_by_user_id"`
+	ApprovedByUserID    pgtype.Text        `json:"approved_by_user_id"`
+	ApprovedAt          pgtype.Timestamptz `json:"approved_at"`
+	Notes               pgtype.Text        `json:"notes"`
+	CreatedAt           pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt           pgtype.Timestamptz `json:"updated_at"`
+	Version             int32              `json:"version"`
+}
+
+type FinancialBudgetRevision struct {
+	ID                 string             `json:"id"`
+	BudgetID           string             `json:"budget_id"`
+	RevisionNumber     int32              `json:"revision_number"`
+	PreviousAmountKobo int64              `json:"previous_amount_kobo"`
+	RevisedAmountKobo  int64              `json:"revised_amount_kobo"`
+	Reason             string             `json:"reason"`
+	RequestedByUserID  string             `json:"requested_by_user_id"`
+	ApprovedByUserID   pgtype.Text        `json:"approved_by_user_id"`
+	ApprovedAt         pgtype.Timestamptz `json:"approved_at"`
+	Status             string             `json:"status"`
+	CreatedAt          pgtype.Timestamptz `json:"created_at"`
+}
+
+type FinancialDonation struct {
+	ID                string             `json:"id"`
+	Reference         string             `json:"reference"`
+	EntityType        string             `json:"entity_type"`
+	CampaignID        pgtype.Text        `json:"campaign_id"`
+	DonorName         string             `json:"donor_name"`
+	DonorEmail        string             `json:"donor_email"`
+	DonorPhone        pgtype.Text        `json:"donor_phone"`
+	IsAnonymous       bool               `json:"is_anonymous"`
+	AmountKobo        int64              `json:"amount_kobo"`
+	Currency          string             `json:"currency"`
+	PaymentMethod     string             `json:"payment_method"`
+	PaymentReference  pgtype.Text        `json:"payment_reference"`
+	ProviderChannel   pgtype.Text        `json:"provider_channel"`
+	Status            string             `json:"status"`
+	ZoneID            pgtype.Text        `json:"zone_id"`
+	StateID           pgtype.Text        `json:"state_id"`
+	DestinationFundID string             `json:"destination_fund_id"`
+	TransactionID     pgtype.Text        `json:"transaction_id"`
+	VerifiedAt        pgtype.Timestamptz `json:"verified_at"`
+	ReceiptNumber     pgtype.Text        `json:"receipt_number"`
+	Notes             pgtype.Text        `json:"notes"`
+	CreatedAt         pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt         pgtype.Timestamptz `json:"updated_at"`
+}
+
+type FinancialExpense struct {
+	ID                       string             `json:"id"`
+	Reference                string             `json:"reference"`
+	Title                    string             `json:"title"`
+	Category                 string             `json:"category"`
+	Description              string             `json:"description"`
+	AmountKobo               int64              `json:"amount_kobo"`
+	Currency                 string             `json:"currency"`
+	BeneficiaryName          string             `json:"beneficiary_name"`
+	BeneficiaryBankName      pgtype.Text        `json:"beneficiary_bank_name"`
+	BeneficiaryAccountNumber pgtype.Text        `json:"beneficiary_account_number"`
+	ZoneID                   pgtype.Text        `json:"zone_id"`
+	StateID                  pgtype.Text        `json:"state_id"`
+	LgaID                    pgtype.Text        `json:"lga_id"`
+	RelatedProjectID         pgtype.Text        `json:"related_project_id"`
+	RelatedCampaignID        pgtype.Text        `json:"related_campaign_id"`
+	SupportingDocumentUrl    pgtype.Text        `json:"supporting_document_url"`
+	ReceiptUrl               pgtype.Text        `json:"receipt_url"`
+	RequestedByUserID        string             `json:"requested_by_user_id"`
+	ReviewerID               pgtype.Text        `json:"reviewer_id"`
+	ReviewedAt               pgtype.Timestamptz `json:"reviewed_at"`
+	ApprovedByUserID         pgtype.Text        `json:"approved_by_user_id"`
+	ApprovedAt               pgtype.Timestamptz `json:"approved_at"`
+	RejectionReason          pgtype.Text        `json:"rejection_reason"`
+	AuthorizedByUserID       pgtype.Text        `json:"authorized_by_user_id"`
+	AuthorizedAt             pgtype.Timestamptz `json:"authorized_at"`
+	PaidByUserID             pgtype.Text        `json:"paid_by_user_id"`
+	PaidAt                   pgtype.Timestamptz `json:"paid_at"`
+	PaymentReference         pgtype.Text        `json:"payment_reference"`
+	TransactionID            pgtype.Text        `json:"transaction_id"`
+	BudgetID                 pgtype.Text        `json:"budget_id"`
+	FundID                   pgtype.Text        `json:"fund_id"`
+	Status                   string             `json:"status"`
+	CreatedAt                pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt                pgtype.Timestamptz `json:"updated_at"`
+	Version                  int32              `json:"version"`
 }
 
 type FinancialFund struct {
@@ -444,6 +587,24 @@ type FinancialLedgerEntry struct {
 	CreatedAt     pgtype.Timestamptz `json:"created_at"`
 }
 
+type FinancialReconciliationPeriod struct {
+	ID                          string             `json:"id"`
+	BankAccountID               string             `json:"bank_account_id"`
+	PeriodStart                 pgtype.Date        `json:"period_start"`
+	PeriodEnd                   pgtype.Date        `json:"period_end"`
+	OpeningBalanceKobo          int64              `json:"opening_balance_kobo"`
+	ClosingBalanceKobo          int64              `json:"closing_balance_kobo"`
+	StatementClosingBalanceKobo int64              `json:"statement_closing_balance_kobo"`
+	Status                      string             `json:"status"`
+	ReconciledByUserID          pgtype.Text        `json:"reconciled_by_user_id"`
+	ReconciledAt                pgtype.Timestamptz `json:"reconciled_at"`
+	CertifiedByUserID           pgtype.Text        `json:"certified_by_user_id"`
+	CertifiedAt                 pgtype.Timestamptz `json:"certified_at"`
+	Notes                       pgtype.Text        `json:"notes"`
+	CreatedAt                   pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt                   pgtype.Timestamptz `json:"updated_at"`
+}
+
 type FinancialReportLog struct {
 	ID                string             `json:"id"`
 	ReportReference   string             `json:"report_reference"`
@@ -455,6 +616,21 @@ type FinancialReportLog struct {
 	TotalInflows      int64              `json:"total_inflows"`
 	TotalOutflows     int64              `json:"total_outflows"`
 	GeneratedAt       pgtype.Timestamptz `json:"generated_at"`
+}
+
+type FinancialStatementItem struct {
+	ID                     string             `json:"id"`
+	ReconciliationPeriodID string             `json:"reconciliation_period_id"`
+	StatementReference     string             `json:"statement_reference"`
+	TransactionDate        pgtype.Date        `json:"transaction_date"`
+	ValueDate              pgtype.Date        `json:"value_date"`
+	Description            string             `json:"description"`
+	AmountKobo             int64              `json:"amount_kobo"`
+	EntryType              string             `json:"entry_type"`
+	MatchedTransactionID   pgtype.Text        `json:"matched_transaction_id"`
+	Status                 string             `json:"status"`
+	MatchNotes             pgtype.Text        `json:"match_notes"`
+	CreatedAt              pgtype.Timestamptz `json:"created_at"`
 }
 
 type FinancialTransaction struct {
@@ -487,6 +663,14 @@ type FinancialTransaction struct {
 	CreatedAt               pgtype.Timestamptz `json:"created_at"`
 	UpdatedAt               pgtype.Timestamptz `json:"updated_at"`
 	Version                 int32              `json:"version"`
+	IncomeCategory          pgtype.Text        `json:"income_category"`
+	PaymentMethod           pgtype.Text        `json:"payment_method"`
+	FundingSource           pgtype.Text        `json:"funding_source"`
+	LgaID                   pgtype.Text        `json:"lga_id"`
+	ReceivingAccountID      pgtype.Text        `json:"receiving_account_id"`
+	VerificationStatus      string             `json:"verification_status"`
+	VerifiedByUserID        pgtype.Text        `json:"verified_by_user_id"`
+	VerifiedAt              pgtype.Timestamptz `json:"verified_at"`
 }
 
 type FoundationCampaign struct {
