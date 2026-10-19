@@ -19,17 +19,24 @@ type Querier interface {
 	ApproveEventMedia(ctx context.Context, arg ApproveEventMediaParams) (EventMedium, error)
 	CalculateExternalInflowsAndOutflows(ctx context.Context, arg CalculateExternalInflowsAndOutflowsParams) (CalculateExternalInflowsAndOutflowsRow, error)
 	CalculateFundBalanceBeforeDate(ctx context.Context, arg CalculateFundBalanceBeforeDateParams) (int64, error)
+	CancelPendingSchedulesForEvent(ctx context.Context, eventID string) error
+	ClaimOutboxBatch(ctx context.Context, arg ClaimOutboxBatchParams) ([]NotificationOutbox, error)
 	CountActiveAppointments(ctx context.Context) (int64, error)
 	CountActiveUsers(ctx context.Context) (int64, error)
 	CountAdminCommunityProjects(ctx context.Context, arg CountAdminCommunityProjectsParams) (int64, error)
 	CountAdminCommunityRequests(ctx context.Context, arg CountAdminCommunityRequestsParams) (int64, error)
 	CountAdminEventMedia(ctx context.Context, arg CountAdminEventMediaParams) (int64, error)
 	CountAuditEvents(ctx context.Context) (int64, error)
+	CountDeliveriesAdmin(ctx context.Context, arg CountDeliveriesAdminParams) (int64, error)
 	CountDraftEvents(ctx context.Context) (int64, error)
+	CountFailedOutboxAdmin(ctx context.Context) (int64, error)
 	CountLGAs(ctx context.Context) (int64, error)
 	CountMediaReports(ctx context.Context, status pgtype.Text) (int64, error)
 	CountMediaTakedownRequests(ctx context.Context, status pgtype.Text) (int64, error)
 	CountMyEventMedia(ctx context.Context, uploadedByUserID string) (int64, error)
+	CountNotificationSchedulesAdmin(ctx context.Context, status pgtype.Text) (int64, error)
+	CountNotificationsByRecipient(ctx context.Context, arg CountNotificationsByRecipientParams) (int64, error)
+	CountOutboxAdmin(ctx context.Context, arg CountOutboxAdminParams) (int64, error)
 	CountPendingAppeals(ctx context.Context) (int64, error)
 	CountPendingClaims(ctx context.Context) (int64, error)
 	CountPendingVerificationUsers(ctx context.Context) (int64, error)
@@ -39,6 +46,7 @@ type Querier interface {
 	CountStates(ctx context.Context) (int64, error)
 	CountStockLedgerEntries(ctx context.Context, arg CountStockLedgerEntriesParams) (int64, error)
 	CountTotalRegistrations(ctx context.Context) (int64, error)
+	CountUnreadNotifications(ctx context.Context, recipientID string) (int64, error)
 	CountUnverifiedCompletedMilestones(ctx context.Context, projectID string) (int64, error)
 	CountUsers(ctx context.Context) (int64, error)
 	CountVerifiedParticipationsByUser(ctx context.Context, userID string) (int64, error)
@@ -88,6 +96,8 @@ type Querier interface {
 	// -------------------------------------------------------------
 	CreateCommunityRequest(ctx context.Context, arg CreateCommunityRequestParams) (CommunityRequest, error)
 	CreateContactVerification(ctx context.Context, arg CreateContactVerificationParams) (ContactVerification, error)
+	// Deliveries Tracking
+	CreateDeliveryRecord(ctx context.Context, arg CreateDeliveryRecordParams) (NotificationDelivery, error)
 	CreateDonation(ctx context.Context, arg CreateDonationParams) (FinancialDonation, error)
 	CreateEmailVerificationToken(ctx context.Context, arg CreateEmailVerificationTokenParams) (EmailVerificationToken, error)
 	CreateEventInstance(ctx context.Context, arg CreateEventInstanceParams) (EventInstance, error)
@@ -144,6 +154,10 @@ type Querier interface {
 	CreateMediaReport(ctx context.Context, arg CreateMediaReportParams) (MediaReport, error)
 	CreateMediaTakedownRequest(ctx context.Context, arg CreateMediaTakedownRequestParams) (MediaTakedownRequest, error)
 	CreateMemberProfile(ctx context.Context, arg CreateMemberProfileParams) (MemberProfile, error)
+	// In-App Notifications
+	CreateNotification(ctx context.Context, arg CreateNotificationParams) (Notification, error)
+	// Notification Schedules
+	CreateNotificationSchedule(ctx context.Context, arg CreateNotificationScheduleParams) (NotificationSchedule, error)
 	CreateParticipationAppeal(ctx context.Context, arg CreateParticipationAppealParams) (ParticipationAppeal, error)
 	CreateParticipationClaim(ctx context.Context, arg CreateParticipationClaimParams) (ParticipationClaim, error)
 	// -------------------------------------------------------------
@@ -173,7 +187,10 @@ type Querier interface {
 	DeleteHeroMedia(ctx context.Context, id string) error
 	DeleteLGA(ctx context.Context, id string) error
 	DeleteMarketplaceProduct(ctx context.Context, id string) error
+	DeleteNotification(ctx context.Context, arg DeleteNotificationParams) error
 	DeleteProjectMilestone(ctx context.Context, id string) error
+	// Transactional Outbox
+	EnqueueOutbox(ctx context.Context, arg EnqueueOutboxParams) (NotificationOutbox, error)
 	GetActiveAppointmentByJurisdiction(ctx context.Context, arg GetActiveAppointmentByJurisdictionParams) (Appointment, error)
 	GetActiveFinancialAuthorization(ctx context.Context, userID string) (FinancialAuthorization, error)
 	GetActiveHeroMedia(ctx context.Context) (HomepageHeroMedium, error)
@@ -218,6 +235,7 @@ type Querier interface {
 	GetDonationByPaymentReference(ctx context.Context, paymentReference pgtype.Text) (FinancialDonation, error)
 	GetDonationByReference(ctx context.Context, reference string) (FinancialDonation, error)
 	GetDonationCampaignTotals(ctx context.Context, campaignID pgtype.Text) (GetDonationCampaignTotalsRow, error)
+	GetDueNotificationSchedules(ctx context.Context, arg GetDueNotificationSchedulesParams) ([]NotificationSchedule, error)
 	GetEmailVerificationTokenByHash(ctx context.Context, tokenHash string) (EmailVerificationToken, error)
 	GetEventInstanceByID(ctx context.Context, id string) (EventInstance, error)
 	GetEventInstanceForUpdate(ctx context.Context, id string) (EventInstance, error)
@@ -225,6 +243,7 @@ type Querier interface {
 	GetEventMediaConsentByMediaID(ctx context.Context, mediaID string) (EventMediaConsent, error)
 	GetEventMediaDetailForAdmin(ctx context.Context, id string) (GetEventMediaDetailForAdminRow, error)
 	GetEventMediaDetailForPublic(ctx context.Context, id string) (GetEventMediaDetailForPublicRow, error)
+	GetEventNotificationContext(ctx context.Context, id string) (GetEventNotificationContextRow, error)
 	GetEventRegistration(ctx context.Context, arg GetEventRegistrationParams) (EventRegistration, error)
 	GetExpenseByID(ctx context.Context, id string) (GetExpenseByIDRow, error)
 	GetExpenseByReference(ctx context.Context, reference string) (FinancialExpense, error)
@@ -266,6 +285,13 @@ type Querier interface {
 	GetMediaReportByID(ctx context.Context, id string) (GetMediaReportByIDRow, error)
 	GetMediaTakedownRequestByID(ctx context.Context, id string) (GetMediaTakedownRequestByIDRow, error)
 	GetMemberProfileByUserID(ctx context.Context, userID string) (MemberProfile, error)
+	GetNotificationByID(ctx context.Context, arg GetNotificationByIDParams) (Notification, error)
+	// Preferences
+	GetNotificationPreferences(ctx context.Context, userID string) (NotificationPreference, error)
+	// Templates
+	GetNotificationTemplateByCode(ctx context.Context, templateCode string) (NotificationTemplate, error)
+	GetOutboxByID(ctx context.Context, id string) (NotificationOutbox, error)
+	GetOutboxOverviewStats(ctx context.Context) (GetOutboxOverviewStatsRow, error)
 	GetParticipationAppealByID(ctx context.Context, id string) (ParticipationAppeal, error)
 	GetParticipationClaimByEventAndUser(ctx context.Context, arg GetParticipationClaimByEventAndUserParams) (ParticipationClaim, error)
 	GetParticipationClaimByID(ctx context.Context, id string) (ParticipationClaim, error)
@@ -326,10 +352,12 @@ type Querier interface {
 	ListClaimsByUser(ctx context.Context, userID string) ([]ListClaimsByUserRow, error)
 	ListCleanupCampaigns(ctx context.Context) ([]CleanupCampaign, error)
 	ListCommunityRequestsByRequester(ctx context.Context, requesterID string) ([]ListCommunityRequestsByRequesterRow, error)
+	ListDeliveriesAdmin(ctx context.Context, arg ListDeliveriesAdminParams) ([]NotificationDelivery, error)
 	ListDonationsFiltered(ctx context.Context, arg ListDonationsFilteredParams) ([]ListDonationsFilteredRow, error)
 	ListEventGalleryMedia(ctx context.Context, arg ListEventGalleryMediaParams) ([]ListEventGalleryMediaRow, error)
 	ListEventsByState(ctx context.Context, stateID string) ([]ListEventsByStateRow, error)
 	ListExpensesFiltered(ctx context.Context, arg ListExpensesFilteredParams) ([]ListExpensesFilteredRow, error)
+	ListFailedOutboxAdmin(ctx context.Context, arg ListFailedOutboxAdminParams) ([]NotificationOutbox, error)
 	ListFeaturedGalleryMedia(ctx context.Context, limit int32) ([]ListFeaturedGalleryMediaRow, error)
 	ListFinancialAuthorizations(ctx context.Context) ([]ListFinancialAuthorizationsRow, error)
 	ListFinancialFunds(ctx context.Context) ([]FinancialFund, error)
@@ -357,6 +385,10 @@ type Querier interface {
 	ListMediaTakedownRequests(ctx context.Context, arg ListMediaTakedownRequestsParams) ([]ListMediaTakedownRequestsRow, error)
 	ListMilestonesByProjectID(ctx context.Context, projectID string) ([]ListMilestonesByProjectIDRow, error)
 	ListMyEventMedia(ctx context.Context, arg ListMyEventMediaParams) ([]ListMyEventMediaRow, error)
+	ListNotificationSchedulesAdmin(ctx context.Context, arg ListNotificationSchedulesAdminParams) ([]ListNotificationSchedulesAdminRow, error)
+	ListNotificationTemplates(ctx context.Context) ([]NotificationTemplate, error)
+	ListNotificationsByRecipient(ctx context.Context, arg ListNotificationsByRecipientParams) ([]Notification, error)
+	ListOutboxAdmin(ctx context.Context, arg ListOutboxAdminParams) ([]NotificationOutbox, error)
 	ListPendingClaims(ctx context.Context) ([]ListPendingClaimsRow, error)
 	ListPendingClaimsByState(ctx context.Context, stateID string) ([]ListPendingClaimsByStateRow, error)
 	ListPublicCareersJobs(ctx context.Context, arg ListPublicCareersJobsParams) ([]ListPublicCareersJobsRow, error)
@@ -367,6 +399,7 @@ type Querier interface {
 	ListPublishedEvents(ctx context.Context) ([]ListPublishedEventsRow, error)
 	ListPublishedEventsByState(ctx context.Context, stateID string) ([]ListPublishedEventsByStateRow, error)
 	ListReconciliationPeriodsByAccount(ctx context.Context, arg ListReconciliationPeriodsByAccountParams) ([]ListReconciliationPeriodsByAccountRow, error)
+	ListRegisteredUsersForEvent(ctx context.Context, eventID string) ([]ListRegisteredUsersForEventRow, error)
 	ListRegistrationsByUser(ctx context.Context, userID string) ([]ListRegistrationsByUserRow, error)
 	ListStatementItemsByPeriod(ctx context.Context, arg ListStatementItemsByPeriodParams) ([]ListStatementItemsByPeriodRow, error)
 	ListStates(ctx context.Context) ([]State, error)
@@ -379,10 +412,17 @@ type Querier interface {
 	ListUsers(ctx context.Context, arg ListUsersParams) ([]User, error)
 	ListVerifiedBankAccountVersions(ctx context.Context) ([]VerifiedBankAccountVersion, error)
 	ListZones(ctx context.Context) ([]Zone, error)
+	MarkAllNotificationsRead(ctx context.Context, recipientID string) error
 	MarkCommunityRequestConverted(ctx context.Context, arg MarkCommunityRequestConvertedParams) (CommunityRequest, error)
 	MarkEmailVerificationTokenUsed(ctx context.Context, id string) (EmailVerificationToken, error)
 	MarkMaterialTransferDispatched(ctx context.Context, arg MarkMaterialTransferDispatchedParams) (MaterialTransfer, error)
 	MarkMaterialTransferReceived(ctx context.Context, arg MarkMaterialTransferReceivedParams) (MaterialTransfer, error)
+	MarkNotificationRead(ctx context.Context, arg MarkNotificationReadParams) (Notification, error)
+	MarkOutboxDeadLetter(ctx context.Context, arg MarkOutboxDeadLetterParams) (NotificationOutbox, error)
+	MarkOutboxDelivered(ctx context.Context, id string) (NotificationOutbox, error)
+	MarkOutboxRetry(ctx context.Context, arg MarkOutboxRetryParams) (NotificationOutbox, error)
+	MarkOutboxSkipped(ctx context.Context, arg MarkOutboxSkippedParams) (NotificationOutbox, error)
+	MarkScheduleDispatched(ctx context.Context, id string) (NotificationSchedule, error)
 	MarkVerificationUsed(ctx context.Context, id string) (ContactVerification, error)
 	PublishHeroMedia(ctx context.Context, arg PublishHeroMediaParams) (HomepageHeroMedium, error)
 	RejectEventMedia(ctx context.Context, arg RejectEventMediaParams) (EventMedium, error)
@@ -397,6 +437,7 @@ type Querier interface {
 	ResolveMediaTakedownRequest(ctx context.Context, arg ResolveMediaTakedownRequestParams) (MediaTakedownRequest, error)
 	ResolveTransferDiscrepancy(ctx context.Context, arg ResolveTransferDiscrepancyParams) (TransferDiscrepancy, error)
 	ResubmitCommunityRequest(ctx context.Context, arg ResubmitCommunityRequestParams) (CommunityRequest, error)
+	RetryOutboxItem(ctx context.Context, id string) (NotificationOutbox, error)
 	ReviewCommunityRequest(ctx context.Context, arg ReviewCommunityRequestParams) (CommunityRequest, error)
 	ReviewParticipationClaim(ctx context.Context, arg ReviewParticipationClaimParams) (ParticipationClaim, error)
 	RevokeAllUserSessions(ctx context.Context, userID string) error
@@ -447,6 +488,7 @@ type Querier interface {
 	UpdateMaterialRequestReview(ctx context.Context, arg UpdateMaterialRequestReviewParams) (MaterialRequest, error)
 	UpdateMaterialTransferItemReceipt(ctx context.Context, arg UpdateMaterialTransferItemReceiptParams) (MaterialTransferItem, error)
 	UpdateMemberProfile(ctx context.Context, arg UpdateMemberProfileParams) (MemberProfile, error)
+	UpdateNotificationTemplate(ctx context.Context, arg UpdateNotificationTemplateParams) (NotificationTemplate, error)
 	UpdateProjectMilestone(ctx context.Context, arg UpdateProjectMilestoneParams) (CommunityProjectMilestone, error)
 	UpdateReconciliationPeriodStatus(ctx context.Context, arg UpdateReconciliationPeriodStatusParams) (FinancialReconciliationPeriod, error)
 	UpdateState(ctx context.Context, arg UpdateStateParams) (State, error)
@@ -460,6 +502,7 @@ type Querier interface {
 	// Candidate Professional Profiles
 	// -------------------------------------------------------------
 	UpsertCandidateProfile(ctx context.Context, arg UpsertCandidateProfileParams) (CareersCandidateProfile, error)
+	UpsertNotificationPreferences(ctx context.Context, arg UpsertNotificationPreferencesParams) (NotificationPreference, error)
 	UpsertStockBalance(ctx context.Context, arg UpsertStockBalanceParams) (StockBalance, error)
 	UpsertVerificationRateLimit(ctx context.Context, arg UpsertVerificationRateLimitParams) (EmailVerificationRateLimit, error)
 	VerifyCommunityProjectCompletion(ctx context.Context, arg VerifyCommunityProjectCompletionParams) (CommunityProject, error)

@@ -170,3 +170,44 @@ export async function apiRequest<T = any>(
 
   return data as T;
 }
+
+export const api = {
+  get: <T = any>(endpoint: string, options?: RequestInit) =>
+    apiRequest<T>(endpoint, { ...options, method: "GET" }),
+  post: <T = any>(endpoint: string, data?: any, options?: RequestInit) =>
+    apiRequest<T>(endpoint, {
+      ...options,
+      method: "POST",
+      body:
+        data !== undefined
+          ? typeof data === "string" || (typeof FormData !== "undefined" && data instanceof FormData)
+            ? data
+            : JSON.stringify(data)
+          : undefined,
+    }),
+  put: <T = any>(endpoint: string, data?: any, options?: RequestInit) =>
+    apiRequest<T>(endpoint, {
+      ...options,
+      method: "PUT",
+      body:
+        data !== undefined
+          ? typeof data === "string" || (typeof FormData !== "undefined" && data instanceof FormData)
+            ? data
+            : JSON.stringify(data)
+          : undefined,
+    }),
+  delete: <T = any>(endpoint: string, options?: RequestInit) =>
+    apiRequest<T>(endpoint, { ...options, method: "DELETE" }),
+  patch: <T = any>(endpoint: string, data?: any, options?: RequestInit) =>
+    apiRequest<T>(endpoint, {
+      ...options,
+      method: "PATCH",
+      body:
+        data !== undefined
+          ? typeof data === "string" || (typeof FormData !== "undefined" && data instanceof FormData)
+            ? data
+            : JSON.stringify(data)
+          : undefined,
+    }),
+};
+

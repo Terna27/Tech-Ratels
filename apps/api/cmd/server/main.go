@@ -23,6 +23,7 @@ import (
 	"ratels-api/internal/seeder"
 	"ratels-api/internal/service"
 	"ratels-api/internal/storage"
+	"ratels-api/internal/worker"
 )
 
 func main() {
@@ -162,6 +163,43 @@ func main() {
 	communityProjectService := service.NewCommunityProjectService(repo, auditService, storageService, financeService)
 	galleryService := service.NewGalleryService(repo, storageService, auditService)
 
+	// Transactional Notifications & Outbox Worker Providers
+	var emailSender delivery.EmailSender
+	if cfg.BrevoAPIKey != "" && cfg.EmailFromAddress != "" {
+		emailSender = delivery.NewBrevoDeliveryAdapter(cfg.BrevoAPIKey, cfg.EmailFromName, cfg.EmailFromAddress)
+		log.Printf("Transactional email sender configured via Brevo (%s <%s>)\n", cfg.EmailFromName, cfg.EmailFromAddress)
+	} else if !isProduction && cfg.DevSafeDelivery {
+		emailSender = delivery.NewDevSafeEmailSender()
+		log.Println("Transactional email running in development safe sandbox mode.")
+	} else {
+		emailSender = delivery.NewUnconfiguredEmailSender()
+		log.Println("WARNING: Brevo credentials missing; transactional emails will fail safely.")
+	}
+
+	var smsSender delivery.SMSSender
+	if cfg.TermiiAPIKey != "" {
+		smsSender = delivery.NewTermiiDeliveryAdapter(cfg.TermiiAPIKey, cfg.TermiiSenderID)
+		log.Printf("Transactional SMS sender configured via Termii (sender: %s)\n", cfg.TermiiSenderID)
+	} else if !isProduction && cfg.DevSafeDelivery {
+		smsSender = delivery.NewDevSafeSMSSender()
+		log.Println("Transactional SMS running in development safe sandbox mode.")
+	} else {
+		smsSender = delivery.NewUnconfiguredSMSSender()
+		log.Println("WARNING: Termii credentials missing; SMS notifications will fail safely.")
+	}
+
+	notifService := service.NewNotificationService(repo, auditService, emailSender, smsSender, cfg.FrontendBaseURL)
+	cleanupService.SetNotificationService(notifService)
+
+	// Launch Outbox Background Worker if enabled
+	var outboxWorker *worker.OutboxWorker
+	if cfg.EnableOutboxWorker {
+		outboxWorker = worker.NewOutboxWorker(repo, notifService, emailSender, smsSender, nil)
+		outboxWorker.Start(ctx)
+		defer outboxWorker.Stop()
+		log.Println("Transactional Notification Outbox & Cleanup Reminder worker started.")
+	}
+
 	// Handlers
 	healthH := handler.NewHealthHandler(repo)
 	authH := handler.NewAuthHandler(authService, cfg)
@@ -179,6 +217,7 @@ func main() {
 	heroMediaH := handler.NewHeroMediaHandler(heroMediaService)
 	communityProjectH := handler.NewCommunityProjectHandler(communityProjectService)
 	galleryH := handler.NewGalleryHandler(galleryService)
+	notifH := handler.NewNotificationHandler(notifService)
 
 	router := handler.NewRouter(handler.RouterParams{
 		Config:                  cfg,
@@ -199,6 +238,7 @@ func main() {
 		HeroMediaHandler:        heroMediaH,
 		CommunityProjectHandler: communityProjectH,
 		GalleryHandler:          galleryH,
+		NotificationHandler:     notifH,
 	})
 
 	srv := &http.Server{

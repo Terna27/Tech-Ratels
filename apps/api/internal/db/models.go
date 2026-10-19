@@ -1062,6 +1062,100 @@ type MemberProfile struct {
 	Version        int32              `json:"version"`
 }
 
+type Notification struct {
+	ID                  string             `json:"id"`
+	RecipientID         string             `json:"recipient_id"`
+	NotificationType    string             `json:"notification_type"`
+	Title               string             `json:"title"`
+	Body                string             `json:"body"`
+	RelatedResourceType pgtype.Text        `json:"related_resource_type"`
+	RelatedResourceID   pgtype.Text        `json:"related_resource_id"`
+	ActionUrl           pgtype.Text        `json:"action_url"`
+	Priority            string             `json:"priority"`
+	IsRead              bool               `json:"is_read"`
+	ReadAt              pgtype.Timestamptz `json:"read_at"`
+	CreatedAt           pgtype.Timestamptz `json:"created_at"`
+	ExpiresAt           pgtype.Timestamptz `json:"expires_at"`
+}
+
+type NotificationDelivery struct {
+	ID                 string             `json:"id"`
+	OutboxID           string             `json:"outbox_id"`
+	Provider           string             `json:"provider"`
+	Channel            string             `json:"channel"`
+	ProviderMessageRef pgtype.Text        `json:"provider_message_ref"`
+	Status             string             `json:"status"`
+	FailureCategory    pgtype.Text        `json:"failure_category"`
+	ErrorMessage       pgtype.Text        `json:"error_message"`
+	AttemptNumber      int32              `json:"attempt_number"`
+	ResponsePayload    pgtype.Text        `json:"response_payload"`
+	CreatedAt          pgtype.Timestamptz `json:"created_at"`
+}
+
+type NotificationOutbox struct {
+	ID                string             `json:"id"`
+	EventType         string             `json:"event_type"`
+	RecipientID       pgtype.Text        `json:"recipient_id"`
+	RecipientEmail    pgtype.Text        `json:"recipient_email"`
+	RecipientPhone    pgtype.Text        `json:"recipient_phone"`
+	RecipientName     pgtype.Text        `json:"recipient_name"`
+	Channel           string             `json:"channel"`
+	Payload           json.RawMessage    `json:"payload"`
+	DeliveryState     string             `json:"delivery_state"`
+	AttemptCount      int32              `json:"attempt_count"`
+	MaxAttempts       int32              `json:"max_attempts"`
+	NextAttemptAt     pgtype.Timestamptz `json:"next_attempt_at"`
+	LeaseToken        pgtype.Text        `json:"lease_token"`
+	LeasedUntil       pgtype.Timestamptz `json:"leased_until"`
+	LastError         pgtype.Text        `json:"last_error"`
+	LastErrorCategory pgtype.Text        `json:"last_error_category"`
+	IdempotencyKey    pgtype.Text        `json:"idempotency_key"`
+	CreatedAt         pgtype.Timestamptz `json:"created_at"`
+	DeliveredAt       pgtype.Timestamptz `json:"delivered_at"`
+}
+
+type NotificationPreference struct {
+	UserID                         string             `json:"user_id"`
+	InAppEnabled                   bool               `json:"in_app_enabled"`
+	EmailEnabled                   bool               `json:"email_enabled"`
+	SmsEnabled                     bool               `json:"sms_enabled"`
+	CleanupRemindersEnabled        bool               `json:"cleanup_reminders_enabled"`
+	LeadershipAlertsEnabled        bool               `json:"leadership_alerts_enabled"`
+	ParticipationUpdatesEnabled    bool               `json:"participation_updates_enabled"`
+	MarketplaceUpdatesEnabled      bool               `json:"marketplace_updates_enabled"`
+	CareersUpdatesEnabled          bool               `json:"careers_updates_enabled"`
+	CommunityProjectUpdatesEnabled bool               `json:"community_project_updates_enabled"`
+	FinanceAlertsEnabled           bool               `json:"finance_alerts_enabled"`
+	AnnouncementsEnabled           bool               `json:"announcements_enabled"`
+	SmsConsentRecordedAt           pgtype.Timestamptz `json:"sms_consent_recorded_at"`
+	SmsConsentWithdrawnAt          pgtype.Timestamptz `json:"sms_consent_withdrawn_at"`
+	UpdatedAt                      pgtype.Timestamptz `json:"updated_at"`
+}
+
+type NotificationSchedule struct {
+	ID                   string             `json:"id"`
+	ScheduleType         string             `json:"schedule_type"`
+	EventID              string             `json:"event_id"`
+	EventScheduleVersion int32              `json:"event_schedule_version"`
+	TargetTime           pgtype.Timestamptz `json:"target_time"`
+	Status               string             `json:"status"`
+	DispatchedAt         pgtype.Timestamptz `json:"dispatched_at"`
+	CreatedAt            pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt            pgtype.Timestamptz `json:"updated_at"`
+}
+
+type NotificationTemplate struct {
+	ID            string             `json:"id"`
+	TemplateCode  string             `json:"template_code"`
+	Channel       string             `json:"channel"`
+	TitleTemplate string             `json:"title_template"`
+	BodyTemplate  string             `json:"body_template"`
+	Version       int32              `json:"version"`
+	IsActive      bool               `json:"is_active"`
+	CreatedAt     pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt     pgtype.Timestamptz `json:"updated_at"`
+}
+
 type ParticipationAppeal struct {
 	ID               string             `json:"id"`
 	ParticipationID  string             `json:"participation_id"`

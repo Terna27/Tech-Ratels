@@ -39,6 +39,9 @@ type Config struct {
 	R2BucketName              string
 	R2PublicDomain            string
 	R2Endpoint                string
+	TermiiAPIKey              string
+	TermiiSenderID            string
+	EnableOutboxWorker        bool
 }
 
 func Load() *Config {
@@ -188,6 +191,16 @@ func Load() *Config {
 	}
 	r2Endpoint := strings.TrimRight(strings.TrimSpace(os.Getenv("R2_ENDPOINT")), "/")
 
+	termiiAPIKey := strings.TrimSpace(os.Getenv("TERMII_API_KEY"))
+	termiiSenderID := strings.TrimSpace(os.Getenv("TERMII_SENDER_ID"))
+	if termiiSenderID == "" {
+		termiiSenderID = "RATELS"
+	}
+	enableWorker := true
+	if os.Getenv("ENABLE_OUTBOX_WORKER") == "false" {
+		enableWorker = false
+	}
+
 	return &Config{
 		DatabaseURL:               dbURL,
 		Port:                      port,
@@ -213,6 +226,9 @@ func Load() *Config {
 		R2BucketName:              r2BucketName,
 		R2PublicDomain:            r2PublicDomain,
 		R2Endpoint:                r2Endpoint,
+		TermiiAPIKey:              termiiAPIKey,
+		TermiiSenderID:            termiiSenderID,
+		EnableOutboxWorker:        enableWorker,
 	}
 }
 

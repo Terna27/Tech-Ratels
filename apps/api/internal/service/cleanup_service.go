@@ -24,10 +24,15 @@ var (
 type CleanupService struct {
 	repo  *repository.Repository
 	audit *AuditService
+	notif *NotificationService
 }
 
 func NewCleanupService(repo *repository.Repository, audit *AuditService) *CleanupService {
 	return &CleanupService{repo: repo, audit: audit}
+}
+
+func (s *CleanupService) SetNotificationService(notif *NotificationService) {
+	s.notif = notif
 }
 
 type CreateEventRequest struct {
@@ -200,6 +205,10 @@ func (s *CleanupService) PublishEvent(ctx context.Context, actorID, actorRole st
 	details := fmt.Sprintf("Published venue %s", updated.Title)
 	_ = s.audit.Log(ctx, &actorID, &actorRole, "publish_event", "event", eventID, &scopeType, &updated.StateID, &details, nil)
 
+	if s.notif != nil {
+		_ = s.notif.ScheduleCleanupReminders(ctx, s.repo.Queries(), eventID, updated.Version, updated.StartTime.Time)
+	}
+
 	return &updated, nil
 }
 
@@ -232,6 +241,11 @@ func (s *CleanupService) RescheduleEvent(ctx context.Context, actorID, actorRole
 	scopeType := "state"
 	details := fmt.Sprintf("Rescheduled event to %s: %s", req.NewStartTime.Format(time.RFC3339), req.Reason)
 	_ = s.audit.Log(ctx, &actorID, &actorRole, "reschedule_event", "event", eventID, &scopeType, &updated.StateID, &details, nil)
+
+	if s.notif != nil {
+		_ = s.notif.ScheduleCleanupReminders(ctx, s.repo.Queries(), eventID, updated.Version, req.NewStartTime)
+		s.notif.OnEventRescheduled(ctx, s.repo.Queries(), eventID, req.NewStartTime.Format("Monday, 02 Jan 2006 03:04 PM"), req.Reason)
+	}
 
 	return &updated, nil
 }

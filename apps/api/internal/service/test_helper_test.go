@@ -8,6 +8,7 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 	"ratels-api/internal/config"
 	"ratels-api/internal/delivery"
+	"ratels-api/internal/migrator"
 	"ratels-api/internal/payment"
 	"ratels-api/internal/repository"
 	"ratels-api/internal/service"
@@ -30,10 +31,13 @@ type TestEnv struct {
 	FinanceService *service.FinanceService
 	InventoryService *service.InventoryService
 	MarketplaceService *service.MarketplaceService
-	CareersService     *service.CareersService
+	CareersService          *service.CareersService
 	HeroMediaService        *service.HeroMediaService
 	CommunityProjectService *service.CommunityProjectService
 	GalleryService          *service.GalleryService
+	NotificationService     *service.NotificationService
+	EmailSender             *delivery.DevSafeEmailSender
+	SMSSender               *delivery.DevSafeSMSSender
 	MockStorage             storage.StorageService
 }
 
@@ -49,6 +53,7 @@ func setupTestEnv(t *testing.T) *TestEnv {
 	if err != nil {
 		t.Fatalf("Failed to connect to test database: %v", err)
 	}
+	_ = migrator.RunMigrations(ctx, pool)
 
 	repo := repository.NewRepository(pool)
 	cfg := config.Load()
@@ -72,6 +77,9 @@ func setupTestEnv(t *testing.T) *TestEnv {
 	heroSvc := service.NewHeroMediaService(repo, auditSvc, mockStorage)
 	communitySvc := service.NewCommunityProjectService(repo, auditSvc, mockStorage, finSvc)
 	gallerySvc := service.NewGalleryService(repo, mockStorage, auditSvc)
+	devEmail := delivery.NewDevSafeEmailSender()
+	devSMS := delivery.NewDevSafeSMSSender()
+	notifSvc := service.NewNotificationService(repo, auditSvc, devEmail, devSMS, cfg.FrontendBaseURL)
 
 	return &TestEnv{
 		Pool:                    pool,
@@ -93,6 +101,9 @@ func setupTestEnv(t *testing.T) *TestEnv {
 		HeroMediaService:        heroSvc,
 		CommunityProjectService: communitySvc,
 		GalleryService:          gallerySvc,
+		NotificationService:     notifSvc,
+		EmailSender:             devEmail,
+		SMSSender:               devSMS,
 		MockStorage:             mockStorage,
 	}
 }

@@ -19,6 +19,7 @@ import {
 } from "lucide-react";
 import { Badge } from "@/components/ui/Badge";
 import { useCart } from "@/lib/cart-context";
+import { NotificationBell } from "@/components/notifications/NotificationBell";
 
 export function Navbar() {
   const pathname = usePathname();
@@ -102,6 +103,8 @@ export function Navbar() {
 
             {user ? (
               <div className="flex items-center gap-3">
+                <NotificationBell />
+
                 {isCoordinator && (
                   <Link
                     href="/admin"
@@ -223,6 +226,14 @@ export function Navbar() {
                   className="block w-full text-center px-4 py-2.5 text-sm font-medium border border-gray-300 text-gray-700 rounded-lg"
                 >
                   Member Dashboard
+                </Link>
+
+                <Link
+                  href="/notifications"
+                  onClick={() => setMobileMenuOpen(false)}
+                  className="block w-full text-center px-4 py-2.5 text-sm font-medium border border-emerald-200 text-emerald-800 bg-emerald-50/50 rounded-lg"
+                >
+                  Notifications Inbox
                 </Link>
 
                 <button

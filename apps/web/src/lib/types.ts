@@ -1642,5 +1642,155 @@ export interface PaginatedGalleryResponse<T = GalleryMedia> {
   limit: number;
 }
 
+// -------------------------------------------------------------
+// Phase B: Notifications & Communications Engine Types
+// -------------------------------------------------------------
+
+export interface InAppNotification {
+  id: string;
+  recipient_id: string;
+  notification_type: string;
+  title: string;
+  body: string;
+  related_resource_type?: string;
+  related_resource_id?: string;
+  action_url?: string;
+  priority: "low" | "normal" | "high" | "urgent";
+  is_read: boolean;
+  read_at?: string;
+  created_at: string;
+  expires_at?: string;
+}
+
+export interface PaginatedNotificationsResponse {
+  items: InAppNotification[];
+  total: number;
+  unread_count: number;
+  page: number;
+  page_size: number;
+  total_pages: number;
+}
+
+export interface NotificationPreferences {
+  user_id: string;
+  in_app_enabled: boolean;
+  email_enabled: boolean;
+  sms_enabled: boolean;
+  cleanup_reminders_enabled: boolean;
+  leadership_alerts_enabled: boolean;
+  participation_updates_enabled: boolean;
+  marketplace_updates_enabled: boolean;
+  careers_updates_enabled: boolean;
+  community_project_updates_enabled: boolean;
+  finance_alerts_enabled: boolean;
+  announcements_enabled: boolean;
+  sms_consent_recorded_at?: string;
+  sms_consent_withdrawn_at?: string;
+  updated_at: string;
+}
+
+export interface UpdateNotificationPreferencesRequest {
+  in_app_enabled?: boolean;
+  email_enabled?: boolean;
+  sms_enabled?: boolean;
+  cleanup_reminders_enabled?: boolean;
+  leadership_alerts_enabled?: boolean;
+  participation_updates_enabled?: boolean;
+  marketplace_updates_enabled?: boolean;
+  careers_updates_enabled?: boolean;
+  community_project_updates_enabled?: boolean;
+  finance_alerts_enabled?: boolean;
+  announcements_enabled?: boolean;
+}
+
+export interface CommunicationsOverviewStats {
+  total_count: number;
+  pending_count: number;
+  processing_count: number;
+  delivered_count: number;
+  failed_count: number;
+  skipped_count: number;
+}
+
+export interface NotificationOutboxItem {
+  id: string;
+  event_type: string;
+  recipient_id?: string;
+  recipient_email?: string;
+  recipient_phone?: string;
+  recipient_name?: string;
+  channel: "in_app" | "email" | "sms";
+  payload: Record<string, any>;
+  delivery_state: "pending" | "processing" | "delivered" | "failed" | "dead_letter" | "skipped";
+  attempt_count: number;
+  max_attempts: number;
+  next_attempt_at: string;
+  lease_token?: string;
+  leased_until?: string;
+  last_error?: string;
+  last_error_category?: string;
+  idempotency_key?: string;
+  created_at: string;
+  delivered_at?: string;
+}
+
+export interface NotificationDeliveryRecord {
+  id: string;
+  outbox_id: string;
+  provider: string;
+  channel: "in_app" | "email" | "sms";
+  provider_message_ref?: string;
+  status: "accepted" | "delivered" | "rejected" | "failed" | "skipped";
+  failure_category?: string;
+  error_message?: string;
+  attempt_number: number;
+  response_payload?: string;
+  created_at: string;
+}
+
+export interface NotificationTemplate {
+  id: string;
+  template_code: string;
+  channel: "in_app" | "email" | "sms";
+  title_template: string;
+  body_template: string;
+  version: number;
+  is_active: boolean;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface NotificationSchedule {
+  id: string;
+  schedule_type: string;
+  event_id: string;
+  event_schedule_version: number;
+  target_time: string;
+  status: "pending" | "dispatched" | "cancelled" | "superseded";
+  dispatched_at?: string;
+  created_at: string;
+  updated_at: string;
+  event_title?: string;
+  event_start_time?: string;
+}
+
+export interface ProviderHealthResponse {
+  brevo_provider: {
+    configured: boolean;
+    provider: string;
+    status: "ready" | "sandbox" | "unconfigured";
+  };
+  termii_provider: {
+    configured: boolean;
+    provider: string;
+    status: "ready" | "sandbox" | "unconfigured";
+  };
+  outbox_worker: {
+    status: string;
+  };
+  lagos_time: string;
+}
+
+
 
 

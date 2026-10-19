@@ -29,6 +29,7 @@ type RouterParams struct {
 	HeroMediaHandler        *HeroMediaHandler
 	CommunityProjectHandler *CommunityProjectHandler
 	GalleryHandler          *GalleryHandler
+	NotificationHandler     *NotificationHandler
 }
 
 func NewRouter(p RouterParams) http.Handler {
@@ -416,6 +417,21 @@ func NewRouter(p RouterParams) http.Handler {
 			meGal.Post("/{id}/takedown", p.GalleryHandler.SubmitTakedown)
 		})
 
+		// Member notifications & preferences
+		api.Route("/me/notifications", func(meNotif chi.Router) {
+			meNotif.Use(RequireAuth)
+			meNotif.Get("/", p.NotificationHandler.ListNotifications)
+			meNotif.Get("/unread-count", p.NotificationHandler.GetUnreadCount)
+			meNotif.Post("/read-all", p.NotificationHandler.MarkAllAsRead)
+			meNotif.Post("/{id}/read", p.NotificationHandler.MarkAsRead)
+			meNotif.Delete("/{id}", p.NotificationHandler.DeleteNotification)
+		})
+		api.Route("/me/notification-preferences", func(mePrefs chi.Router) {
+			mePrefs.Use(RequireAuth)
+			mePrefs.Get("/", p.NotificationHandler.GetPreferences)
+			mePrefs.Put("/", p.NotificationHandler.UpdatePreferences)
+		})
+
 		// Admin Workspace
 		api.Route("/admin", func(adm chi.Router) {
 			adm.With(RequireRole("national_admin", "state_coordinator", "zonal_coordinator", "lga_representative")).Get("/overview", p.AdminHandler.GetOverview)
@@ -474,6 +490,20 @@ func NewRouter(p RouterParams) http.Handler {
 				admComm.Post("/projects/{id}/updates", p.CommunityProjectHandler.CreateProjectUpdate)
 				admComm.Post("/projects/{id}/presign", p.CommunityProjectHandler.PresignProjectUpload)
 				admComm.Post("/projects/{id}/upload", p.CommunityProjectHandler.UploadProjectImageDirect)
+			})
+
+			// Communications, Outbox & Delivery Administration
+			adm.Route("/communications", func(admComms chi.Router) {
+				admComms.Use(RequireRole("national_admin", "super_admin", "zonal_coordinator", "state_coordinator", "lga_representative"))
+				admComms.Get("/overview", p.NotificationHandler.GetOverviewStats)
+				admComms.Get("/deliveries", p.NotificationHandler.ListOutbox)
+				admComms.Get("/failed", p.NotificationHandler.ListFailed)
+				admComms.Post("/deliveries/{id}/retry", p.NotificationHandler.RetryDelivery)
+				admComms.Get("/logs", p.NotificationHandler.ListDeliveries)
+				admComms.Get("/templates", p.NotificationHandler.ListTemplates)
+				admComms.Put("/templates/{id}", p.NotificationHandler.UpdateTemplate)
+				admComms.Get("/schedules", p.NotificationHandler.ListSchedules)
+				admComms.Get("/provider-health", p.NotificationHandler.GetProviderHealth)
 			})
 		})
 	})
