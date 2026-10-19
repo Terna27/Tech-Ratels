@@ -400,6 +400,53 @@ type EventInstance struct {
 	Version            int32              `json:"version"`
 }
 
+type EventMediaConsent struct {
+	ID                       string             `json:"id"`
+	MediaID                  string             `json:"media_id"`
+	HasOwnerPermission       bool               `json:"has_owner_permission"`
+	UnderstandsPublicDisplay bool               `json:"understands_public_display"`
+	HasIdentifiableConsent   bool               `json:"has_identifiable_consent"`
+	HasNoConfidentialInfo    bool               `json:"has_no_confidential_info"`
+	HasMinors                bool               `json:"has_minors"`
+	HasGuardianConsent       bool               `json:"has_guardian_consent"`
+	ConsentNotes             pgtype.Text        `json:"consent_notes"`
+	DeclaredAt               pgtype.Timestamptz `json:"declared_at"`
+	CreatedAt                pgtype.Timestamptz `json:"created_at"`
+}
+
+type EventMedium struct {
+	ID                     string             `json:"id"`
+	EventID                string             `json:"event_id"`
+	UploadedByUserID       string             `json:"uploaded_by_user_id"`
+	MediaType              string             `json:"media_type"`
+	Caption                string             `json:"caption"`
+	Description            pgtype.Text        `json:"description"`
+	StorageKey             string             `json:"storage_key"`
+	PublicUrl              pgtype.Text        `json:"public_url"`
+	ThumbnailUrl           pgtype.Text        `json:"thumbnail_url"`
+	MimeType               string             `json:"mime_type"`
+	FileSizeBytes          int64              `json:"file_size_bytes"`
+	Width                  pgtype.Int4        `json:"width"`
+	Height                 pgtype.Int4        `json:"height"`
+	DurationSeconds        pgtype.Numeric     `json:"duration_seconds"`
+	ModerationStatus       string             `json:"moderation_status"`
+	RejectionReason        pgtype.Text        `json:"rejection_reason"`
+	ReviewedByUserID       pgtype.Text        `json:"reviewed_by_user_id"`
+	ReviewedAt             pgtype.Timestamptz `json:"reviewed_at"`
+	IsPublished            bool               `json:"is_published"`
+	PublishedAt            pgtype.Timestamptz `json:"published_at"`
+	IsHidden               bool               `json:"is_hidden"`
+	IsFeatured             bool               `json:"is_featured"`
+	MetadataSanitized      bool               `json:"metadata_sanitized"`
+	SanitizedAt            pgtype.Timestamptz `json:"sanitized_at"`
+	AllowPublicAttribution bool               `json:"allow_public_attribution"`
+	StateID                string             `json:"state_id"`
+	LgaID                  string             `json:"lga_id"`
+	CreatedAt              pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt              pgtype.Timestamptz `json:"updated_at"`
+	Version                int32              `json:"version"`
+}
+
 type EventRegistration struct {
 	ID           string             `json:"id"`
 	EventID      string             `json:"event_id"`
@@ -957,6 +1004,48 @@ type MaterialTransferItem struct {
 	DiscrepancyQuantity int64              `json:"discrepancy_quantity"`
 	UnitOfMeasure       string             `json:"unit_of_measure"`
 	CreatedAt           pgtype.Timestamptz `json:"created_at"`
+}
+
+type MediaModerationAction struct {
+	ID             string             `json:"id"`
+	MediaID        string             `json:"media_id"`
+	ReviewerUserID string             `json:"reviewer_user_id"`
+	Action         string             `json:"action"`
+	Reason         string             `json:"reason"`
+	Notes          pgtype.Text        `json:"notes"`
+	CreatedAt      pgtype.Timestamptz `json:"created_at"`
+}
+
+type MediaReport struct {
+	ID               string             `json:"id"`
+	MediaID          string             `json:"media_id"`
+	ReporterUserID   pgtype.Text        `json:"reporter_user_id"`
+	ReporterEmail    pgtype.Text        `json:"reporter_email"`
+	ReportReason     string             `json:"report_reason"`
+	Details          string             `json:"details"`
+	Status           string             `json:"status"`
+	ResolutionNotes  pgtype.Text        `json:"resolution_notes"`
+	ResolvedByUserID pgtype.Text        `json:"resolved_by_user_id"`
+	ResolvedAt       pgtype.Timestamptz `json:"resolved_at"`
+	CreatedAt        pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt        pgtype.Timestamptz `json:"updated_at"`
+}
+
+type MediaTakedownRequest struct {
+	ID                  string             `json:"id"`
+	MediaID             string             `json:"media_id"`
+	RequesterUserID     pgtype.Text        `json:"requester_user_id"`
+	RequesterName       string             `json:"requester_name"`
+	RequesterEmail      string             `json:"requester_email"`
+	RelationshipToMedia string             `json:"relationship_to_media"`
+	Reason              string             `json:"reason"`
+	Details             string             `json:"details"`
+	Status              string             `json:"status"`
+	ReviewedByUserID    pgtype.Text        `json:"reviewed_by_user_id"`
+	ResolutionReason    pgtype.Text        `json:"resolution_reason"`
+	ResolvedAt          pgtype.Timestamptz `json:"resolved_at"`
+	CreatedAt           pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt           pgtype.Timestamptz `json:"updated_at"`
 }
 
 type MemberProfile struct {

@@ -160,6 +160,7 @@ func main() {
 	careersService := service.NewCareersService(repo, auditService, emailDelivery)
 	heroMediaService := service.NewHeroMediaService(repo, auditService, storageService)
 	communityProjectService := service.NewCommunityProjectService(repo, auditService, storageService, financeService)
+	galleryService := service.NewGalleryService(repo, storageService, auditService)
 
 	// Handlers
 	healthH := handler.NewHealthHandler(repo)
@@ -177,6 +178,7 @@ func main() {
 	careersH := handler.NewCareersHandler(careersService)
 	heroMediaH := handler.NewHeroMediaHandler(heroMediaService)
 	communityProjectH := handler.NewCommunityProjectHandler(communityProjectService)
+	galleryH := handler.NewGalleryHandler(galleryService)
 
 	router := handler.NewRouter(handler.RouterParams{
 		Config:                  cfg,
@@ -196,6 +198,7 @@ func main() {
 		CareersHandler:          careersH,
 		HeroMediaHandler:        heroMediaH,
 		CommunityProjectHandler: communityProjectH,
+		GalleryHandler:          galleryH,
 	})
 
 	srv := &http.Server{

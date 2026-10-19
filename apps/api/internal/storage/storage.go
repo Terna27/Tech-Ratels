@@ -27,6 +27,7 @@ type StorageService interface {
 	ProviderName() string
 	GeneratePresignedUpload(ctx context.Context, key string, contentType string, maxBytes int64, expiry time.Duration) (string, error)
 	UploadObject(ctx context.Context, key string, contentType string, reader io.Reader, size int64) (string, error)
+	ReadObject(ctx context.Context, key string) ([]byte, error)
 	DeleteObject(ctx context.Context, key string) error
 	GetPublicURL(key string) string
 }
@@ -143,6 +144,18 @@ func (s *R2StorageService) UploadObject(ctx context.Context, key string, content
 	return s.GetPublicURL(key), nil
 }
 
+func (s *R2StorageService) ReadObject(ctx context.Context, key string) ([]byte, error) {
+	out, err := s.s3Client.GetObject(ctx, &s3.GetObjectInput{
+		Bucket: aws.String(s.bucketName),
+		Key:    aws.String(key),
+	})
+	if err != nil {
+		return nil, fmt.Errorf("failed to get object from R2: %w", err)
+	}
+	defer out.Body.Close()
+	return io.ReadAll(out.Body)
+}
+
 func (s *R2StorageService) DeleteObject(ctx context.Context, key string) error {
 	_, err := s.s3Client.DeleteObject(ctx, &s3.DeleteObjectInput{
 		Bucket: aws.String(s.bucketName),
@@ -229,6 +242,16 @@ func (s *DevSandboxStorageService) GetPublicURL(key string) string {
 	return fmt.Sprintf("%s/%s", s.publicDomain, cleanKey)
 }
 
+func (s *DevSandboxStorageService) ReadObject(ctx context.Context, key string) ([]byte, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	obj, exists := s.objects[key]
+	if !exists {
+		return nil, ErrObjectNotFound
+	}
+	return obj.data, nil
+}
+
 func (s *DevSandboxStorageService) GetObject(key string) ([]byte, string, bool) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
@@ -265,6 +288,10 @@ func (s *UnconfiguredStorageService) UploadObject(ctx context.Context, key strin
 	return "", ErrStorageUnconfigured
 }
 
+func (s *UnconfiguredStorageService) ReadObject(ctx context.Context, key string) ([]byte, error) {
+	return nil, ErrStorageUnconfigured
+}
+
 func (s *UnconfiguredStorageService) DeleteObject(ctx context.Context, key string) error {
 	return ErrStorageUnconfigured
 }
@@ -272,3 +299,4 @@ func (s *UnconfiguredStorageService) DeleteObject(ctx context.Context, key strin
 func (s *UnconfiguredStorageService) GetPublicURL(key string) string {
 	return ""
 }
+

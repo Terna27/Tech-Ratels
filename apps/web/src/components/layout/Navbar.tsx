@@ -30,6 +30,7 @@ export function Navbar() {
     { href: "/", label: "Home" },
     { href: "/about", label: "About" },
     { href: "/activities", label: "Cleanups & Events" },
+    { href: "/gallery", label: "Media Gallery" },
     { href: "/projects", label: "Community Projects" },
     { href: "/marketplace", label: "Ratels Marketplace" },
     { href: "/careers", label: "Ratels Careers" },

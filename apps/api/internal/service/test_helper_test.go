@@ -33,6 +33,8 @@ type TestEnv struct {
 	CareersService     *service.CareersService
 	HeroMediaService        *service.HeroMediaService
 	CommunityProjectService *service.CommunityProjectService
+	GalleryService          *service.GalleryService
+	MockStorage             storage.StorageService
 }
 
 func setupTestEnv(t *testing.T) *TestEnv {
@@ -69,6 +71,7 @@ func setupTestEnv(t *testing.T) *TestEnv {
 	careersSvc := service.NewCareersService(repo, auditSvc, del)
 	heroSvc := service.NewHeroMediaService(repo, auditSvc, mockStorage)
 	communitySvc := service.NewCommunityProjectService(repo, auditSvc, mockStorage, finSvc)
+	gallerySvc := service.NewGalleryService(repo, mockStorage, auditSvc)
 
 	return &TestEnv{
 		Pool:                    pool,
@@ -89,5 +92,7 @@ func setupTestEnv(t *testing.T) *TestEnv {
 		CareersService:          careersSvc,
 		HeroMediaService:        heroSvc,
 		CommunityProjectService: communitySvc,
+		GalleryService:          gallerySvc,
+		MockStorage:             mockStorage,
 	}
 }

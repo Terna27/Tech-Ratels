@@ -15,9 +15,12 @@ import {
   AlertTriangle,
   FileText,
   XCircle,
+  Camera,
+  Upload,
+  Play,
 } from "lucide-react";
 import { apiRequest } from "@/lib/api";
-import { EventInstance, EventRegistration } from "@/lib/types";
+import { EventInstance, EventRegistration, GalleryMedia } from "@/lib/types";
 import { useAuth } from "@/lib/auth-context";
 import { Badge } from "@/components/ui/Badge";
 import { Spinner } from "@/components/ui/Spinner";
@@ -29,6 +32,7 @@ export default function ActivityDetailPage({ params }: { params: Promise<{ id: s
   const { user } = useAuth();
 
   const [event, setEvent] = useState<EventInstance | null>(null);
+  const [eventMedia, setEventMedia] = useState<GalleryMedia[]>([]);
   const [isRegistered, setIsRegistered] = useState(false);
   const [loading, setLoading] = useState(true);
   const [submitting, setSubmitting] = useState(false);
@@ -44,6 +48,15 @@ export default function ActivityDetailPage({ params }: { params: Promise<{ id: s
           const myRegs = await apiRequest<EventRegistration[]>("/activities/my-registrations");
           const registered = myRegs.some((r) => r.event_id === id && r.status === "registered");
           setIsRegistered(registered);
+        }
+
+        try {
+          const media = await apiRequest<GalleryMedia[]>(`/activities/events/${id}/gallery`);
+          if (media && Array.isArray(media)) {
+            setEventMedia(media);
+          }
+        } catch (_) {
+          // Graceful fallback if no media exists yet
         }
       } catch (err: any) {
         setFeedback({ type: "error", message: err.message || "Failed to load event details" });
@@ -258,6 +271,77 @@ export default function ActivityDetailPage({ params }: { params: Promise<{ id: s
             <strong>Accessibility:</strong> {event.accessibility_notes || "Standard pedestrian access. Contact local coordinator for mobility assistance."}
           </p>
         </div>
+      </div>
+
+      {/* Event Photo & Video Gallery Section */}
+      <div className="bg-white rounded-2xl border border-gray-200 p-6 sm:p-8 shadow-sm space-y-6">
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 pb-4 border-b border-gray-100">
+          <div>
+            <div className="flex items-center gap-2">
+              <Camera className="w-4 h-4 text-emerald-800" />
+              <h3 className="text-lg font-bold text-gray-900">Event Media & Volunteer Highlights</h3>
+            </div>
+            <p className="text-xs text-gray-500 mt-0.5">
+              Approved photographs and video recordings from this cleanup venue
+            </p>
+          </div>
+
+          <div className="flex items-center gap-2">
+            <Link
+              href={`/gallery/upload?event_id=${id}`}
+              className="px-4 py-2 bg-emerald-800 hover:bg-emerald-900 text-white rounded-xl text-xs font-bold transition flex items-center gap-1.5 shadow-sm"
+            >
+              <Upload className="w-3.5 h-3.5" />
+              <span>Submit Media for this Event</span>
+            </Link>
+          </div>
+        </div>
+
+        {eventMedia.length > 0 ? (
+          <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-4">
+            {eventMedia.map((m) => (
+              <Link
+                key={m.id}
+                href="/gallery"
+                className="group relative aspect-square bg-gray-900 rounded-xl overflow-hidden block"
+              >
+                {m.thumbnail_url || m.public_url ? (
+                  <img
+                    src={m.thumbnail_url || m.public_url}
+                    alt={m.caption}
+                    loading="lazy"
+                    className="w-full h-full object-cover group-hover:scale-105 transition duration-300"
+                  />
+                ) : (
+                  <div className="w-full h-full flex items-center justify-center text-gray-400">
+                    <Camera className="w-6 h-6" />
+                  </div>
+                )}
+                {m.media_type === "video" && (
+                  <div className="absolute top-2 left-2 bg-black/70 text-white px-1.5 py-0.5 rounded text-[9px] font-bold flex items-center gap-1">
+                    <Play className="w-2.5 h-2.5 fill-current text-emerald-400" />
+                    <span>VIDEO</span>
+                  </div>
+                )}
+                <div className="absolute inset-0 bg-gradient-to-t from-black/80 via-transparent to-transparent opacity-0 group-hover:opacity-100 transition p-2.5 flex flex-col justify-end text-white">
+                  <p className="text-xs font-bold line-clamp-2 leading-tight">{m.caption}</p>
+                </div>
+              </Link>
+            ))}
+          </div>
+        ) : (
+          <div className="bg-gray-50 rounded-xl border border-gray-100 p-8 text-center space-y-2">
+            <div className="w-10 h-10 rounded-full bg-emerald-100 text-emerald-800 flex items-center justify-center mx-auto">
+              <Camera className="w-5 h-5" />
+            </div>
+            <p className="text-xs text-gray-600 font-medium">
+              No photos or videos have been published for this event yet.
+            </p>
+            <p className="text-[11px] text-gray-400">
+              Were you a volunteer or coordinator at this cleanup? Upload your photographs to be featured!
+            </p>
+          </div>
+        )}
       </div>
     </div>
   );

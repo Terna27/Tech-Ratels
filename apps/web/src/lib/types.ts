@@ -1515,4 +1515,132 @@ export interface CommunityProjectsOverviewStats {
   total_recorded_expenditure: number;
 }
 
+// ============================================================================
+// Event Media Gallery & Moderation System (Phase A)
+// ============================================================================
+
+export interface GalleryMedia {
+  id: string;
+  event_id: string;
+  media_type: "image" | "video";
+  caption: string;
+  description?: string;
+  public_url?: string;
+  thumbnail_url?: string;
+  mime_type: string;
+  file_size_bytes: number;
+  width?: number;
+  height?: number;
+  duration_seconds?: number;
+  moderation_status?: "draft" | "pending_review" | "approved" | "rejected" | "revision_requested" | "withdrawn" | "removed";
+  rejection_reason?: string;
+  reviewed_by_user_id?: string;
+  reviewed_at?: string;
+  is_published: boolean;
+  published_at?: string;
+  is_hidden: boolean;
+  is_featured: boolean;
+  metadata_sanitized: boolean;
+  sanitized_at?: string;
+  allow_public_attribution: boolean;
+  uploader_display_name?: string;
+  event_title?: string;
+  event_date?: string;
+  state_id?: string;
+  state_name?: string;
+  state_code?: string;
+  lga_id?: string;
+  lga_name?: string;
+  zone_id?: string;
+  zone_name?: string;
+  created_at: string;
+  updated_at?: string;
+  version?: number;
+  uploaded_by_user_id?: string;
+  uploader_name?: string;
+  uploader_email?: string;
+  reviewer_name?: string;
+}
+
+export interface GalleryConsent {
+  id?: string;
+  media_id?: string;
+  has_owner_permission: boolean;
+  understands_public_display: boolean;
+  has_identifiable_consent: boolean;
+  has_no_confidential_info: boolean;
+  has_minors: boolean;
+  has_guardian_consent: boolean;
+  consent_notes?: string;
+  declared_at?: string;
+}
+
+export interface MediaModerationAction {
+  id: string;
+  media_id: string;
+  reviewer_user_id: string;
+  reviewer_name?: string;
+  action: string;
+  reason: string;
+  notes?: string;
+  created_at: string;
+}
+
+export interface MediaReport {
+  id: string;
+  media_id: string;
+  reporter_user_id?: string;
+  reporter_name?: string;
+  reporter_email?: string;
+  report_reason: string;
+  details: string;
+  status: "pending" | "investigating" | "resolved" | "dismissed";
+  resolution_notes?: string;
+  resolver_name?: string;
+  media_caption?: string;
+  media_url?: string;
+  media_thumbnail?: string;
+  created_at: string;
+  resolved_at?: string;
+}
+
+export interface MediaTakedownRequest {
+  id: string;
+  media_id: string;
+  requester_user_id?: string;
+  requester_name: string;
+  requester_email: string;
+  relationship_to_media: string;
+  reason: string;
+  details: string;
+  status: "pending" | "approved_removed" | "rejected_retained";
+  resolution_reason?: string;
+  reviewer_name?: string;
+  media_caption?: string;
+  media_url?: string;
+  media_thumbnail?: string;
+  created_at: string;
+  resolved_at?: string;
+}
+
+export interface GalleryOverviewStats {
+  total_media: number;
+  pending_review_count: number;
+  approved_count: number;
+  rejected_count: number;
+  revision_requested_count: number;
+  removed_count: number;
+  hidden_count: number;
+  pending_reports_count: number;
+  pending_takedowns_count: number;
+}
+
+export interface PaginatedGalleryResponse<T = GalleryMedia> {
+  items: T[];
+  total: number;
+  page: number;
+  limit: number;
+}
+
+
 

@@ -28,6 +28,7 @@ type RouterParams struct {
 	CareersHandler          *CareersHandler
 	HeroMediaHandler        *HeroMediaHandler
 	CommunityProjectHandler *CommunityProjectHandler
+	GalleryHandler          *GalleryHandler
 }
 
 func NewRouter(p RouterParams) http.Handler {
@@ -179,6 +180,7 @@ func NewRouter(p RouterParams) http.Handler {
 			act.Get("/campaigns/current", p.ActivityHandler.GetCurrentCampaign)
 			act.Get("/events", p.ActivityHandler.ListEvents)
 			act.Get("/events/{id}", p.ActivityHandler.GetEvent)
+			act.Get("/events/{id}/gallery", p.GalleryHandler.ListEventGallery)
 
 			// Venue & Event mutations
 			act.With(RequireRole("national_admin", "state_coordinator", "lga_representative")).Post("/events", p.ActivityHandler.CreateEvent)
@@ -387,11 +389,56 @@ func NewRouter(p RouterParams) http.Handler {
 			})
 		})
 
+		// Event Media Gallery & Moderation System (Phase A)
+		api.Route("/gallery", func(gal chi.Router) {
+			gal.Get("/", p.GalleryHandler.ListPublicGallery)
+			gal.Get("/featured", p.GalleryHandler.ListFeatured)
+			gal.Get("/{id}", p.GalleryHandler.GetPublicMediaDetail)
+			gal.Post("/{id}/report", p.GalleryHandler.ReportMedia)
+			gal.Post("/{id}/takedown", p.GalleryHandler.SubmitTakedown)
+
+			// Authenticated member gallery actions
+			gal.With(RequireAuth).Get("/my-submissions", p.GalleryHandler.ListMySubmissions)
+			gal.With(RequireAuth).Post("/presign", p.GalleryHandler.AuthorizeUpload)
+			gal.With(RequireAuth).Post("/submit", p.GalleryHandler.SubmitMedia)
+			gal.With(RequireAuth).Post("/upload", p.GalleryHandler.SubmitDirectUpload)
+			gal.With(RequireAuth).Post("/{id}/withdraw", p.GalleryHandler.WithdrawSubmission)
+		})
+
+		// Member gallery shortcuts (/me/gallery)
+		api.Route("/me/gallery", func(meGal chi.Router) {
+			meGal.Use(RequireAuth)
+			meGal.Get("/", p.GalleryHandler.ListMySubmissions)
+			meGal.Post("/presign", p.GalleryHandler.AuthorizeUpload)
+			meGal.Post("/submit", p.GalleryHandler.SubmitMedia)
+			meGal.Post("/upload", p.GalleryHandler.SubmitDirectUpload)
+			meGal.Post("/{id}/withdraw", p.GalleryHandler.WithdrawSubmission)
+			meGal.Post("/{id}/takedown", p.GalleryHandler.SubmitTakedown)
+		})
+
 		// Admin Workspace
 		api.Route("/admin", func(adm chi.Router) {
 			adm.With(RequireRole("national_admin", "state_coordinator", "zonal_coordinator", "lga_representative")).Get("/overview", p.AdminHandler.GetOverview)
 			adm.With(RequireRole("national_admin")).Get("/audit-logs", p.AdminHandler.ListAuditLogs)
 			adm.With(RequireRole("super_admin", "national_admin")).Post("/geography/seed", p.AdminHandler.SeedGeography)
+
+			// Event Media Gallery & Moderation Administration
+			adm.Route("/gallery", func(admGal chi.Router) {
+				admGal.Use(RequireRole("national_admin", "super_admin", "zonal_coordinator", "state_coordinator", "lga_representative"))
+				admGal.Get("/", p.GalleryHandler.ListAdminGallery)
+				admGal.Get("/overview", p.GalleryHandler.GetAdminOverview)
+				admGal.Get("/reports", p.GalleryHandler.ListReports)
+				admGal.Post("/reports/{id}/resolve", p.GalleryHandler.ResolveReport)
+				admGal.Get("/takedowns", p.GalleryHandler.ListTakedowns)
+				admGal.Post("/takedowns/{id}/resolve", p.GalleryHandler.ResolveTakedown)
+				admGal.Get("/{id}", p.GalleryHandler.GetAdminMediaDetail)
+				admGal.Post("/{id}/approve", p.GalleryHandler.ApproveMedia)
+				admGal.Post("/{id}/reject", p.GalleryHandler.RejectMedia)
+				admGal.Post("/{id}/request-revision", p.GalleryHandler.RequestRevision)
+				admGal.Post("/{id}/remove", p.GalleryHandler.RemoveMedia)
+				admGal.Patch("/{id}/toggle-hide", p.GalleryHandler.ToggleHideMedia)
+				admGal.Post("/{id}/toggle-hide", p.GalleryHandler.ToggleHideMedia)
+			})
 
 			// Homepage Hero Media Administration (Super Admin & National Admin)
 			adm.Route("/hero-media", func(admHero chi.Router) {

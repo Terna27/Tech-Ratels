@@ -13,9 +13,12 @@ import {
   CheckCircle,
   Clock,
   Sparkles,
+  Camera,
+  Play,
+  Video,
 } from "lucide-react";
 import { apiRequest } from "@/lib/api";
-import { EventInstance, PublicLeader, HeroMedia, ActiveHeroMediaResponse } from "@/lib/types";
+import { EventInstance, PublicLeader, HeroMedia, ActiveHeroMediaResponse, GalleryMedia } from "@/lib/types";
 import { Badge } from "@/components/ui/Badge";
 import { Alert } from "@/components/ui/Alert";
 
@@ -23,6 +26,7 @@ export default function HomePage() {
   const [featuredEvent, setFeaturedEvent] = useState<EventInstance | null>(null);
   const [leaders, setLeaders] = useState<PublicLeader[]>([]);
   const [heroMedia, setHeroMedia] = useState<HeroMedia | null>(null);
+  const [featuredMedia, setFeaturedMedia] = useState<GalleryMedia[]>([]);
   const [videoPlaybackError, setVideoPlaybackError] = useState(false);
   const [reducedMotion, setReducedMotion] = useState(false);
   const [loading, setLoading] = useState(true);
@@ -55,6 +59,14 @@ export default function HomePage() {
           }
         } catch (_) {
           // Graceful fallback to default green gradient
+        }
+        try {
+          const media = await apiRequest<GalleryMedia[]>("/gallery/featured?limit=4");
+          if (media && Array.isArray(media)) {
+            setFeaturedMedia(media);
+          }
+        } catch (_) {
+          // Graceful fallback if no media exists yet
         }
       } catch (err) {
         console.error("Failed to load initial data", err);
@@ -260,6 +272,90 @@ export default function HomePage() {
               </p>
             </div>
           </div>
+        </section>
+
+        {/* Featured Cleanup Event Media Section */}
+        <section className="bg-white rounded-2xl border border-gray-200 p-6 sm:p-8 space-y-6">
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+            <div>
+              <div className="flex items-center gap-2">
+                <span className="p-1.5 rounded-lg bg-emerald-100 text-emerald-800">
+                  <Camera className="w-4 h-4" />
+                </span>
+                <span className="text-xs font-bold text-emerald-800 uppercase tracking-wider">
+                  Verified In Action
+                </span>
+              </div>
+              <h3 className="text-xl font-bold text-gray-900 mt-1">Recent Cleanup Media</h3>
+              <p className="text-xs text-gray-600">
+                Approved photographs and video highlights from volunteer cleanups across Nigeria.
+              </p>
+            </div>
+            <Link
+              href="/gallery"
+              className="inline-flex items-center text-xs font-semibold text-emerald-800 hover:text-emerald-950"
+            >
+              Explore Full Media Gallery
+              <ArrowRight className="w-3.5 h-3.5 ml-1" />
+            </Link>
+          </div>
+
+          {featuredMedia.length > 0 ? (
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+              {featuredMedia.map((m) => (
+                <Link
+                  key={m.id}
+                  href="/gallery"
+                  className="group bg-gray-50 rounded-xl border border-gray-200 overflow-hidden hover:shadow-md transition flex flex-col"
+                >
+                  <div className="relative aspect-video bg-gray-900 overflow-hidden">
+                    {m.thumbnail_url || m.public_url ? (
+                      <img
+                        src={m.thumbnail_url || m.public_url}
+                        alt={m.caption}
+                        loading="lazy"
+                        className="w-full h-full object-cover group-hover:scale-105 transition duration-300"
+                      />
+                    ) : (
+                      <div className="w-full h-full flex items-center justify-center text-gray-400">
+                        <Camera className="w-6 h-6" />
+                      </div>
+                    )}
+                    {m.media_type === "video" && (
+                      <div className="absolute top-2 left-2 bg-black/70 text-white px-2 py-0.5 rounded text-[10px] font-bold flex items-center gap-1">
+                        <Play className="w-2.5 h-2.5 fill-current text-emerald-400" />
+                        <span>VIDEO</span>
+                      </div>
+                    )}
+                  </div>
+                  <div className="p-3 flex-1 flex flex-col justify-between">
+                    <h4 className="font-bold text-xs text-gray-900 line-clamp-2 leading-snug group-hover:text-emerald-800 transition">
+                      {m.caption}
+                    </h4>
+                    <div className="pt-2 text-[10px] text-gray-500 flex items-center justify-between">
+                      <span className="truncate">{m.state_name || m.lga_name || "Nigeria"}</span>
+                      {m.published_at && (
+                        <span>{new Date(m.published_at).toLocaleDateString("en-GB", { month: "short", day: "numeric" })}</span>
+                      )}
+                    </div>
+                  </div>
+                </Link>
+              ))}
+            </div>
+          ) : (
+            <div className="bg-emerald-50/50 rounded-xl border border-emerald-100 p-6 text-center space-y-3">
+              <p className="text-xs text-emerald-950 font-medium">
+                Our volunteers are capturing nationwide cleanup operations in real time.
+              </p>
+              <Link
+                href="/gallery"
+                className="inline-flex items-center gap-1.5 px-4 py-2 bg-emerald-800 text-white rounded-lg text-xs font-bold hover:bg-emerald-900 transition"
+              >
+                <span>Browse Approved Gallery</span>
+                <ArrowRight className="w-3.5 h-3.5" />
+              </Link>
+            </div>
+          )}
         </section>
 
         {/* Leadership Directory Highlight */}

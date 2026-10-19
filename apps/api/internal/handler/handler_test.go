@@ -19,6 +19,7 @@ import (
 	"ratels-api/internal/payment"
 	"ratels-api/internal/repository"
 	"ratels-api/internal/service"
+	"ratels-api/internal/storage"
 )
 
 type TestHarness struct {
@@ -38,6 +39,8 @@ type TestHarness struct {
 	InventoryService *service.InventoryService
 	MarketplaceService *service.MarketplaceService
 	CareersService   *service.CareersService
+	GalleryService   *service.GalleryService
+	Storage          storage.StorageService
 	Cleanup          func()
 }
 
@@ -67,11 +70,15 @@ func setupTestHarness(t *testing.T) *TestHarness {
 	partSvc := service.NewParticipationService(repo, auditSvc)
 	foundSvc := service.NewFoundationService(repo, cfg, auditSvc)
 	adminSvc := service.NewAdminService(repo)
-	financeSvc := service.NewFinanceService(repo, auditSvc)
-	inventorySvc := service.NewInventoryService(repo, auditSvc)
+	mockStorage := storage.NewDevSandboxStorageService("http://localhost:3000")
 	paymentGw := payment.NewSandboxGateway(cfg.FrontendBaseURL)
-	marketplaceSvc := service.NewMarketplaceService(repo, auditSvc, paymentGw)
+	financeSvc := service.NewFinanceService(repo, auditSvc, paymentGw, mockStorage)
+	inventorySvc := service.NewInventoryService(repo, auditSvc)
+	marketplaceSvc := service.NewMarketplaceService(repo, auditSvc, paymentGw, mockStorage)
 	careersSvc := service.NewCareersService(repo, auditSvc, del)
+	heroMediaSvc := service.NewHeroMediaService(repo, auditSvc, mockStorage)
+	commProjectSvc := service.NewCommunityProjectService(repo, auditSvc, mockStorage, financeSvc)
+	gallerySvc := service.NewGalleryService(repo, mockStorage, auditSvc)
 
 	healthH := handler.NewHealthHandler(repo)
 	authH := handler.NewAuthHandler(authSvc, cfg)
@@ -86,42 +93,50 @@ func setupTestHarness(t *testing.T) *TestHarness {
 	inventoryH := handler.NewInventoryHandler(inventorySvc)
 	marketplaceH := handler.NewMarketplaceHandler(marketplaceSvc)
 	careersH := handler.NewCareersHandler(careersSvc)
+	heroMediaH := handler.NewHeroMediaHandler(heroMediaSvc)
+	commProjectH := handler.NewCommunityProjectHandler(commProjectSvc)
+	galleryH := handler.NewGalleryHandler(gallerySvc)
 
 	router := handler.NewRouter(handler.RouterParams{
-		Config:               cfg,
-		Repo:                 repo,
-		HealthHandler:        healthH,
-		AuthHandler:          authH,
-		MemberHandler:        memberH,
-		GeographyHandler:     geoH,
-		LeadershipHandler:    leadH,
-		ActivityHandler:      activityH,
-		ParticipationHandler: partH,
-		FoundationHandler:    foundH,
-		AdminHandler:         adminH,
-		FinanceHandler:       financeH,
-		InventoryHandler:     inventoryH,
-		MarketplaceHandler:   marketplaceH,
-		CareersHandler:       careersH,
+		Config:                  cfg,
+		Repo:                    repo,
+		HealthHandler:           healthH,
+		AuthHandler:             authH,
+		MemberHandler:           memberH,
+		GeographyHandler:        geoH,
+		LeadershipHandler:       leadH,
+		ActivityHandler:         activityH,
+		ParticipationHandler:    partH,
+		FoundationHandler:       foundH,
+		AdminHandler:            adminH,
+		FinanceHandler:          financeH,
+		InventoryHandler:        inventoryH,
+		MarketplaceHandler:      marketplaceH,
+		CareersHandler:          careersH,
+		HeroMediaHandler:        heroMediaH,
+		CommunityProjectHandler: commProjectH,
+		GalleryHandler:          galleryH,
 	})
 
 	return &TestHarness{
-		Router:           router,
-		Pool:             pool,
-		Repo:             repo,
-		Config:           cfg,
-		Delivery:         del,
-		AuthService:      authSvc,
-		LeadService:      leadSvc,
-		CleanupService:   cleanupSvc,
-		PartService:      partSvc,
-		FoundService:     foundSvc,
-		GeoService:       geoSvc,
-		AdminService:     adminSvc,
-		FinanceService:   financeSvc,
-		InventoryService: inventorySvc,
+		Router:             router,
+		Pool:               pool,
+		Repo:               repo,
+		Config:             cfg,
+		Delivery:           del,
+		AuthService:        authSvc,
+		LeadService:        leadSvc,
+		CleanupService:     cleanupSvc,
+		PartService:        partSvc,
+		FoundService:       foundSvc,
+		GeoService:         geoSvc,
+		AdminService:       adminSvc,
+		FinanceService:     financeSvc,
+		InventoryService:   inventorySvc,
 		MarketplaceService: marketplaceSvc,
-		CareersService:   careersSvc,
+		CareersService:     careersSvc,
+		GalleryService:     gallerySvc,
+		Storage:            mockStorage,
 		Cleanup: func() {
 			pool.Close()
 		},
