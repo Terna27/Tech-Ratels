@@ -391,6 +391,7 @@ func NewRouter(p RouterParams) http.Handler {
 		api.Route("/admin", func(adm chi.Router) {
 			adm.With(RequireRole("national_admin", "state_coordinator", "zonal_coordinator", "lga_representative")).Get("/overview", p.AdminHandler.GetOverview)
 			adm.With(RequireRole("national_admin")).Get("/audit-logs", p.AdminHandler.ListAuditLogs)
+			adm.With(RequireRole("super_admin", "national_admin")).Post("/geography/seed", p.AdminHandler.SeedGeography)
 
 			// Homepage Hero Media Administration (Super Admin & National Admin)
 			adm.Route("/hero-media", func(admHero chi.Router) {

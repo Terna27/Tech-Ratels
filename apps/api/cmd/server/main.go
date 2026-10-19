@@ -13,12 +13,14 @@ import (
 
 	"github.com/jackc/pgx/v5/pgxpool"
 	"ratels-api/internal/config"
+	"ratels-api/internal/db"
 	"ratels-api/internal/delivery"
 	"ratels-api/internal/handler"
 	"ratels-api/internal/migrator"
 	"ratels-api/internal/payment"
 	"ratels-api/internal/repository"
 	"ratels-api/internal/security"
+	"ratels-api/internal/seeder"
 	"ratels-api/internal/service"
 	"ratels-api/internal/storage"
 )
@@ -56,6 +58,11 @@ func main() {
 	// Execute any unapplied database migrations
 	if err := migrator.RunMigrations(ctx, pool); err != nil {
 		log.Fatalf("Database migration failed: %v\n", err)
+	}
+
+	// Ensure authoritative reference geographic and institutional data is populated
+	if err := seeder.SeedReferenceData(ctx, pool, db.New(pool)); err != nil {
+		log.Fatalf("Reference data seeding failed: %v\n", err)
 	}
 
 	repo := repository.NewRepository(pool)

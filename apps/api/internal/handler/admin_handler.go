@@ -74,3 +74,14 @@ func (h *AdminHandler) ListAuditLogs(w http.ResponseWriter, r *http.Request) {
 
 	JSON(w, http.StatusOK, logs)
 }
+
+func (h *AdminHandler) SeedGeography(w http.ResponseWriter, r *http.Request) {
+	res, err := h.adminService.SeedGeography(r.Context())
+	if err != nil {
+		ErrorJSON(w, http.StatusInternalServerError, "SEED_ERROR", err.Error(), nil)
+		return
+	}
+
+	JSON(w, http.StatusOK, res)
+}
+

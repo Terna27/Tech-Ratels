@@ -5,6 +5,7 @@ import (
 
 	"ratels-api/internal/db"
 	"ratels-api/internal/repository"
+	"ratels-api/internal/seeder"
 )
 
 type AdminService struct {
@@ -104,3 +105,37 @@ func (s *AdminService) ListAuditLogs(ctx context.Context, page, limit int32) (*P
 		Limit: limit,
 	}, nil
 }
+
+type SeedGeographyResponse struct {
+	Status  string `json:"status"`
+	Message string `json:"message"`
+	Zones   int64  `json:"zones"`
+	States  int64  `json:"states"`
+	LGAs    int64  `json:"lgas"`
+}
+
+func (s *AdminService) SeedGeography(ctx context.Context) (*SeedGeographyResponse, error) {
+	if err := seeder.SeedReferenceData(ctx, s.repo.Pool(), s.repo.Queries()); err != nil {
+		return nil, err
+	}
+	zoneCount, err := s.repo.Queries().CountZones(ctx)
+	if err != nil {
+		return nil, err
+	}
+	stateCount, err := s.repo.Queries().CountStates(ctx)
+	if err != nil {
+		return nil, err
+	}
+	lgaCount, err := s.repo.Queries().CountLGAs(ctx)
+	if err != nil {
+		return nil, err
+	}
+	return &SeedGeographyResponse{
+		Status:  "ok",
+		Message: "Authoritative reference geography verified and seeded successfully",
+		Zones:   zoneCount,
+		States:  stateCount,
+		LGAs:    lgaCount,
+	}, nil
+}
+
