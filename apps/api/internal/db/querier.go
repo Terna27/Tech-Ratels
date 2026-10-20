@@ -21,6 +21,7 @@ type Querier interface {
 	CalculateFundBalanceBeforeDate(ctx context.Context, arg CalculateFundBalanceBeforeDateParams) (int64, error)
 	CancelPendingSchedulesForEvent(ctx context.Context, eventID string) error
 	ClaimOutboxBatch(ctx context.Context, arg ClaimOutboxBatchParams) ([]NotificationOutbox, error)
+	CloseSafeguardingCase(ctx context.Context, id string) (SafeguardingCase, error)
 	CountActiveAppointments(ctx context.Context) (int64, error)
 	CountActiveUsers(ctx context.Context) (int64, error)
 	CountAdminCommunityProjects(ctx context.Context, arg CountAdminCommunityProjectsParams) (int64, error)
@@ -43,6 +44,8 @@ type Querier interface {
 	CountPublicCommunityProjects(ctx context.Context, arg CountPublicCommunityProjectsParams) (int64, error)
 	CountPublicGalleryMedia(ctx context.Context, arg CountPublicGalleryMediaParams) (int64, error)
 	CountPublishedEvents(ctx context.Context) (int64, error)
+	CountSafeguardingAccessLogs(ctx context.Context) (int64, error)
+	CountSafeguardingCases(ctx context.Context, arg CountSafeguardingCasesParams) (int64, error)
 	CountStates(ctx context.Context) (int64, error)
 	CountStockLedgerEntries(ctx context.Context, arg CountStockLedgerEntriesParams) (int64, error)
 	CountTotalRegistrations(ctx context.Context) (int64, error)
@@ -169,6 +172,24 @@ type Querier interface {
 	// -------------------------------------------------------------
 	CreateProjectUpdate(ctx context.Context, arg CreateProjectUpdateParams) (CommunityProjectUpdate, error)
 	CreateReconciliationPeriod(ctx context.Context, arg CreateReconciliationPeriodParams) (FinancialReconciliationPeriod, error)
+	// Safeguarding Access Logs
+	CreateSafeguardingAccessLog(ctx context.Context, arg CreateSafeguardingAccessLogParams) (SafeguardingAccessLog, error)
+	// Safeguarding Assignments
+	CreateSafeguardingAssignment(ctx context.Context, arg CreateSafeguardingAssignmentParams) (SafeguardingAssignment, error)
+	// Safeguarding Cases
+	CreateSafeguardingCase(ctx context.Context, arg CreateSafeguardingCaseParams) (SafeguardingCase, error)
+	// Safeguarding Case Actions
+	CreateSafeguardingCaseAction(ctx context.Context, arg CreateSafeguardingCaseActionParams) (SafeguardingCaseAction, error)
+	// Safeguarding Conflicts
+	CreateSafeguardingConflict(ctx context.Context, arg CreateSafeguardingConflictParams) (SafeguardingConflict, error)
+	// Safeguarding Evidence
+	CreateSafeguardingEvidence(ctx context.Context, arg CreateSafeguardingEvidenceParams) (SafeguardingEvidence, error)
+	// Safeguarding Messages
+	CreateSafeguardingMessage(ctx context.Context, arg CreateSafeguardingMessageParams) (SafeguardingMessage, error)
+	// Safeguarding Reporters
+	CreateSafeguardingReporter(ctx context.Context, arg CreateSafeguardingReporterParams) (SafeguardingReporter, error)
+	// Safeguarding Retention Records
+	CreateSafeguardingRetentionRecord(ctx context.Context, arg CreateSafeguardingRetentionRecordParams) (SafeguardingRetentionRecord, error)
 	CreateState(ctx context.Context, arg CreateStateParams) (State, error)
 	CreateStatementItem(ctx context.Context, arg CreateStatementItemParams) (FinancialStatementItem, error)
 	CreateStockLedgerEntry(ctx context.Context, arg CreateStockLedgerEntryParams) (StockLedgerEntry, error)
@@ -179,6 +200,7 @@ type Querier interface {
 	CreateUserSession(ctx context.Context, arg CreateUserSessionParams) (UserSession, error)
 	CreateZone(ctx context.Context, arg CreateZoneParams) (Zone, error)
 	DeactivateAllHeroMedia(ctx context.Context) error
+	DeactivateAssignmentsForCase(ctx context.Context, caseID string) error
 	DecrementCareersJobApplications(ctx context.Context, id string) error
 	DecrementProductStock(ctx context.Context, arg DecrementProductStockParams) (MarketplaceProduct, error)
 	DecrementRegisteredCount(ctx context.Context, id string) (EventInstance, error)
@@ -189,9 +211,12 @@ type Querier interface {
 	DeleteMarketplaceProduct(ctx context.Context, id string) error
 	DeleteNotification(ctx context.Context, arg DeleteNotificationParams) error
 	DeleteProjectMilestone(ctx context.Context, id string) error
+	DeleteSafeguardingEvidence(ctx context.Context, id string) error
 	// Transactional Outbox
 	EnqueueOutbox(ctx context.Context, arg EnqueueOutboxParams) (NotificationOutbox, error)
+	EscalateSafeguardingCase(ctx context.Context, arg EscalateSafeguardingCaseParams) (SafeguardingCase, error)
 	GetActiveAppointmentByJurisdiction(ctx context.Context, arg GetActiveAppointmentByJurisdictionParams) (Appointment, error)
+	GetActiveAssignmentByCaseID(ctx context.Context, caseID string) (GetActiveAssignmentByCaseIDRow, error)
 	GetActiveFinancialAuthorization(ctx context.Context, userID string) (FinancialAuthorization, error)
 	GetActiveHeroMedia(ctx context.Context) (HomepageHeroMedium, error)
 	GetActiveVerification(ctx context.Context, arg GetActiveVerificationParams) (ContactVerification, error)
@@ -297,6 +322,16 @@ type Querier interface {
 	GetParticipationClaimByID(ctx context.Context, id string) (ParticipationClaim, error)
 	GetProjectMilestoneByID(ctx context.Context, id string) (GetProjectMilestoneByIDRow, error)
 	GetReconciliationPeriodByID(ctx context.Context, id string) (GetReconciliationPeriodByIDRow, error)
+	GetSafeguardingCaseByID(ctx context.Context, id string) (GetSafeguardingCaseByIDRow, error)
+	GetSafeguardingCaseByPublicRef(ctx context.Context, publicReference string) (GetSafeguardingCaseByPublicRefRow, error)
+	GetSafeguardingConflict(ctx context.Context, arg GetSafeguardingConflictParams) (SafeguardingConflict, error)
+	GetSafeguardingEvidenceByID(ctx context.Context, id string) (SafeguardingEvidence, error)
+	// Safeguarding Officers
+	GetSafeguardingOfficerByUserID(ctx context.Context, userID string) (SafeguardingOfficer, error)
+	GetSafeguardingReporterByCaseID(ctx context.Context, caseID string) (SafeguardingReporter, error)
+	GetSafeguardingRetentionRecordByCaseID(ctx context.Context, caseID string) (SafeguardingRetentionRecord, error)
+	// Safeguarding Settings
+	GetSafeguardingSetting(ctx context.Context, key string) (SafeguardingSetting, error)
 	GetStateByCode(ctx context.Context, code string) (State, error)
 	GetStateByID(ctx context.Context, id string) (State, error)
 	GetStockBalance(ctx context.Context, arg GetStockBalanceParams) (StockBalance, error)
@@ -319,6 +354,7 @@ type Querier interface {
 	IncrementVerificationAttempt(ctx context.Context, id string) (ContactVerification, error)
 	InvalidatePendingEmailVerificationTokens(ctx context.Context, userID string) error
 	ListActiveAppointmentsByUser(ctx context.Context, userID string) ([]Appointment, error)
+	ListActiveSafeguardingOfficers(ctx context.Context) ([]ListActiveSafeguardingOfficersRow, error)
 	ListAdminCommunityProjects(ctx context.Context, arg ListAdminCommunityProjectsParams) ([]ListAdminCommunityProjectsRow, error)
 	ListAdminCommunityRequests(ctx context.Context, arg ListAdminCommunityRequestsParams) ([]ListAdminCommunityRequestsRow, error)
 	ListAdminEventMedia(ctx context.Context, arg ListAdminEventMediaParams) ([]ListAdminEventMediaRow, error)
@@ -326,11 +362,13 @@ type Querier interface {
 	ListAllEvents(ctx context.Context) ([]ListAllEventsRow, error)
 	ListAllMarketplaceDisputes(ctx context.Context, dollar_1 string) ([]ListAllMarketplaceDisputesRow, error)
 	ListAllMarketplaceOrders(ctx context.Context, arg ListAllMarketplaceOrdersParams) ([]ListAllMarketplaceOrdersRow, error)
+	ListAllMessagesByCaseID(ctx context.Context, caseID string) ([]ListAllMessagesByCaseIDRow, error)
 	ListAllStockBalances(ctx context.Context, arg ListAllStockBalancesParams) ([]ListAllStockBalancesRow, error)
 	ListAllUpdatesByProjectID(ctx context.Context, projectID string) ([]ListAllUpdatesByProjectIDRow, error)
 	ListAllocationsFiltered(ctx context.Context, arg ListAllocationsFilteredParams) ([]ListAllocationsFilteredRow, error)
 	ListAppointmentHistory(ctx context.Context, appointmentID string) ([]ListAppointmentHistoryRow, error)
 	ListAppointments(ctx context.Context) ([]ListAppointmentsRow, error)
+	ListAssignmentsByCaseID(ctx context.Context, caseID string) ([]ListAssignmentsByCaseIDRow, error)
 	ListAuditEvents(ctx context.Context, arg ListAuditEventsParams) ([]AuditEvent, error)
 	ListBadgeAwardsByUser(ctx context.Context, userID string) ([]ListBadgeAwardsByUserRow, error)
 	ListBadges(ctx context.Context) ([]Badge, error)
@@ -401,6 +439,13 @@ type Querier interface {
 	ListReconciliationPeriodsByAccount(ctx context.Context, arg ListReconciliationPeriodsByAccountParams) ([]ListReconciliationPeriodsByAccountRow, error)
 	ListRegisteredUsersForEvent(ctx context.Context, eventID string) ([]ListRegisteredUsersForEventRow, error)
 	ListRegistrationsByUser(ctx context.Context, userID string) ([]ListRegistrationsByUserRow, error)
+	ListReporterVisibleMessagesByCaseID(ctx context.Context, caseID string) ([]ListReporterVisibleMessagesByCaseIDRow, error)
+	ListSafeguardingAccessLogs(ctx context.Context, arg ListSafeguardingAccessLogsParams) ([]ListSafeguardingAccessLogsRow, error)
+	ListSafeguardingCaseActionsByCaseID(ctx context.Context, caseID string) ([]ListSafeguardingCaseActionsByCaseIDRow, error)
+	ListSafeguardingCases(ctx context.Context, arg ListSafeguardingCasesParams) ([]ListSafeguardingCasesRow, error)
+	ListSafeguardingConflictsByCaseID(ctx context.Context, caseID string) ([]ListSafeguardingConflictsByCaseIDRow, error)
+	ListSafeguardingEvidenceByCaseID(ctx context.Context, caseID string) ([]SafeguardingEvidence, error)
+	ListSafeguardingSettings(ctx context.Context) ([]SafeguardingSetting, error)
 	ListStatementItemsByPeriod(ctx context.Context, arg ListStatementItemsByPeriodParams) ([]ListStatementItemsByPeriodRow, error)
 	ListStates(ctx context.Context) ([]State, error)
 	ListStatesByZone(ctx context.Context, zoneID string) ([]State, error)
@@ -435,6 +480,7 @@ type Querier interface {
 	ResolveMarketplaceDispute(ctx context.Context, arg ResolveMarketplaceDisputeParams) (MarketplaceDispute, error)
 	ResolveMediaReport(ctx context.Context, arg ResolveMediaReportParams) (MediaReport, error)
 	ResolveMediaTakedownRequest(ctx context.Context, arg ResolveMediaTakedownRequestParams) (MediaTakedownRequest, error)
+	ResolveSafeguardingCase(ctx context.Context, arg ResolveSafeguardingCaseParams) (SafeguardingCase, error)
 	ResolveTransferDiscrepancy(ctx context.Context, arg ResolveTransferDiscrepancyParams) (TransferDiscrepancy, error)
 	ResubmitCommunityRequest(ctx context.Context, arg ResubmitCommunityRequestParams) (CommunityRequest, error)
 	RetryOutboxItem(ctx context.Context, id string) (NotificationOutbox, error)
@@ -491,6 +537,9 @@ type Querier interface {
 	UpdateNotificationTemplate(ctx context.Context, arg UpdateNotificationTemplateParams) (NotificationTemplate, error)
 	UpdateProjectMilestone(ctx context.Context, arg UpdateProjectMilestoneParams) (CommunityProjectMilestone, error)
 	UpdateReconciliationPeriodStatus(ctx context.Context, arg UpdateReconciliationPeriodStatusParams) (FinancialReconciliationPeriod, error)
+	UpdateSafeguardingCaseStatus(ctx context.Context, arg UpdateSafeguardingCaseStatusParams) (SafeguardingCase, error)
+	UpdateSafeguardingCaseTriage(ctx context.Context, arg UpdateSafeguardingCaseTriageParams) (SafeguardingCase, error)
+	UpdateSafeguardingLegalHold(ctx context.Context, arg UpdateSafeguardingLegalHoldParams) (SafeguardingRetentionRecord, error)
 	UpdateState(ctx context.Context, arg UpdateStateParams) (State, error)
 	UpdateStatementItemMatch(ctx context.Context, arg UpdateStatementItemMatchParams) (FinancialStatementItem, error)
 	UpdateStockReservationStatus(ctx context.Context, arg UpdateStockReservationStatusParams) (StockReservation, error)
@@ -503,6 +552,8 @@ type Querier interface {
 	// -------------------------------------------------------------
 	UpsertCandidateProfile(ctx context.Context, arg UpsertCandidateProfileParams) (CareersCandidateProfile, error)
 	UpsertNotificationPreferences(ctx context.Context, arg UpsertNotificationPreferencesParams) (NotificationPreference, error)
+	UpsertSafeguardingOfficer(ctx context.Context, arg UpsertSafeguardingOfficerParams) (SafeguardingOfficer, error)
+	UpsertSafeguardingSetting(ctx context.Context, arg UpsertSafeguardingSettingParams) (SafeguardingSetting, error)
 	UpsertStockBalance(ctx context.Context, arg UpsertStockBalanceParams) (StockBalance, error)
 	UpsertVerificationRateLimit(ctx context.Context, arg UpsertVerificationRateLimitParams) (EmailVerificationRateLimit, error)
 	VerifyCommunityProjectCompletion(ctx context.Context, arg VerifyCommunityProjectCompletionParams) (CommunityProject, error)

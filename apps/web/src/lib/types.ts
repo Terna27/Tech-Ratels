@@ -1791,6 +1791,175 @@ export interface ProviderHealthResponse {
   lagos_time: string;
 }
 
+// -------------------------------------------------------------
+// Ratels Safeguarding & Confidential Reporting (Phase C)
+// -------------------------------------------------------------
+
+export interface SafeguardingPublicConfig {
+  reporting_enabled?: boolean;
+  is_enabled?: boolean;
+  emergency_banner?: string;
+  emergency_guidance_text?: string;
+  max_evidence_bytes?: number;
+  allowed_mime_types?: string[];
+}
+
+export interface SafeguardingSubmissionResponse {
+  case_id?: string;
+  public_reference: string;
+  reference_number?: string;
+  follow_up_secret: string;
+  status: string;
+  category?: string;
+  risk_level?: string;
+  created_at: string;
+  advisory_notice?: string;
+  instructions?: string;
+}
+
+export interface SafeguardingMessageItem {
+  id: string;
+  author_type?: "reporter" | "officer" | "system";
+  sender_role?: "reporter" | "safeguarding_officer";
+  content?: string;
+  message?: string;
+  author_name?: string;
+  created_at: string;
+}
+
+export interface SafeguardingStatusResponse {
+  public_reference: string;
+  reference_number?: string;
+  status: string;
+  category: string;
+  risk_level?: string;
+  urgency?: string;
+  is_minor_involved?: boolean;
+  is_immediate_danger?: boolean;
+  created_at?: string;
+  submitted_at?: string;
+  last_status_update_at?: string;
+  resolution_summary?: string;
+  messages: SafeguardingMessageItem[];
+}
+
+export interface SafeguardingCaseListItem {
+  id: string;
+  public_reference: string;
+  reference_number?: string;
+  category: string;
+  risk_level?: string;
+  urgency?: string;
+  status: string;
+  is_anonymous: boolean;
+  is_minor_involved: boolean;
+  is_escalated: boolean;
+  incident_date?: string;
+  state_name?: string;
+  lga_name?: string;
+  created_at: string;
+  triage_notes?: string;
+}
+
+export interface SafeguardingEvidenceItem {
+  id: string;
+  file_name?: string;
+  original_filename?: string;
+  mime_type: string;
+  file_size_bytes: number;
+  sha256_hash: string;
+  uploaded_at?: string;
+  created_at?: string;
+}
+
+export interface SafeguardingAssignmentItem {
+  id: string;
+  officer_id?: string;
+  officer_user_id?: string;
+  officer_name: string;
+  assigned_role?: string;
+  status?: string;
+  assigned_at?: string;
+  created_at?: string;
+}
+
+export interface SafeguardingActionItem {
+  id: string;
+  action_type: string;
+  actor_user_id?: string;
+  actor_name?: string;
+  summary?: string;
+  reason?: string;
+  created_at: string;
+}
+
+export interface SafeguardingReporterInfo {
+  is_anonymous?: boolean;
+  name?: string;
+  email?: string;
+  phone?: string;
+  relationship?: string;
+  contact_preference?: string;
+}
+
+export interface SafeguardingCaseDetails {
+  id: string;
+  public_reference: string;
+  reference_number?: string;
+  category: string;
+  risk_level?: string;
+  urgency?: string;
+  status: string;
+  is_anonymous: boolean;
+  is_minor_involved: boolean;
+  is_escalated: boolean;
+  escalation_reason?: string;
+  escalated_at?: string;
+  incident_date?: string;
+  state_id?: string;
+  lga_id?: string;
+  state_name?: string;
+  lga_name?: string;
+  decrypted_description?: string;
+  narrative_decrypted?: string;
+  reporter?: SafeguardingReporterInfo;
+  reporter_info?: SafeguardingReporterInfo;
+  triage_notes?: string;
+  resolution_summary?: string;
+  resolved_at?: string;
+  closed_at?: string;
+  legal_hold?: boolean;
+  retention_scheduled_for?: string;
+  created_at: string;
+  updated_at: string;
+  evidence: SafeguardingEvidenceItem[];
+  assignments: SafeguardingAssignmentItem[];
+  messages: SafeguardingMessageItem[];
+  actions: SafeguardingActionItem[];
+}
+
+export interface SafeguardingAccessLogItem {
+  id: string;
+  case_id?: string;
+  actor_user_id: string;
+  actor_name: string;
+  access_type: string;
+  ip_address?: string;
+  access_reason: string;
+  created_at: string;
+}
+
+export interface SafeguardingOfficer {
+  id: string;
+  user_id: string;
+  officer_role: string;
+  display_name: string;
+  email: string;
+  is_active: boolean;
+  appointed_at: string;
+}
+
+
 
 
 

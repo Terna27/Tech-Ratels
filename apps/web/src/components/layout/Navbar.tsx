@@ -16,6 +16,7 @@ import {
   LayoutDashboard,
   CheckCircle2,
   ShoppingCart,
+  ShieldAlert,
 } from "lucide-react";
 import { Badge } from "@/components/ui/Badge";
 import { useCart } from "@/lib/cart-context";
@@ -87,6 +88,16 @@ export function Navbar() {
 
           {/* Right Action Buttons */}
           <div className="hidden md:flex items-center gap-3">
+            {/* Confidential Incident Report Link */}
+            <Link
+              href="/report-incident"
+              className="inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-xs font-bold text-amber-900 bg-amber-50 hover:bg-amber-100 border border-amber-200 transition"
+              title="Report Incident (Confidential)"
+            >
+              <ShieldAlert className="w-4 h-4 text-amber-700" />
+              <span className="hidden lg:inline">Report Incident</span>
+            </Link>
+
             {/* Shopping Cart Button */}
             <Link
               href="/marketplace/cart"
@@ -197,6 +208,13 @@ export function Navbar() {
                 {link.label}
               </Link>
             ))}
+            <Link
+              href="/report-incident"
+              onClick={() => setMobileMenuOpen(false)}
+              className="block px-3 py-2.5 rounded-lg text-base font-bold text-amber-900 bg-amber-50 hover:bg-amber-100 border border-amber-200 mt-2"
+            >
+              Report Incident (Confidential)
+            </Link>
           </nav>
 
           <div className="pt-3 border-t border-gray-100 space-y-2">

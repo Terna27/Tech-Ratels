@@ -26,6 +26,7 @@ import {
   FolderKanban,
   Camera,
   Send,
+  ShieldAlert,
 } from "lucide-react";
 import { useAuth } from "@/lib/auth-context";
 import { apiRequest } from "@/lib/api";
@@ -432,6 +433,24 @@ export default function AdminOverviewPage() {
             </h3>
             <p className="text-xs text-gray-600 leading-relaxed">
               Monitor the transactional outbox queue, Brevo email & Termii SMS delivery logs, failed message retries, and cleanup reminder schedules.
+            </p>
+          </Link>
+
+          <Link
+            href="/admin/safeguarding"
+            className="p-5 bg-white rounded-xl border border-amber-300 hover:border-amber-500 shadow-sm space-y-2 group transition ring-1 ring-amber-200"
+          >
+            <div className="w-9 h-9 rounded-lg bg-amber-50 text-amber-800 flex items-center justify-center font-bold">
+              <ShieldAlert className="w-5 h-5 text-amber-700" />
+            </div>
+            <div className="flex items-center gap-2">
+              <h3 className="font-bold text-gray-900 text-sm group-hover:text-amber-800 transition">
+                Confidential Safeguarding & Cases
+              </h3>
+              <Badge variant="warning" size="sm">RESTRICTED</Badge>
+            </div>
+            <p className="text-xs text-gray-600 leading-relaxed">
+              Triage confidential member and public incident reports, manage encrypted case narratives, assign investigating officers, and enforce conflict recusal.
             </p>
           </Link>
         </div>

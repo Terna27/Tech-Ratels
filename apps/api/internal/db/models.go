@@ -1187,6 +1187,147 @@ type ParticipationClaim struct {
 	Version          int32              `json:"version"`
 }
 
+type SafeguardingAccessLog struct {
+	ID            string             `json:"id"`
+	CaseID        string             `json:"case_id"`
+	ActorID       string             `json:"actor_id"`
+	AccessType    string             `json:"access_type"`
+	Justification pgtype.Text        `json:"justification"`
+	IpAddress     pgtype.Text        `json:"ip_address"`
+	CreatedAt     pgtype.Timestamptz `json:"created_at"`
+}
+
+type SafeguardingAssignment struct {
+	ID               string             `json:"id"`
+	CaseID           string             `json:"case_id"`
+	OfficerID        string             `json:"officer_id"`
+	AssignedBy       string             `json:"assigned_by"`
+	Status           string             `json:"status"`
+	AssignmentReason pgtype.Text        `json:"assignment_reason"`
+	CreatedAt        pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt        pgtype.Timestamptz `json:"updated_at"`
+}
+
+type SafeguardingCase struct {
+	ID                   string             `json:"id"`
+	PublicReference      string             `json:"public_reference"`
+	Category             string             `json:"category"`
+	EncryptedDescription string             `json:"encrypted_description"`
+	IncidentDate         pgtype.Timestamptz `json:"incident_date"`
+	StateID              pgtype.Text        `json:"state_id"`
+	LgaID                pgtype.Text        `json:"lga_id"`
+	RelatedActivity      pgtype.Text        `json:"related_activity"`
+	PersonInvolved       pgtype.Text        `json:"person_involved"`
+	IsImmediateDanger    bool               `json:"is_immediate_danger"`
+	IsMinorInvolved      bool               `json:"is_minor_involved"`
+	RiskLevel            string             `json:"risk_level"`
+	Status               string             `json:"status"`
+	IsEscalated          bool               `json:"is_escalated"`
+	EscalatedTo          pgtype.Text        `json:"escalated_to"`
+	EscalationReason     pgtype.Text        `json:"escalation_reason"`
+	ResolutionSummary    pgtype.Text        `json:"resolution_summary"`
+	ClosedAt             pgtype.Timestamptz `json:"closed_at"`
+	CreatedAt            pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt            pgtype.Timestamptz `json:"updated_at"`
+}
+
+type SafeguardingCaseAction struct {
+	ID             string             `json:"id"`
+	CaseID         string             `json:"case_id"`
+	ActorID        pgtype.Text        `json:"actor_id"`
+	ActionType     string             `json:"action_type"`
+	PreviousStatus pgtype.Text        `json:"previous_status"`
+	NewStatus      pgtype.Text        `json:"new_status"`
+	Reason         pgtype.Text        `json:"reason"`
+	CreatedAt      pgtype.Timestamptz `json:"created_at"`
+}
+
+type SafeguardingConflict struct {
+	ID           string             `json:"id"`
+	CaseID       string             `json:"case_id"`
+	OfficerID    string             `json:"officer_id"`
+	ConflictType string             `json:"conflict_type"`
+	DeclaredBy   string             `json:"declared_by"`
+	Reason       string             `json:"reason"`
+	CreatedAt    pgtype.Timestamptz `json:"created_at"`
+}
+
+type SafeguardingEvidence struct {
+	ID                      string             `json:"id"`
+	CaseID                  string             `json:"case_id"`
+	UploaderType            string             `json:"uploader_type"`
+	UploaderID              pgtype.Text        `json:"uploader_id"`
+	StorageKey              string             `json:"storage_key"`
+	FileName                string             `json:"file_name"`
+	MimeType                string             `json:"mime_type"`
+	FileSizeBytes           int64              `json:"file_size_bytes"`
+	Sha256Hash              string             `json:"sha256_hash"`
+	IsQuarantined           bool               `json:"is_quarantined"`
+	RetentionClassification string             `json:"retention_classification"`
+	CreatedAt               pgtype.Timestamptz `json:"created_at"`
+}
+
+type SafeguardingMessage struct {
+	ID         string             `json:"id"`
+	CaseID     string             `json:"case_id"`
+	AuthorType string             `json:"author_type"`
+	AuthorID   pgtype.Text        `json:"author_id"`
+	Visibility string             `json:"visibility"`
+	Content    string             `json:"content"`
+	CreatedAt  pgtype.Timestamptz `json:"created_at"`
+}
+
+type SafeguardingOfficer struct {
+	ID             string             `json:"id"`
+	UserID         string             `json:"user_id"`
+	RoleTitle      string             `json:"role_title"`
+	IsLead         bool               `json:"is_lead"`
+	CanTriage      bool               `json:"can_triage"`
+	CanAssign      bool               `json:"can_assign"`
+	CanInvestigate bool               `json:"can_investigate"`
+	CanEscalate    bool               `json:"can_escalate"`
+	CanClose       bool               `json:"can_close"`
+	CanViewAudit   bool               `json:"can_view_audit"`
+	Status         string             `json:"status"`
+	AppointedBy    pgtype.Text        `json:"appointed_by"`
+	CreatedAt      pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt      pgtype.Timestamptz `json:"updated_at"`
+}
+
+type SafeguardingReporter struct {
+	ID                 string             `json:"id"`
+	CaseID             string             `json:"case_id"`
+	IsAnonymous        bool               `json:"is_anonymous"`
+	ReporterUserID     pgtype.Text        `json:"reporter_user_id"`
+	EncryptedName      pgtype.Text        `json:"encrypted_name"`
+	EncryptedEmail     pgtype.Text        `json:"encrypted_email"`
+	EncryptedPhone     pgtype.Text        `json:"encrypted_phone"`
+	ContactPreference  string             `json:"contact_preference"`
+	FollowUpSecretHash string             `json:"follow_up_secret_hash"`
+	CreatedAt          pgtype.Timestamptz `json:"created_at"`
+}
+
+type SafeguardingRetentionRecord struct {
+	ID                   string             `json:"id"`
+	CaseID               string             `json:"case_id"`
+	RetentionCategory    string             `json:"retention_category"`
+	ReviewDate           pgtype.Timestamptz `json:"review_date"`
+	IsLegalHold          bool               `json:"is_legal_hold"`
+	LegalHoldReason      pgtype.Text        `json:"legal_hold_reason"`
+	DisposalAuthorizedBy pgtype.Text        `json:"disposal_authorized_by"`
+	DisposedAt           pgtype.Timestamptz `json:"disposed_at"`
+	CreatedAt            pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt            pgtype.Timestamptz `json:"updated_at"`
+}
+
+type SafeguardingSetting struct {
+	Key         string             `json:"key"`
+	Value       string             `json:"value"`
+	Description pgtype.Text        `json:"description"`
+	UpdatedBy   pgtype.Text        `json:"updated_by"`
+	UpdatedAt   pgtype.Timestamptz `json:"updated_at"`
+}
+
 type State struct {
 	ID        string             `json:"id"`
 	ZoneID    string             `json:"zone_id"`

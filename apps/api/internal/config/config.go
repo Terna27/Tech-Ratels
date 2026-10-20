@@ -42,6 +42,9 @@ type Config struct {
 	TermiiAPIKey              string
 	TermiiSenderID            string
 	EnableOutboxWorker        bool
+	SafeguardingReportingEnabled bool
+	R2SafeguardingBucketName     string
+	SafeguardingEncryptionKey    string
 }
 
 func Load() *Config {
@@ -201,6 +204,22 @@ func Load() *Config {
 		enableWorker = false
 	}
 
+	safeguardingEnabled := false
+	if isProduction {
+		if os.Getenv("SAFEGUARDING_REPORTING_ENABLED") == "true" {
+			safeguardingEnabled = true
+		}
+	} else {
+		// Enabled by default in dev/test unless explicitly disabled
+		safeguardingEnabled = true
+		if os.Getenv("SAFEGUARDING_REPORTING_ENABLED") == "false" {
+			safeguardingEnabled = false
+		}
+	}
+
+	r2SafeguardingBucket := strings.TrimSpace(os.Getenv("R2_SAFEGUARDING_BUCKET_NAME"))
+	safeguardingEncKey := strings.TrimSpace(os.Getenv("SAFEGUARDING_ENCRYPTION_KEY"))
+
 	return &Config{
 		DatabaseURL:               dbURL,
 		Port:                      port,
@@ -229,6 +248,9 @@ func Load() *Config {
 		TermiiAPIKey:              termiiAPIKey,
 		TermiiSenderID:            termiiSenderID,
 		EnableOutboxWorker:        enableWorker,
+		SafeguardingReportingEnabled: safeguardingEnabled,
+		R2SafeguardingBucketName:     r2SafeguardingBucket,
+		SafeguardingEncryptionKey:    safeguardingEncKey,
 	}
 }
 
@@ -316,6 +338,16 @@ func (c *Config) Validate() error {
 			}
 			if c.R2AccountID == "" && c.R2Endpoint == "" {
 				return errors.New("R2_ACCOUNT_ID (or R2_ENDPOINT) is required in production when Cloudflare R2 is configured")
+			}
+		}
+
+		// Safeguarding: in production, if enabled, require encryption key and verify length >= 32
+		if c.SafeguardingReportingEnabled {
+			if strings.TrimSpace(c.SafeguardingEncryptionKey) == "" {
+				return errors.New("SAFEGUARDING_ENCRYPTION_KEY is required in production when SAFEGUARDING_REPORTING_ENABLED is true")
+			}
+			if len(c.SafeguardingEncryptionKey) < 32 {
+				return fmt.Errorf("SAFEGUARDING_ENCRYPTION_KEY is too short (%d bytes); minimum 32 bytes required for AES-256", len(c.SafeguardingEncryptionKey))
 			}
 		}
 	}

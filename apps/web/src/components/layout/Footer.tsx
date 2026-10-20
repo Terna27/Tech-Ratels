@@ -64,6 +64,16 @@ export function Footer() {
                 </Link>
               </li>
               <li>
+                <Link href="/report-incident" className="text-amber-400 hover:text-amber-300 font-semibold transition flex items-center gap-1">
+                  Report Incident (Confidential)
+                </Link>
+              </li>
+              <li>
+                <Link href="/report-incident/status" className="hover:text-emerald-400 transition">
+                  Track Incident Status
+                </Link>
+              </li>
+              <li>
                 <Link href="/register" className="hover:text-emerald-400 transition">
                   Join as Member
                 </Link>

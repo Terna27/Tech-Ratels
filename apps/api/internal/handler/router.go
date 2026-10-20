@@ -30,6 +30,7 @@ type RouterParams struct {
 	CommunityProjectHandler *CommunityProjectHandler
 	GalleryHandler          *GalleryHandler
 	NotificationHandler     *NotificationHandler
+	SafeguardingHandler     *SafeguardingHandler
 }
 
 func NewRouter(p RouterParams) http.Handler {
@@ -432,6 +433,16 @@ func NewRouter(p RouterParams) http.Handler {
 			mePrefs.Put("/", p.NotificationHandler.UpdatePreferences)
 		})
 
+		// Safeguarding & Confidential Incident Reporting (Public)
+		if p.SafeguardingHandler != nil {
+			api.Route("/safeguarding", func(sg chi.Router) {
+				sg.Get("/public-config", p.SafeguardingHandler.GetPublicConfig)
+				sg.Post("/reports", p.SafeguardingHandler.SubmitReport)
+				sg.Post("/reports/status", p.SafeguardingHandler.GetReportStatus)
+				sg.Post("/reports/messages", p.SafeguardingHandler.PostReporterMessage)
+			})
+		}
+
 		// Admin Workspace
 		api.Route("/admin", func(adm chi.Router) {
 			adm.With(RequireRole("national_admin", "state_coordinator", "zonal_coordinator", "lga_representative")).Get("/overview", p.AdminHandler.GetOverview)
@@ -505,6 +516,29 @@ func NewRouter(p RouterParams) http.Handler {
 				admComms.Get("/schedules", p.NotificationHandler.ListSchedules)
 				admComms.Get("/provider-health", p.NotificationHandler.GetProviderHealth)
 			})
+
+			// Confidential Safeguarding Administration
+			if p.SafeguardingHandler != nil {
+				adm.Route("/safeguarding", func(admSg chi.Router) {
+					admSg.Use(RequireAuth)
+					admSg.Get("/cases", p.SafeguardingHandler.ListCases)
+					admSg.Get("/cases/{id}", p.SafeguardingHandler.GetCaseDetails)
+					admSg.Post("/cases/{id}/triage", p.SafeguardingHandler.UpdateTriage)
+					admSg.Post("/cases/{id}/assign", p.SafeguardingHandler.AssignOfficer)
+					admSg.Post("/cases/{id}/conflict", p.SafeguardingHandler.DeclareConflict)
+					admSg.Post("/cases/{id}/escalate", p.SafeguardingHandler.EscalateCase)
+					admSg.Post("/cases/{id}/resolve", p.SafeguardingHandler.ResolveCase)
+					admSg.Post("/cases/{id}/close", p.SafeguardingHandler.CloseCase)
+					admSg.Post("/cases/{id}/notes", p.SafeguardingHandler.AddInternalNote)
+					admSg.Post("/cases/{id}/reporter-message", p.SafeguardingHandler.SendReporterUpdate)
+					admSg.Get("/cases/{id}/evidence/{evidence_id}/download", p.SafeguardingHandler.GetEvidenceDownloadURL)
+					admSg.Get("/evidence/sandbox-download", p.SafeguardingHandler.SandboxDownloadEvidence)
+					admSg.Post("/cases/{id}/legal-hold", p.SafeguardingHandler.SetLegalHold)
+					admSg.Get("/access-logs", p.SafeguardingHandler.ListAccessLogs)
+					admSg.Get("/officers", p.SafeguardingHandler.ListActiveOfficers)
+					admSg.Post("/officers", p.SafeguardingHandler.AppointOfficer)
+				})
+			}
 		})
 	})
 

@@ -11,6 +11,7 @@ import (
 	"ratels-api/internal/migrator"
 	"ratels-api/internal/payment"
 	"ratels-api/internal/repository"
+	"ratels-api/internal/security"
 	"ratels-api/internal/service"
 	"ratels-api/internal/storage"
 )
@@ -36,6 +37,7 @@ type TestEnv struct {
 	CommunityProjectService *service.CommunityProjectService
 	GalleryService          *service.GalleryService
 	NotificationService     *service.NotificationService
+	SafeguardingService     *service.SafeguardingService
 	EmailSender             *delivery.DevSafeEmailSender
 	SMSSender               *delivery.DevSafeSMSSender
 	MockStorage             storage.StorageService
@@ -80,6 +82,9 @@ func setupTestEnv(t *testing.T) *TestEnv {
 	devEmail := delivery.NewDevSafeEmailSender()
 	devSMS := delivery.NewDevSafeSMSSender()
 	notifSvc := service.NewNotificationService(repo, auditSvc, devEmail, devSMS, cfg.FrontendBaseURL)
+	cipher, _ := security.NewSafeguardingCipher("dev-safeguarding-key-32bytes-secure-for-tests!", false)
+	safeguardStorage := storage.NewDevSafeguardingStorageService()
+	safeguardSvc := service.NewSafeguardingService(repo, cipher, safeguardStorage, notifSvc, cfg)
 
 	return &TestEnv{
 		Pool:                    pool,
@@ -102,6 +107,7 @@ func setupTestEnv(t *testing.T) *TestEnv {
 		CommunityProjectService: communitySvc,
 		GalleryService:          gallerySvc,
 		NotificationService:     notifSvc,
+		SafeguardingService:     safeguardSvc,
 		EmailSender:             devEmail,
 		SMSSender:               devSMS,
 		MockStorage:             mockStorage,

@@ -219,6 +219,15 @@ func main() {
 	galleryH := handler.NewGalleryHandler(galleryService)
 	notifH := handler.NewNotificationHandler(notifService)
 
+	// Safeguarding & Confidential Incident Reporting
+	safeguardCipher, err := security.NewSafeguardingCipher(cfg.SafeguardingEncryptionKey, isProduction)
+	if err != nil {
+		log.Fatalf("Failed to initialize safeguarding cipher: %v\n", err)
+	}
+	safeguardStorage := storage.NewDevSafeguardingStorageService()
+	safeguardService := service.NewSafeguardingService(repo, safeguardCipher, safeguardStorage, notifService, cfg)
+	safeguardH := handler.NewSafeguardingHandler(safeguardService, safeguardStorage, cfg)
+
 	router := handler.NewRouter(handler.RouterParams{
 		Config:                  cfg,
 		Repo:                    repo,
@@ -239,6 +248,7 @@ func main() {
 		CommunityProjectHandler: communityProjectH,
 		GalleryHandler:          galleryH,
 		NotificationHandler:     notifH,
+		SafeguardingHandler:     safeguardH,
 	})
 
 	srv := &http.Server{
