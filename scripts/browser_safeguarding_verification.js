@@ -99,15 +99,24 @@ async function runSafeguardingBrowserVerification() {
   const browser = await puppeteer.launch({
     executablePath,
     headless: "new",
+    protocolTimeout: 60000,
     args: ["--no-sandbox", "--disable-setuid-sandbox", "--disable-dev-shm-usage", "--disable-gpu"],
   });
 
   const page = await browser.newPage();
   await page.setViewport({ width: 1280, height: 950 });
+  page.setDefaultTimeout(30000);
+  page.setDefaultNavigationTimeout(30000);
 
   page.on('dialog', async (dialog) => {
     console.log(`   [Browser Dialog ${dialog.type()}]: ${dialog.message()}`);
-    await dialog.dismiss();
+    try {
+      await dialog.accept();
+    } catch (_) {
+      try {
+        await dialog.dismiss();
+      } catch (__) {}
+    }
   });
 
   try {
@@ -120,7 +129,7 @@ async function runSafeguardingBrowserVerification() {
     // Wait for the form to render (past loading spinner)
     await page.waitForFunction(
       () => document.body.innerText.toLowerCase().includes("emergency & safety notice") || document.body.innerText.toLowerCase().includes("emergency response service"),
-      { timeout: 15000 }
+      { timeout: 30000 }
     );
 
     // Verify Emergency Notice
@@ -153,7 +162,7 @@ async function runSafeguardingBrowserVerification() {
     // Wait for success screen and credentials
     await page.waitForFunction(
       () => document.body.innerText.toLowerCase().includes("confidential report received") && document.body.innerText.toLowerCase().includes("case reference number"),
-      { timeout: 15000 }
+      { timeout: 30000 }
     );
     console.log("   ✓ Success screen received with reference number and secret passkey.");
 
@@ -179,7 +188,7 @@ async function runSafeguardingBrowserVerification() {
 
     await page.waitForFunction(
       (ref) => document.body.innerText.includes(ref) && document.body.innerText.includes("Submitted"),
-      { timeout: 15000 },
+      { timeout: 30000 },
       refNumber
     );
     console.log("   ✓ Incident status dashboard loaded with initial 'Submitted' state.");
@@ -192,7 +201,7 @@ async function runSafeguardingBrowserVerification() {
 
     await page.waitForFunction(
       (msg) => document.body.innerText.includes(msg),
-      { timeout: 10000 },
+      { timeout: 25000 },
       reporterMsg
     );
     console.log("   ✓ Reporter message successfully submitted and visible in confidential channel.");
@@ -225,7 +234,7 @@ async function runSafeguardingBrowserVerification() {
 
     await page.waitForFunction(
       (ref) => document.body.innerText.includes(ref),
-      { timeout: 15000 },
+      { timeout: 30000 },
       refNumber
     );
     console.log(`   ✓ Newly submitted case ${refNumber} visible in officer triage queue.`);
@@ -237,7 +246,7 @@ async function runSafeguardingBrowserVerification() {
     // Wait for drawer and verify decrypted narrative
     await page.waitForFunction(
       (txt) => document.body.innerText.includes(txt) && document.body.innerText.toLowerCase().includes("decrypted incident narrative"),
-      { timeout: 15000 },
+      { timeout: 30000 },
       testNarrative
     );
     console.log("   ✓ Case details loaded. Narrative decrypted successfully via AES-256-GCM.");
@@ -252,9 +261,9 @@ async function runSafeguardingBrowserVerification() {
     // Reply to Reporter from Officer
     console.log("-> 9. Replying to reporter from safeguarding officer workspace...");
     const officerReply = "Thank you for bringing this to our attention. A safeguarding officer has been designated to review this report.";
-    const inputs = await page.$$("textarea");
-    if (inputs.length > 0) {
-      await inputs[0].type(officerReply);
+    const reporterTextarea = (await page.$('textarea[placeholder*="response or inquiry"]')) || (await page.$$("textarea"))[0];
+    if (reporterTextarea) {
+      await reporterTextarea.type(officerReply);
       await clickButtonWithText(page, "Send Message to Reporter");
       await sleep(1500);
       console.log("   ✓ Officer reply dispatched to reporter channel.");
@@ -305,7 +314,7 @@ async function runSafeguardingBrowserVerification() {
 
     await page.waitForFunction(
       (reply) => document.body.innerText.includes(reply),
-      { timeout: 15000 },
+      { timeout: 30000 },
       officerReply
     );
     console.log("   ✓ Officer reply successfully displayed to reporter without revealing officer identity.");

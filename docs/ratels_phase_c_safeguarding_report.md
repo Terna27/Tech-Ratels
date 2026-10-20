@@ -272,7 +272,37 @@ Execution Results:
 
 ---
 
-## 8. Compliance & Legal Governance
+## 8. Production Safeguarding Safeguards & Evidence Isolation
+
+### 1. Disabled-by-Default Production Safe State
+- In production (`ENVIRONMENT=production` or `APP_ENV=production`), safeguarding incident reporting remains **strictly disabled by default**.
+- The Go configuration parser (`apps/api/internal/config/config.go`) verifies:
+  ```go
+  safeguardingEnabled := false
+  if isProduction {
+      if os.Getenv("SAFEGUARDING_REPORTING_ENABLED") == "true" {
+          safeguardingEnabled = true
+      }
+  }
+  ```
+- If `SAFEGUARDING_REPORTING_ENABLED` is not explicitly set to `"true"`:
+  - All public reporting submissions return `503 Service Unavailable` with `ErrSafeguardingDisabled` ("safeguarding and confidential incident reporting is currently undergoing administrative readiness review and is unavailable").
+  - Automated unit test [`TestSafeguardingService_ReportingDisabledFailSafe`](file:///home/recoding/Tech-Ratels/apps/api/internal/service/safeguarding_test.go#L293-L309) cryptographically validates that reports are rejected and unrecorded when disabled.
+  - No real incident data can be captured prematurely.
+
+### 2. Confidential Evidence Zero Public Access Guarantee
+- Evidence uploaded during report submission is saved exclusively to the private safeguarding bucket (`R2_SAFEGUARDING_BUCKET_NAME`), fully isolated from public asset buckets.
+- Public direct access is strictly blocked:
+  - No public CDN or static URLs are ever generated for safeguarding evidence.
+  - Downloads are guarded by [`GetEvidenceDownloadURL`](file:///home/recoding/Tech-Ratels/apps/api/internal/handler/safeguarding_handler.go#L638-L661) and require:
+    1. Active authenticated session with verified safeguarding officer appointment or Super Admin authority.
+    2. Zero conflict of interest on the target case (conflict check passes).
+    3. Mandatory access justification logging in `safeguarding_access_logs`.
+  - Presigned S3/R2 URLs expire strictly within 15 minutes.
+
+---
+
+## 9. Compliance & Legal Governance
 
 - **Nigerian Data Protection Act (NDPA 2023) & NDPR:** All personally identifiable information (PII) is encrypted at rest using AES-256-GCM. Anonymity is guaranteed by design.
 - **Child Rights Act & Protection of Minors:** Dedicated priority flags (`is_minor_involved`) automatically tag high-risk incidents for specialized lead safeguarding intervention with extended retention periods.
