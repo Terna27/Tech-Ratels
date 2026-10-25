@@ -231,6 +231,8 @@ type Querier interface {
 	DeleteMarketplaceProduct(ctx context.Context, id string) error
 	DeleteNotification(ctx context.Context, arg DeleteNotificationParams) error
 	DeleteProjectMilestone(ctx context.Context, id string) error
+	DeleteReportExport(ctx context.Context, id string) error
+	DeleteReportExportsBySnapshot(ctx context.Context, snapshotID string) error
 	DeleteSafeguardingEvidence(ctx context.Context, id string) error
 	// Transactional Outbox
 	EnqueueOutbox(ctx context.Context, arg EnqueueOutboxParams) (NotificationOutbox, error)
@@ -346,6 +348,8 @@ type Querier interface {
 	GetPublishedReportByID(ctx context.Context, id string) (GetPublishedReportByIDRow, error)
 	GetReconciliationPeriodByID(ctx context.Context, id string) (GetReconciliationPeriodByIDRow, error)
 	GetReportDefinitionByType(ctx context.Context, reportType string) (PublicReportDefinition, error)
+	GetReportExportByID(ctx context.Context, id string) (PublicReportExport, error)
+	GetReportExportBySnapshotAndFormat(ctx context.Context, arg GetReportExportBySnapshotAndFormatParams) (PublicReportExport, error)
 	GetReportSnapshotByID(ctx context.Context, id string) (GetReportSnapshotByIDRow, error)
 	GetReportSnapshotByRef(ctx context.Context, publicReference string) (GetReportSnapshotByRefRow, error)
 	GetSafeguardingCaseByID(ctx context.Context, id string) (GetSafeguardingCaseByIDRow, error)
@@ -472,6 +476,7 @@ type Querier interface {
 	ListReportAudits(ctx context.Context, arg ListReportAuditsParams) ([]ListReportAuditsRow, error)
 	// Public Report Definitions
 	ListReportDefinitions(ctx context.Context) ([]PublicReportDefinition, error)
+	ListReportExportsBySnapshot(ctx context.Context, snapshotID string) ([]PublicReportExport, error)
 	ListReportSnapshotsAdmin(ctx context.Context, arg ListReportSnapshotsAdminParams) ([]ListReportSnapshotsAdminRow, error)
 	ListReporterVisibleMessagesByCaseID(ctx context.Context, caseID string) ([]ListReporterVisibleMessagesByCaseIDRow, error)
 	ListSafeguardingAccessLogs(ctx context.Context, arg ListSafeguardingAccessLogsParams) ([]ListSafeguardingAccessLogsRow, error)
@@ -571,6 +576,7 @@ type Querier interface {
 	UpdateNotificationTemplate(ctx context.Context, arg UpdateNotificationTemplateParams) (NotificationTemplate, error)
 	UpdateProjectMilestone(ctx context.Context, arg UpdateProjectMilestoneParams) (CommunityProjectMilestone, error)
 	UpdateReconciliationPeriodStatus(ctx context.Context, arg UpdateReconciliationPeriodStatusParams) (FinancialReconciliationPeriod, error)
+	UpdateReportExportStatus(ctx context.Context, arg UpdateReportExportStatusParams) (PublicReportExport, error)
 	UpdateReportSnapshotRevision(ctx context.Context, arg UpdateReportSnapshotRevisionParams) (PublicReportSnapshot, error)
 	UpdateReportSnapshotStatus(ctx context.Context, arg UpdateReportSnapshotStatusParams) (PublicReportSnapshot, error)
 	UpdateSafeguardingCaseStatus(ctx context.Context, arg UpdateSafeguardingCaseStatusParams) (SafeguardingCase, error)

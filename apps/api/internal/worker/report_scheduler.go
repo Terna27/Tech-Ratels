@@ -271,12 +271,7 @@ func (s *ReportScheduler) RunScheduledCycle(
 		actorType = "system"
 		actorIdentity = "system:" + triggerSource
 		auditUserPg = pgtype.Text{Valid: false}
-
-		adminUser, err := s.repo.Queries().GetFirstActiveAdminUser(ctx)
-		if err != nil {
-			return nil, fmt.Errorf("%w: %v", ErrNoAdminUserFound, err)
-		}
-		snapshotAdminUser = &adminUser
+		snapshotAdminUser = nil
 	} else {
 		actorType = "administrator"
 		actorIdentity = params.ActorUser.DisplayName

@@ -5,19 +5,21 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"github.com/jackc/pgx/v5"
 	"strings"
 	"time"
 
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
 	"ratels-api/internal/db"
 	"ratels-api/internal/repository"
 	"ratels-api/internal/security"
+	"ratels-api/internal/storage"
 )
 
 var (
 	ErrReportSnapshotNotFound      = errors.New("report snapshot not found")
 	ErrReportPublicationNotFound   = errors.New("report publication not found")
+	ErrReportExportNotFound        = errors.New("report export not found")
 	ErrInvalidReportState          = errors.New("invalid report state for requested transition")
 	ErrFinancialGovernanceRole     = errors.New("only Super Admin or authorized financial governance officer can approve financial disclosure reports")
 	ErrGeographicScopeMismatch     = errors.New("administrator lacks authority over the requested geographic scope")
@@ -27,6 +29,10 @@ var (
 	ErrInvalidGeographicFilter     = errors.New("invalid geographic filter parameters for scope")
 	ErrUnsupportedScopeForType     = errors.New("unsupported scope for report type")
 	ErrGeographicHierarchyMismatch = errors.New("geographic hierarchy mismatch")
+	ErrReportWithdrawn             = errors.New("report is withdrawn; export access is revoked")
+	ErrReportRejected              = errors.New("report is rejected; export generation is prohibited")
+	ErrUnauthorizedExportAccess    = errors.New("unauthorized export access; drafts require administrator authorization")
+	ErrUnsupportedExportFormat     = errors.New("unsupported export format; only 'pdf' and 'csv' are supported")
 )
 
 // Request / Response DTOs
@@ -217,7 +223,8 @@ type AdminSnapshotDetailDTO struct {
 	Status             string               `json:"status"`
 	PublicationVersion int                  `json:"publication_version"`
 	DataHash           string               `json:"data_hash"`
-	CreatedByUserID    string               `json:"created_by_user_id"`
+	CreatedByUserID    *string              `json:"created_by_user_id,omitempty"`
+	CreatedByType      string               `json:"created_by_type"`
 	CreatorName        string               `json:"creator_name"`
 	CorrectionNotes    *string              `json:"correction_notes,omitempty"`
 	AggregatedData     json.RawMessage      `json:"aggregated_data"`
@@ -225,6 +232,21 @@ type AdminSnapshotDetailDTO struct {
 	UpdatedAt          time.Time            `json:"updated_at"`
 	Approvals          []ReportApprovalItem `json:"approvals"`
 	AuditLogs          []ReportAuditItem    `json:"audit_logs"`
+}
+
+type AdminReportExportDTO struct {
+	ID                string    `json:"id"`
+	SnapshotID        string    `json:"snapshot_id"`
+	ExportFormat      string    `json:"export_format"` // "pdf" or "csv"
+	FileName          string    `json:"file_name"`
+	FileSizeBytes     int64     `json:"file_size_bytes"`
+	MimeType          string    `json:"mime_type"`
+	ChecksumAlgorithm string    `json:"checksum_algorithm"`
+	ContentHash       string    `json:"content_hash"`
+	StorageReference  *string   `json:"storage_reference,omitempty"`
+	ExportStatus      string    `json:"export_status"`
+	CreatedAt         time.Time `json:"created_at"`
+	UpdatedAt         time.Time `json:"updated_at"`
 }
 
 type ReportApprovalItem struct {
@@ -266,16 +288,30 @@ type PaginatedPublicationsResponse struct {
 
 // Service definition
 type ReportService struct {
-	repo         *repository.Repository
-	notifService *NotificationService
-	auditService *AuditService
+	repo          *repository.Repository
+	notifService  *NotificationService
+	auditService  *AuditService
+	exportStorage storage.ReportExportStorage
 }
 
-func NewReportService(repo *repository.Repository, notifService *NotificationService, auditService *AuditService) *ReportService {
+func NewReportService(repo *repository.Repository, notifService *NotificationService, auditService *AuditService, exportStorage ...storage.ReportExportStorage) *ReportService {
+	var st storage.ReportExportStorage
+	if len(exportStorage) > 0 && exportStorage[0] != nil {
+		st = exportStorage[0]
+	} else {
+		st = storage.NewDevSandboxReportExportStorage()
+	}
 	return &ReportService{
-		repo:         repo,
-		notifService: notifService,
-		auditService: auditService,
+		repo:          repo,
+		notifService:  notifService,
+		auditService:  auditService,
+		exportStorage: st,
+	}
+}
+
+func (s *ReportService) SetExportStorage(st storage.ReportExportStorage) {
+	if st != nil {
+		s.exportStorage = st
 	}
 }
 
@@ -836,6 +872,16 @@ func (s *ReportService) GenerateSnapshot(ctx context.Context, adminUser *db.User
 
 	qtx := s.repo.Queries().WithTx(tx)
 
+	var createdByUserID pgtype.Text
+	createdByType := "administrator"
+	if req.IsSystemActor || adminUser == nil {
+		createdByType = "system"
+		createdByUserID = pgtype.Text{Valid: false}
+	} else {
+		createdByType = "administrator"
+		createdByUserID = pgtype.Text{String: adminUser.ID, Valid: true}
+	}
+
 	row, err := qtx.CreateReportSnapshot(ctx, db.CreateReportSnapshotParams{
 		ID:                 snapshotID,
 		PublicReference:    publicRef,
@@ -854,7 +900,8 @@ func (s *ReportService) GenerateSnapshot(ctx context.Context, adminUser *db.User
 		DataHash:           dataHash,
 		PublicationVersion: 1,
 		CorrectionNotes:    pgtype.Text{Valid: false},
-		CreatedByUserID:    adminUser.ID,
+		CreatedByUserID:    createdByUserID,
+		CreatedByType:      createdByType,
 	})
 	if err != nil {
 		return nil, fmt.Errorf("failed creating report snapshot: %w", err)
@@ -862,7 +909,7 @@ func (s *ReportService) GenerateSnapshot(ctx context.Context, adminUser *db.User
 
 	triggerSource := req.TriggerSource
 	if triggerSource == "" {
-		if req.IsSystemActor {
+		if req.IsSystemActor || adminUser == nil {
 			triggerSource = "scheduled"
 		} else {
 			triggerSource = "admin_manual"
@@ -871,15 +918,17 @@ func (s *ReportService) GenerateSnapshot(ctx context.Context, adminUser *db.User
 
 	var auditUserPg pgtype.Text
 	actorType := "administrator"
-	actorIdentity := adminUser.DisplayName
-	if adminUser.Email.Valid && adminUser.Email.String != "" {
-		actorIdentity = adminUser.Email.String
-	}
-	if req.IsSystemActor {
+	actorIdentity := "system:" + triggerSource
+	if req.IsSystemActor || adminUser == nil {
 		actorType = "system"
 		actorIdentity = "system:" + triggerSource
 		auditUserPg = pgtype.Text{Valid: false}
 	} else {
+		actorType = "administrator"
+		actorIdentity = adminUser.DisplayName
+		if adminUser.Email.Valid && adminUser.Email.String != "" {
+			actorIdentity = adminUser.Email.String
+		}
 		auditUserPg = pgtype.Text{String: adminUser.ID, Valid: true}
 	}
 
@@ -970,7 +1019,7 @@ func (s *ReportService) ApproveSnapshot(ctx context.Context, reviewer *db.User, 
 	}
 
 	// 1. Separation of duties: Anti-Self-Approval
-	if snap.CreatedByUserID == reviewer.ID {
+	if snap.CreatedByUserID.Valid && snap.CreatedByUserID.String == reviewer.ID {
 		return nil, ErrSelfApprovalProhibited
 	}
 
@@ -1017,8 +1066,8 @@ func (s *ReportService) ApproveSnapshot(ctx context.Context, reviewer *db.User, 
 		IpAddress:         ipPg,
 	})
 
-	if s.notifService != nil {
-		s.notifService.OnReportApproved(ctx, s.repo.Queries(), snap.CreatedByUserID, snapshotID, snap.Title, snap.PublicReference)
+	if s.notifService != nil && snap.CreatedByUserID.Valid && snap.CreatedByUserID.String != "" {
+		s.notifService.OnReportApproved(ctx, s.repo.Queries(), snap.CreatedByUserID.String, snapshotID, snap.Title, snap.PublicReference)
 	}
 
 	return s.GetSnapshotDetailAdmin(ctx, updated.ID)
@@ -1070,8 +1119,8 @@ func (s *ReportService) RejectSnapshot(ctx context.Context, reviewer *db.User, s
 		IpAddress:         ipPg,
 	})
 
-	if s.notifService != nil {
-		s.notifService.OnReportRejected(ctx, s.repo.Queries(), snap.CreatedByUserID, snapshotID, snap.Title, snap.PublicReference, reason)
+	if s.notifService != nil && snap.CreatedByUserID.Valid && snap.CreatedByUserID.String != "" {
+		s.notifService.OnReportRejected(ctx, s.repo.Queries(), snap.CreatedByUserID.String, snapshotID, snap.Title, snap.PublicReference, reason)
 	}
 
 	return s.GetSnapshotDetailAdmin(ctx, updated.ID)
@@ -1131,8 +1180,8 @@ func (s *ReportService) PublishSnapshot(ctx context.Context, publisher *db.User,
 		IpAddress:         ipPg,
 	})
 
-	if s.notifService != nil {
-		s.notifService.OnReportPublished(ctx, s.repo.Queries(), snap.CreatedByUserID, snapshotID, snap.Title, snap.PublicReference)
+	if s.notifService != nil && snap.CreatedByUserID.Valid && snap.CreatedByUserID.String != "" {
+		s.notifService.OnReportPublished(ctx, s.repo.Queries(), snap.CreatedByUserID.String, snapshotID, snap.Title, snap.PublicReference)
 	}
 
 	return s.GetPublicPublicationByID(ctx, snapshotID)
@@ -1171,6 +1220,18 @@ func (s *ReportService) WithdrawPublication(ctx context.Context, user *db.User, 
 		return nil, fmt.Errorf("failed withdrawing report: %w", err)
 	}
 
+	// Invalidate and delete exports to prevent public access
+	exports, _ := s.repo.Queries().ListReportExportsBySnapshot(ctx, snapshotID)
+	for _, exp := range exports {
+		if exp.StorageReference.Valid && exp.StorageReference.String != "" {
+			_ = s.exportStorage.DeleteExport(ctx, exp.StorageReference.String)
+		}
+		_, _ = s.repo.Queries().UpdateReportExportStatus(ctx, db.UpdateReportExportStatusParams{
+			ID:           exp.ID,
+			ExportStatus: "withdrawn",
+		})
+	}
+
 	detailsJSON, _ := json.Marshal(map[string]interface{}{
 		"action": "withdrawn",
 		"reason": reason,
@@ -1188,8 +1249,8 @@ func (s *ReportService) WithdrawPublication(ctx context.Context, user *db.User, 
 		IpAddress:         ipPg,
 	})
 
-	if s.notifService != nil {
-		s.notifService.OnReportWithdrawn(ctx, s.repo.Queries(), snap.CreatedByUserID, snapshotID, snap.Title, snap.PublicReference, reason)
+	if s.notifService != nil && snap.CreatedByUserID.Valid && snap.CreatedByUserID.String != "" {
+		s.notifService.OnReportWithdrawn(ctx, s.repo.Queries(), snap.CreatedByUserID.String, snapshotID, snap.Title, snap.PublicReference, reason)
 	}
 
 	return s.GetSnapshotDetailAdmin(ctx, snapshotID)
@@ -1249,7 +1310,8 @@ func (s *ReportService) ReviseSnapshot(ctx context.Context, user *db.User, snaps
 		DataHash:           freshHash,
 		PublicationVersion: newVersion,
 		CorrectionNotes:    pgtype.Text{String: correctionNotes, Valid: true},
-		CreatedByUserID:    user.ID,
+		CreatedByUserID:    pgtype.Text{String: user.ID, Valid: true},
+		CreatedByType:      "administrator",
 	})
 	if err != nil {
 		return nil, fmt.Errorf("failed creating revised snapshot: %w", err)
@@ -1406,37 +1468,81 @@ func (s *ReportService) GetPublicPublicationByID(ctx context.Context, idOrRef st
 }
 
 // -----------------------------------------------------------------------
-// Exports: PDF and CSV Generation
+// Exports: PDF and CSV Generation with Private Cloudflare R2 Storage
 // -----------------------------------------------------------------------
 
-func (s *ReportService) ExportReportPDF(ctx context.Context, idOrRef string) ([]byte, string, error) {
-	pub, err := s.GetPublicPublicationByID(ctx, idOrRef)
-	if err != nil {
-		return nil, "", err
+func (s *ReportService) mapExportRowToDTO(r *db.PublicReportExport) *AdminReportExportDTO {
+	dto := &AdminReportExportDTO{
+		ID:                r.ID,
+		SnapshotID:        r.SnapshotID,
+		ExportFormat:      r.ExportFormat,
+		FileName:          r.FileName,
+		FileSizeBytes:     r.FileSizeBytes,
+		MimeType:          r.MimeType,
+		ChecksumAlgorithm: r.ChecksumAlgorithm,
+		ContentHash:       r.ContentHash,
+		ExportStatus:      r.ExportStatus,
+		CreatedAt:         r.CreatedAt.Time,
+		UpdatedAt:         r.UpdatedAt.Time,
+	}
+	if r.StorageReference.Valid && r.StorageReference.String != "" {
+		dto.StorageReference = &r.StorageReference.String
+	}
+	return dto
+}
+
+func (s *ReportService) buildPDFDataFromSnapshot(snap *db.GetReportSnapshotByIDRow) (PDFReportData, error) {
+	scopeStr := "Nigeria (Nationwide)"
+	if snap.ScopeType == "zone" && snap.ZoneName.Valid {
+		scopeStr = snap.ZoneName.String + " Zone"
+	} else if snap.ScopeType == "state" && snap.StateName.Valid {
+		scopeStr = snap.StateName.String + " State"
+	} else if snap.ScopeType == "lga" && snap.LgaName.Valid {
+		scopeStr = snap.LgaName.String + " LGA"
+		if snap.StateName.Valid {
+			scopeStr += ", " + snap.StateName.String + " State"
+		}
 	}
 
-	scopeStr := "Nigeria (Nationwide)"
-	if pub.StateName != nil {
-		scopeStr = *pub.StateName + " State"
+	var sources string
+	switch snap.ReportType {
+	case "cleanups":
+		sources = "Ratels Worldwide field volunteer logs, digital check-in records, and certified waste disposal weighbridge slips."
+	case "finance":
+		sources = "Approved double-entry general ledger transactions, verified bank reconciliations, and authorized expenditure vouchers."
+	case "community_projects":
+		sources = "Verified engineering milestone reports, physical inspection certificates, and contractor disbursements."
+	case "foundation":
+		sources = "Designated charitable foundation escrow accounts and individual donor transaction receipts."
+	default:
+		sources = "Consolidated Ratels Worldwide programmatic datasets across civic action, environmental cleanups, and audited financial records."
+	}
+
+	certNote := "Certified official public disclosure authorized by Ratels Worldwide Governance & Transparency Office."
+	if snap.Status == "draft" {
+		certNote = "Provisional preliminary aggregation for internal administrative audit only. NOT CERTIFIED FOR PUBLIC RELEASE."
+	} else if snap.Status == "withdrawn" {
+		certNote = "Formal revocation: this publication has been revoked by governance authority and is no longer certified."
 	}
 
 	pdfData := PDFReportData{
-		Title:             pub.Title,
-		PublicReference:   pub.PublicReference,
-		ReportType:        pub.ReportType,
-		ReportingPeriod:   pub.ReportingPeriod,
+		Title:             snap.Title,
+		PublicReference:   snap.PublicReference,
+		ReportType:        snap.ReportType,
+		ReportingPeriod:   snap.ReportingPeriod,
 		Scope:             scopeStr,
-		PublicationDate:   pub.PublishedAt,
-		Version:           pub.PublicationVersion,
-		DataHash:          pub.DataHash,
-		CertificationNote: "This document is a certified public transparency report issued by the Ratels Worldwide Platform.",
+		PublicationDate:   snap.CreatedAt.Time,
+		Version:           int(snap.PublicationVersion),
+		DataHash:          snap.DataHash,
+		Status:            snap.Status,
+		CertificationNote: certNote,
+		DataSources:       sources,
 	}
 
-	// Decode aggregated data to construct metrics and tables
-	switch pub.ReportType {
+	switch snap.ReportType {
 	case "cleanups":
 		var cData PublicCleanupsData
-		_ = json.Unmarshal(pub.AggregatedData, &cData)
+		_ = json.Unmarshal(snap.AggregatedData, &cData)
 		pdfData.Metrics = []PDFMetricItem{
 			{Label: "Cleanups Completed", Value: fmt.Sprintf("%d", cData.CompletedCleanupsCount)},
 			{Label: "Verified Attendees", Value: fmt.Sprintf("%d", cData.VerifiedAttendeesCount)},
@@ -1461,7 +1567,7 @@ func (s *ReportService) ExportReportPDF(ctx context.Context, idOrRef string) ([]
 
 	case "finance":
 		var fData PublicFinanceData
-		_ = json.Unmarshal(pub.AggregatedData, &fData)
+		_ = json.Unmarshal(snap.AggregatedData, &fData)
 		pdfData.Metrics = []PDFMetricItem{
 			{Label: "Approved Income", Value: fData.ApprovedIncomeFormatted},
 			{Label: "Approved Expenditure", Value: fData.ApprovedExpenditureFormatted},
@@ -1485,7 +1591,7 @@ func (s *ReportService) ExportReportPDF(ctx context.Context, idOrRef string) ([]
 
 	case "community_projects":
 		var pData PublicCommunityProjectsData
-		_ = json.Unmarshal(pub.AggregatedData, &pData)
+		_ = json.Unmarshal(snap.AggregatedData, &pData)
 		pdfData.Metrics = []PDFMetricItem{
 			{Label: "Total Projects", Value: fmt.Sprintf("%d", pData.TotalProjectsCount)},
 			{Label: "Completed", Value: fmt.Sprintf("%d", pData.CompletedProjectsCount)},
@@ -1511,7 +1617,7 @@ func (s *ReportService) ExportReportPDF(ctx context.Context, idOrRef string) ([]
 
 	case "foundation":
 		var fndData PublicFoundationData
-		_ = json.Unmarshal(pub.AggregatedData, &fndData)
+		_ = json.Unmarshal(snap.AggregatedData, &fndData)
 		pdfData.Metrics = []PDFMetricItem{
 			{Label: "Verified Donations", Value: fmt.Sprintf("%d", fndData.VerifiedDonationsCount)},
 			{Label: "Total Receipts", Value: fndData.TotalDonationsFormatted},
@@ -1521,7 +1627,7 @@ func (s *ReportService) ExportReportPDF(ctx context.Context, idOrRef string) ([]
 
 	default: // national_overview
 		var oData PublicOverviewData
-		_ = json.Unmarshal(pub.AggregatedData, &oData)
+		_ = json.Unmarshal(snap.AggregatedData, &oData)
 		pdfData.Metrics = []PDFMetricItem{
 			{Label: "Cleanups Completed", Value: fmt.Sprintf("%d", oData.CompletedCleanupsCount)},
 			{Label: "Verified Attendees", Value: fmt.Sprintf("%d", oData.VerifiedAttendeesCount)},
@@ -1530,40 +1636,37 @@ func (s *ReportService) ExportReportPDF(ctx context.Context, idOrRef string) ([]
 		}
 	}
 
-	pdfBytes, err := GeneratePDF(pdfData)
-	if err != nil {
-		return nil, "", fmt.Errorf("failed generating pdf: %w", err)
-	}
-
-	filename := fmt.Sprintf("Ratels-Report-%s.pdf", pub.PublicReference)
-	return pdfBytes, filename, nil
+	return pdfData, nil
 }
 
-func (s *ReportService) ExportReportCSV(ctx context.Context, idOrRef string) ([]byte, string, error) {
-	pub, err := s.GetPublicPublicationByID(ctx, idOrRef)
-	if err != nil {
-		return nil, "", err
-	}
-
+func (s *ReportService) buildCSVDataFromSnapshot(snap *db.GetReportSnapshotByIDRow) (CSVReportData, error) {
 	scopeStr := "Nigeria (Nationwide)"
-	if pub.StateName != nil {
-		scopeStr = *pub.StateName + " State"
+	if snap.ScopeType == "zone" && snap.ZoneName.Valid {
+		scopeStr = snap.ZoneName.String + " Zone"
+	} else if snap.ScopeType == "state" && snap.StateName.Valid {
+		scopeStr = snap.StateName.String + " State"
+	} else if snap.ScopeType == "lga" && snap.LgaName.Valid {
+		scopeStr = snap.LgaName.String + " LGA"
+		if snap.StateName.Valid {
+			scopeStr += ", " + snap.StateName.String + " State"
+		}
 	}
 
 	csvData := CSVReportData{
-		Title:           pub.Title,
-		PublicReference: pub.PublicReference,
-		ReportType:      pub.ReportType,
-		ReportingPeriod: pub.ReportingPeriod,
+		Title:           snap.Title,
+		PublicReference: snap.PublicReference,
+		ReportType:      snap.ReportType,
+		ReportingPeriod: snap.ReportingPeriod,
 		Scope:           scopeStr,
-		PublicationDate: pub.PublishedAt,
-		DataHash:        pub.DataHash,
+		PublicationDate: snap.CreatedAt.Time,
+		Status:          snap.Status,
+		DataHash:        snap.DataHash,
 	}
 
-	switch pub.ReportType {
+	switch snap.ReportType {
 	case "cleanups":
 		var cData PublicCleanupsData
-		_ = json.Unmarshal(pub.AggregatedData, &cData)
+		_ = json.Unmarshal(snap.AggregatedData, &cData)
 		csvData.Headers = []string{"State", "Cleanups Completed", "Waste Collected (kg)", "Verified Attendees"}
 		for _, sb := range cData.StateBreakdown {
 			csvData.Rows = append(csvData.Rows, []string{
@@ -1584,7 +1687,7 @@ func (s *ReportService) ExportReportCSV(ctx context.Context, idOrRef string) ([]
 
 	case "finance":
 		var fData PublicFinanceData
-		_ = json.Unmarshal(pub.AggregatedData, &fData)
+		_ = json.Unmarshal(snap.AggregatedData, &fData)
 		csvData.Headers = []string{"Metric / Category", "Amount (NGN)", "Expense Count", "Notes"}
 		csvData.Rows = append(csvData.Rows,
 			[]string{"Total Approved Income", fData.ApprovedIncomeFormatted, "-", "Reconciled ledger income"},
@@ -1603,7 +1706,7 @@ func (s *ReportService) ExportReportCSV(ctx context.Context, idOrRef string) ([]
 
 	case "community_projects":
 		var pData PublicCommunityProjectsData
-		_ = json.Unmarshal(pub.AggregatedData, &pData)
+		_ = json.Unmarshal(snap.AggregatedData, &pData)
 		csvData.Headers = []string{"Reference", "Title", "Category", "State", "LGA", "Status", "Approved Budget", "Recorded Expenditure", "Progress (%)"}
 		for _, pr := range pData.Projects {
 			csvData.Rows = append(csvData.Rows, []string{
@@ -1621,7 +1724,7 @@ func (s *ReportService) ExportReportCSV(ctx context.Context, idOrRef string) ([]
 
 	case "foundation":
 		var fndData PublicFoundationData
-		_ = json.Unmarshal(pub.AggregatedData, &fndData)
+		_ = json.Unmarshal(snap.AggregatedData, &fndData)
 		csvData.Headers = []string{"Metric", "Value", "Status", "Notes"}
 		csvData.Rows = append(csvData.Rows,
 			[]string{"Total Verified Donations", fndData.TotalDonationsFormatted, "Verified", "Charitable donations"},
@@ -1632,7 +1735,7 @@ func (s *ReportService) ExportReportCSV(ctx context.Context, idOrRef string) ([]
 
 	default: // national_overview
 		var oData PublicOverviewData
-		_ = json.Unmarshal(pub.AggregatedData, &oData)
+		_ = json.Unmarshal(snap.AggregatedData, &oData)
 		csvData.Headers = []string{"Indicator", "Verified Total", "Unit", "Verification Status"}
 		csvData.Rows = append(csvData.Rows,
 			[]string{"Completed Cleanups", fmt.Sprintf("%d", oData.CompletedCleanupsCount), "Activities", "Verified"},
@@ -1649,13 +1752,266 @@ func (s *ReportService) ExportReportCSV(ctx context.Context, idOrRef string) ([]
 		)
 	}
 
-	csvBytes, err := GenerateCSV(csvData)
-	if err != nil {
-		return nil, "", fmt.Errorf("failed generating csv: %w", err)
+	return csvData, nil
+}
+
+func (s *ReportService) GenerateAndStoreExport(
+	ctx context.Context,
+	actor *db.User,
+	snapshotID string,
+	format string,
+	ipAddress *string,
+) (*AdminReportExportDTO, error) {
+	cleanFormat := strings.ToLower(strings.TrimSpace(format))
+	if cleanFormat != "pdf" && cleanFormat != "csv" {
+		return nil, ErrUnsupportedExportFormat
 	}
 
-	filename := fmt.Sprintf("Ratels-Report-%s.csv", pub.PublicReference)
-	return csvBytes, filename, nil
+	snap, err := s.repo.Queries().GetReportSnapshotByID(ctx, snapshotID)
+	if err != nil {
+		return nil, ErrReportSnapshotNotFound
+	}
+
+	if snap.Status == "withdrawn" {
+		return nil, ErrReportWithdrawn
+	}
+	if snap.Status == "rejected" {
+		return nil, ErrReportRejected
+	}
+
+	// 1. Deduplication check: return cached export if unchanged snapshot version and object exists in storage
+	existing, err := s.repo.Queries().GetReportExportBySnapshotAndFormat(ctx, db.GetReportExportBySnapshotAndFormatParams{
+		SnapshotID:   snapshotID,
+		ExportFormat: cleanFormat,
+	})
+	if err == nil && existing.ExportStatus == "generated" && existing.StorageReference.Valid {
+		if _, readErr := s.exportStorage.ReadExport(ctx, existing.StorageReference.String); readErr == nil {
+			return s.mapExportRowToDTO(&existing), nil
+		}
+	}
+
+	// 2. Generate export bytes
+	var exportBytes []byte
+	var mimeType string
+	var fileName string
+
+	if cleanFormat == "pdf" {
+		pdfData, err := s.buildPDFDataFromSnapshot(&snap)
+		if err != nil {
+			return nil, fmt.Errorf("failed building PDF data: %w", err)
+		}
+		exportBytes, err = GeneratePDF(pdfData)
+		if err != nil {
+			return nil, fmt.Errorf("failed generating PDF: %w", err)
+		}
+		mimeType = "application/pdf"
+		fileName = fmt.Sprintf("Ratels-Report-%s-%s.pdf", snap.ReportType, snap.PublicReference)
+	} else {
+		csvData, err := s.buildCSVDataFromSnapshot(&snap)
+		if err != nil {
+			return nil, fmt.Errorf("failed building CSV data: %w", err)
+		}
+		exportBytes, err = GenerateCSV(csvData)
+		if err != nil {
+			return nil, fmt.Errorf("failed generating CSV: %w", err)
+		}
+		mimeType = "text/csv; charset=utf-8"
+		fileName = fmt.Sprintf("Ratels-Report-%s-%s.csv", snap.ReportType, snap.PublicReference)
+	}
+
+	// 3. Upload to private R2 storage
+	storageKey, uploadedHash, actualSize, err := s.exportStorage.StoreExport(ctx, snapshotID, cleanFormat, fileName, mimeType, exportBytes)
+	if err != nil {
+		return nil, fmt.Errorf("failed uploading export to private storage: %w", err)
+	}
+
+	// 5. Verify upload integrity
+	verifyBytes, err := s.exportStorage.ReadExport(ctx, storageKey)
+	if err != nil || int64(len(verifyBytes)) != actualSize {
+		_ = s.exportStorage.DeleteExport(ctx, storageKey)
+		return nil, fmt.Errorf("upload verification failed: storage payload size mismatch or unreadable")
+	}
+
+	// 6. Persist export metadata in DB
+	exportID := security.GenerateUUID()
+	upserted, err := s.repo.Queries().UpsertReportExport(ctx, db.UpsertReportExportParams{
+		ID:                exportID,
+		SnapshotID:        snapshotID,
+		ExportFormat:      cleanFormat,
+		FileName:          fileName,
+		FileSizeBytes:     actualSize,
+		MimeType:          mimeType,
+		ChecksumAlgorithm: "sha256",
+		ContentHash:       uploadedHash,
+		StorageReference:  pgtype.Text{String: storageKey, Valid: true},
+		ExportStatus:      "generated",
+	})
+	if err != nil {
+		// Clean up orphaned storage object on DB failure
+		_ = s.exportStorage.DeleteExport(ctx, storageKey)
+		return nil, fmt.Errorf("failed saving export record: %w", err)
+	}
+
+	// 7. Audit log
+	detailsJSON, _ := json.Marshal(map[string]interface{}{
+		"export_id":          upserted.ID,
+		"snapshot_id":        snapshotID,
+		"public_ref":         snap.PublicReference,
+		"export_format":      cleanFormat,
+		"file_name":          fileName,
+		"file_size_bytes":    actualSize,
+		"checksum_algorithm": "sha256",
+		"content_hash":       uploadedHash,
+		"storage_reference":  storageKey,
+	})
+	var ipPg pgtype.Text
+	if ipAddress != nil {
+		ipPg = pgtype.Text{String: *ipAddress, Valid: true}
+	}
+	var auditUserPg pgtype.Text
+	if actor != nil {
+		auditUserPg = pgtype.Text{String: actor.ID, Valid: true}
+	}
+	_, _ = s.repo.Queries().CreateReportAudit(ctx, db.CreateReportAuditParams{
+		ID:                security.GenerateUUID(),
+		SnapshotID:        pgtype.Text{String: snapshotID, Valid: true},
+		Action:            "exported",
+		PerformedByUserID: auditUserPg,
+		Details:           detailsJSON,
+		IpAddress:         ipPg,
+	})
+
+	return s.mapExportRowToDTO(&upserted), nil
+}
+
+func (s *ReportService) GetExportPrivateStream(
+	ctx context.Context,
+	actor *db.User,
+	snapshotID string,
+	format string,
+) ([]byte, string, string, error) {
+	cleanFormat := strings.ToLower(strings.TrimSpace(format))
+	snap, err := s.repo.Queries().GetReportSnapshotByID(ctx, snapshotID)
+	if err != nil {
+		return nil, "", "", ErrReportSnapshotNotFound
+	}
+
+	if snap.Status == "withdrawn" {
+		return nil, "", "", ErrReportWithdrawn
+	}
+
+	// Draft reports require administrator authorization
+	if snap.Status != "published" {
+		if actor == nil || (actor.PrimaryRole != "super_admin" && actor.PrimaryRole != "national_admin") {
+			return nil, "", "", ErrUnauthorizedExportAccess
+		}
+	}
+
+	exp, err := s.repo.Queries().GetReportExportBySnapshotAndFormat(ctx, db.GetReportExportBySnapshotAndFormatParams{
+		SnapshotID:   snapshotID,
+		ExportFormat: cleanFormat,
+	})
+	if err != nil || exp.ExportStatus != "generated" || !exp.StorageReference.Valid {
+		// Generate on demand if missing or ungenerated
+		dto, err := s.GenerateAndStoreExport(ctx, actor, snapshotID, cleanFormat, nil)
+		if err != nil {
+			return nil, "", "", err
+		}
+		bytes, err := s.exportStorage.ReadExport(ctx, *dto.StorageReference)
+		if err != nil {
+			return nil, "", "", err
+		}
+		return bytes, dto.FileName, dto.MimeType, nil
+	}
+
+	bytes, err := s.exportStorage.ReadExport(ctx, exp.StorageReference.String)
+	if err != nil {
+		return nil, "", "", fmt.Errorf("failed reading export from private storage: %w", err)
+	}
+
+	return bytes, exp.FileName, exp.MimeType, nil
+}
+
+func (s *ReportService) GetExportPresignedDownloadURL(
+	ctx context.Context,
+	actor *db.User,
+	snapshotID string,
+	format string,
+	expiry time.Duration,
+) (string, error) {
+	cleanFormat := strings.ToLower(strings.TrimSpace(format))
+	snap, err := s.repo.Queries().GetReportSnapshotByID(ctx, snapshotID)
+	if err != nil {
+		return "", ErrReportSnapshotNotFound
+	}
+
+	if snap.Status == "withdrawn" {
+		return "", ErrReportWithdrawn
+	}
+
+	if snap.Status != "published" {
+		if actor == nil || (actor.PrimaryRole != "super_admin" && actor.PrimaryRole != "national_admin") {
+			return "", ErrUnauthorizedExportAccess
+		}
+	}
+
+	exp, err := s.repo.Queries().GetReportExportBySnapshotAndFormat(ctx, db.GetReportExportBySnapshotAndFormatParams{
+		SnapshotID:   snapshotID,
+		ExportFormat: cleanFormat,
+	})
+	if err != nil || exp.ExportStatus != "generated" || !exp.StorageReference.Valid {
+		dto, err := s.GenerateAndStoreExport(ctx, actor, snapshotID, cleanFormat, nil)
+		if err != nil {
+			return "", err
+		}
+		return s.exportStorage.GeneratePresignedDownload(ctx, *dto.StorageReference, dto.FileName, expiry)
+	}
+
+	return s.exportStorage.GeneratePresignedDownload(ctx, exp.StorageReference.String, exp.FileName, expiry)
+}
+
+func (s *ReportService) ExportReportPDF(ctx context.Context, idOrRef string) ([]byte, string, error) {
+	pub, err := s.GetPublicPublicationByID(ctx, idOrRef)
+	if err != nil {
+		return nil, "", err
+	}
+
+	snap, err := s.repo.Queries().GetReportSnapshotByID(ctx, pub.SnapshotID)
+	if err != nil {
+		return nil, "", ErrReportSnapshotNotFound
+	}
+
+	if snap.Status != "published" {
+		return nil, "", ErrReportWithdrawn
+	}
+
+	bytes, fileName, _, err := s.GetExportPrivateStream(ctx, nil, pub.SnapshotID, "pdf")
+	if err != nil {
+		return nil, "", err
+	}
+	return bytes, fileName, nil
+}
+
+func (s *ReportService) ExportReportCSV(ctx context.Context, idOrRef string) ([]byte, string, error) {
+	pub, err := s.GetPublicPublicationByID(ctx, idOrRef)
+	if err != nil {
+		return nil, "", err
+	}
+
+	snap, err := s.repo.Queries().GetReportSnapshotByID(ctx, pub.SnapshotID)
+	if err != nil {
+		return nil, "", ErrReportSnapshotNotFound
+	}
+
+	if snap.Status != "published" {
+		return nil, "", ErrReportWithdrawn
+	}
+
+	bytes, fileName, _, err := s.GetExportPrivateStream(ctx, nil, pub.SnapshotID, "csv")
+	if err != nil {
+		return nil, "", err
+	}
+	return bytes, fileName, nil
 }
 
 // -----------------------------------------------------------------------
@@ -1721,11 +2077,14 @@ func (s *ReportService) ListSnapshotsAdmin(ctx context.Context, status, reportTy
 			Status:             r.Status,
 			PublicationVersion: int(r.PublicationVersion),
 			DataHash:           r.DataHash,
-			CreatedByUserID:    r.CreatedByUserID,
+			CreatedByType:      r.CreatedByType,
 			CreatorName:        r.CreatorName,
 			AggregatedData:     r.AggregatedData,
 			CreatedAt:          r.CreatedAt.Time,
 			UpdatedAt:          r.UpdatedAt.Time,
+		}
+		if r.CreatedByUserID.Valid {
+			item.CreatedByUserID = &r.CreatedByUserID.String
 		}
 		if r.DefinitionID.Valid {
 			item.DefinitionID = &r.DefinitionID.String
@@ -1826,13 +2185,16 @@ func (s *ReportService) GetSnapshotDetailAdmin(ctx context.Context, snapshotID s
 		Status:             r.Status,
 		PublicationVersion: int(r.PublicationVersion),
 		DataHash:           r.DataHash,
-		CreatedByUserID:    r.CreatedByUserID,
+		CreatedByType:      r.CreatedByType,
 		CreatorName:        r.CreatorName,
 		AggregatedData:     r.AggregatedData,
 		CreatedAt:          r.CreatedAt.Time,
 		UpdatedAt:          r.UpdatedAt.Time,
 		Approvals:          approvalItems,
 		AuditLogs:          auditItems,
+	}
+	if r.CreatedByUserID.Valid {
+		dto.CreatedByUserID = &r.CreatedByUserID.String
 	}
 	if r.DefinitionID.Valid {
 		dto.DefinitionID = &r.DefinitionID.String

@@ -1226,14 +1226,18 @@ type PublicReportDefinition struct {
 }
 
 type PublicReportExport struct {
-	ID               string             `json:"id"`
-	SnapshotID       string             `json:"snapshot_id"`
-	ExportFormat     string             `json:"export_format"`
-	FileName         string             `json:"file_name"`
-	ContentHash      string             `json:"content_hash"`
-	StorageReference pgtype.Text        `json:"storage_reference"`
-	ExportStatus     string             `json:"export_status"`
-	CreatedAt        pgtype.Timestamptz `json:"created_at"`
+	ID                string             `json:"id"`
+	SnapshotID        string             `json:"snapshot_id"`
+	ExportFormat      string             `json:"export_format"`
+	FileName          string             `json:"file_name"`
+	ContentHash       string             `json:"content_hash"`
+	StorageReference  pgtype.Text        `json:"storage_reference"`
+	ExportStatus      string             `json:"export_status"`
+	CreatedAt         pgtype.Timestamptz `json:"created_at"`
+	FileSizeBytes     int64              `json:"file_size_bytes"`
+	MimeType          string             `json:"mime_type"`
+	ChecksumAlgorithm string             `json:"checksum_algorithm"`
+	UpdatedAt         pgtype.Timestamptz `json:"updated_at"`
 }
 
 type PublicReportPublication struct {
@@ -1268,9 +1272,10 @@ type PublicReportSnapshot struct {
 	DataHash           string             `json:"data_hash"`
 	PublicationVersion int32              `json:"publication_version"`
 	CorrectionNotes    pgtype.Text        `json:"correction_notes"`
-	CreatedByUserID    string             `json:"created_by_user_id"`
+	CreatedByUserID    pgtype.Text        `json:"created_by_user_id"`
 	CreatedAt          pgtype.Timestamptz `json:"created_at"`
 	UpdatedAt          pgtype.Timestamptz `json:"updated_at"`
+	CreatedByType      string             `json:"created_by_type"`
 }
 
 type SafeguardingAccessLog struct {

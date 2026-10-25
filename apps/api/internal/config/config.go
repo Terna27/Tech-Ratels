@@ -45,6 +45,7 @@ type Config struct {
 	SafeguardingReportingEnabled bool
 	R2SafeguardingBucketName     string
 	SafeguardingEncryptionKey    string
+	R2ReportsBucketName          string
 	ReportCronSecret             string
 }
 
@@ -219,6 +220,13 @@ func Load() *Config {
 	}
 
 	r2SafeguardingBucket := strings.TrimSpace(os.Getenv("R2_SAFEGUARDING_BUCKET_NAME"))
+	r2ReportsBucket := strings.TrimSpace(os.Getenv("R2_REPORTS_BUCKET_NAME"))
+	if r2ReportsBucket == "" {
+		r2ReportsBucket = r2SafeguardingBucket
+	}
+	if r2ReportsBucket == "" {
+		r2ReportsBucket = r2BucketName
+	}
 	safeguardingEncKey := strings.TrimSpace(os.Getenv("SAFEGUARDING_ENCRYPTION_KEY"))
 	reportCronSecret := strings.TrimSpace(os.Getenv("REPORT_CRON_SECRET"))
 
@@ -253,6 +261,7 @@ func Load() *Config {
 		SafeguardingReportingEnabled: safeguardingEnabled,
 		R2SafeguardingBucketName:     r2SafeguardingBucket,
 		SafeguardingEncryptionKey:    safeguardingEncKey,
+		R2ReportsBucketName:          r2ReportsBucket,
 		ReportCronSecret:             reportCronSecret,
 	}
 }

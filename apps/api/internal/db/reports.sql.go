@@ -591,17 +591,17 @@ INSERT INTO public_report_snapshots (
     reporting_period, period_start, period_end,
     scope_type, zone_id, state_id, lga_id,
     status, aggregated_data, data_hash,
-    publication_version, correction_notes, created_by_user_id,
+    publication_version, correction_notes, created_by_user_id, created_by_type,
     created_at, updated_at
 ) VALUES (
     $1, $2, $3, $4, $5,
     $6, $7, $8,
     $9, $10, $11, $12,
     $13, $14, $15,
-    $16, $17, $18,
+    $16, $17, $18, $19,
     CURRENT_TIMESTAMP, CURRENT_TIMESTAMP
 )
-RETURNING id, public_reference, definition_id, report_type, title, reporting_period, period_start, period_end, scope_type, zone_id, state_id, lga_id, status, aggregated_data, data_hash, publication_version, correction_notes, created_by_user_id, created_at, updated_at
+RETURNING id, public_reference, definition_id, report_type, title, reporting_period, period_start, period_end, scope_type, zone_id, state_id, lga_id, status, aggregated_data, data_hash, publication_version, correction_notes, created_by_user_id, created_at, updated_at, created_by_type
 `
 
 type CreateReportSnapshotParams struct {
@@ -622,7 +622,8 @@ type CreateReportSnapshotParams struct {
 	DataHash           string          `json:"data_hash"`
 	PublicationVersion int32           `json:"publication_version"`
 	CorrectionNotes    pgtype.Text     `json:"correction_notes"`
-	CreatedByUserID    string          `json:"created_by_user_id"`
+	CreatedByUserID    pgtype.Text     `json:"created_by_user_id"`
+	CreatedByType      string          `json:"created_by_type"`
 }
 
 // Snapshots
@@ -646,6 +647,7 @@ func (q *Queries) CreateReportSnapshot(ctx context.Context, arg CreateReportSnap
 		arg.PublicationVersion,
 		arg.CorrectionNotes,
 		arg.CreatedByUserID,
+		arg.CreatedByType,
 	)
 	var i PublicReportSnapshot
 	err := row.Scan(
@@ -669,8 +671,29 @@ func (q *Queries) CreateReportSnapshot(ctx context.Context, arg CreateReportSnap
 		&i.CreatedByUserID,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.CreatedByType,
 	)
 	return i, err
+}
+
+const deleteReportExport = `-- name: DeleteReportExport :exec
+DELETE FROM public_report_exports
+WHERE id = $1
+`
+
+func (q *Queries) DeleteReportExport(ctx context.Context, id string) error {
+	_, err := q.db.Exec(ctx, deleteReportExport, id)
+	return err
+}
+
+const deleteReportExportsBySnapshot = `-- name: DeleteReportExportsBySnapshot :exec
+DELETE FROM public_report_exports
+WHERE snapshot_id = $1
+`
+
+func (q *Queries) DeleteReportExportsBySnapshot(ctx context.Context, snapshotID string) error {
+	_, err := q.db.Exec(ctx, deleteReportExportsBySnapshot, snapshotID)
+	return err
 }
 
 const getFirstActiveAdminUser = `-- name: GetFirstActiveAdminUser :one
@@ -859,14 +882,70 @@ func (q *Queries) GetReportDefinitionByType(ctx context.Context, reportType stri
 	return i, err
 }
 
+const getReportExportByID = `-- name: GetReportExportByID :one
+SELECT id, snapshot_id, export_format, file_name, content_hash, storage_reference, export_status, created_at, file_size_bytes, mime_type, checksum_algorithm, updated_at FROM public_report_exports
+WHERE id = $1 LIMIT 1
+`
+
+func (q *Queries) GetReportExportByID(ctx context.Context, id string) (PublicReportExport, error) {
+	row := q.db.QueryRow(ctx, getReportExportByID, id)
+	var i PublicReportExport
+	err := row.Scan(
+		&i.ID,
+		&i.SnapshotID,
+		&i.ExportFormat,
+		&i.FileName,
+		&i.ContentHash,
+		&i.StorageReference,
+		&i.ExportStatus,
+		&i.CreatedAt,
+		&i.FileSizeBytes,
+		&i.MimeType,
+		&i.ChecksumAlgorithm,
+		&i.UpdatedAt,
+	)
+	return i, err
+}
+
+const getReportExportBySnapshotAndFormat = `-- name: GetReportExportBySnapshotAndFormat :one
+SELECT id, snapshot_id, export_format, file_name, content_hash, storage_reference, export_status, created_at, file_size_bytes, mime_type, checksum_algorithm, updated_at FROM public_report_exports
+WHERE snapshot_id = $1 AND export_format = $2
+LIMIT 1
+`
+
+type GetReportExportBySnapshotAndFormatParams struct {
+	SnapshotID   string `json:"snapshot_id"`
+	ExportFormat string `json:"export_format"`
+}
+
+func (q *Queries) GetReportExportBySnapshotAndFormat(ctx context.Context, arg GetReportExportBySnapshotAndFormatParams) (PublicReportExport, error) {
+	row := q.db.QueryRow(ctx, getReportExportBySnapshotAndFormat, arg.SnapshotID, arg.ExportFormat)
+	var i PublicReportExport
+	err := row.Scan(
+		&i.ID,
+		&i.SnapshotID,
+		&i.ExportFormat,
+		&i.FileName,
+		&i.ContentHash,
+		&i.StorageReference,
+		&i.ExportStatus,
+		&i.CreatedAt,
+		&i.FileSizeBytes,
+		&i.MimeType,
+		&i.ChecksumAlgorithm,
+		&i.UpdatedAt,
+	)
+	return i, err
+}
+
 const getReportSnapshotByID = `-- name: GetReportSnapshotByID :one
-SELECT rs.id, rs.public_reference, rs.definition_id, rs.report_type, rs.title, rs.reporting_period, rs.period_start, rs.period_end, rs.scope_type, rs.zone_id, rs.state_id, rs.lga_id, rs.status, rs.aggregated_data, rs.data_hash, rs.publication_version, rs.correction_notes, rs.created_by_user_id, rs.created_at, rs.updated_at,
-       u.display_name AS creator_name,
+SELECT rs.id, rs.public_reference, rs.definition_id, rs.report_type, rs.title, rs.reporting_period, rs.period_start, rs.period_end, rs.scope_type, rs.zone_id, rs.state_id, rs.lga_id, rs.status, rs.aggregated_data, rs.data_hash, rs.publication_version, rs.correction_notes, rs.created_by_user_id, rs.created_at, rs.updated_at, rs.created_by_type,
+       COALESCE(u.display_name, CASE WHEN rs.created_by_type = 'system' THEN 'System' ELSE 'Administrator' END)::varchar AS creator_name,
        z.name AS zone_name,
        s.name AS state_name,
        l.name AS lga_name
 FROM public_report_snapshots rs
-JOIN users u ON u.id = rs.created_by_user_id
+LEFT JOIN users u ON u.id = rs.created_by_user_id
 LEFT JOIN zones z ON z.id = rs.zone_id
 LEFT JOIN states s ON s.id = rs.state_id
 LEFT JOIN lgas l ON l.id = rs.lga_id
@@ -892,9 +971,10 @@ type GetReportSnapshotByIDRow struct {
 	DataHash           string             `json:"data_hash"`
 	PublicationVersion int32              `json:"publication_version"`
 	CorrectionNotes    pgtype.Text        `json:"correction_notes"`
-	CreatedByUserID    string             `json:"created_by_user_id"`
+	CreatedByUserID    pgtype.Text        `json:"created_by_user_id"`
 	CreatedAt          pgtype.Timestamptz `json:"created_at"`
 	UpdatedAt          pgtype.Timestamptz `json:"updated_at"`
+	CreatedByType      string             `json:"created_by_type"`
 	CreatorName        string             `json:"creator_name"`
 	ZoneName           pgtype.Text        `json:"zone_name"`
 	StateName          pgtype.Text        `json:"state_name"`
@@ -925,6 +1005,7 @@ func (q *Queries) GetReportSnapshotByID(ctx context.Context, id string) (GetRepo
 		&i.CreatedByUserID,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.CreatedByType,
 		&i.CreatorName,
 		&i.ZoneName,
 		&i.StateName,
@@ -934,13 +1015,13 @@ func (q *Queries) GetReportSnapshotByID(ctx context.Context, id string) (GetRepo
 }
 
 const getReportSnapshotByRef = `-- name: GetReportSnapshotByRef :one
-SELECT rs.id, rs.public_reference, rs.definition_id, rs.report_type, rs.title, rs.reporting_period, rs.period_start, rs.period_end, rs.scope_type, rs.zone_id, rs.state_id, rs.lga_id, rs.status, rs.aggregated_data, rs.data_hash, rs.publication_version, rs.correction_notes, rs.created_by_user_id, rs.created_at, rs.updated_at,
-       u.display_name AS creator_name,
+SELECT rs.id, rs.public_reference, rs.definition_id, rs.report_type, rs.title, rs.reporting_period, rs.period_start, rs.period_end, rs.scope_type, rs.zone_id, rs.state_id, rs.lga_id, rs.status, rs.aggregated_data, rs.data_hash, rs.publication_version, rs.correction_notes, rs.created_by_user_id, rs.created_at, rs.updated_at, rs.created_by_type,
+       COALESCE(u.display_name, CASE WHEN rs.created_by_type = 'system' THEN 'System' ELSE 'Administrator' END)::varchar AS creator_name,
        z.name AS zone_name,
        s.name AS state_name,
        l.name AS lga_name
 FROM public_report_snapshots rs
-JOIN users u ON u.id = rs.created_by_user_id
+LEFT JOIN users u ON u.id = rs.created_by_user_id
 LEFT JOIN zones z ON z.id = rs.zone_id
 LEFT JOIN states s ON s.id = rs.state_id
 LEFT JOIN lgas l ON l.id = rs.lga_id
@@ -966,9 +1047,10 @@ type GetReportSnapshotByRefRow struct {
 	DataHash           string             `json:"data_hash"`
 	PublicationVersion int32              `json:"publication_version"`
 	CorrectionNotes    pgtype.Text        `json:"correction_notes"`
-	CreatedByUserID    string             `json:"created_by_user_id"`
+	CreatedByUserID    pgtype.Text        `json:"created_by_user_id"`
 	CreatedAt          pgtype.Timestamptz `json:"created_at"`
 	UpdatedAt          pgtype.Timestamptz `json:"updated_at"`
+	CreatedByType      string             `json:"created_by_type"`
 	CreatorName        string             `json:"creator_name"`
 	ZoneName           pgtype.Text        `json:"zone_name"`
 	StateName          pgtype.Text        `json:"state_name"`
@@ -999,6 +1081,7 @@ func (q *Queries) GetReportSnapshotByRef(ctx context.Context, publicReference st
 		&i.CreatedByUserID,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.CreatedByType,
 		&i.CreatorName,
 		&i.ZoneName,
 		&i.StateName,
@@ -1451,14 +1534,53 @@ func (q *Queries) ListReportDefinitions(ctx context.Context) ([]PublicReportDefi
 	return items, nil
 }
 
+const listReportExportsBySnapshot = `-- name: ListReportExportsBySnapshot :many
+SELECT id, snapshot_id, export_format, file_name, content_hash, storage_reference, export_status, created_at, file_size_bytes, mime_type, checksum_algorithm, updated_at FROM public_report_exports
+WHERE snapshot_id = $1
+ORDER BY created_at DESC
+`
+
+func (q *Queries) ListReportExportsBySnapshot(ctx context.Context, snapshotID string) ([]PublicReportExport, error) {
+	rows, err := q.db.Query(ctx, listReportExportsBySnapshot, snapshotID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []PublicReportExport
+	for rows.Next() {
+		var i PublicReportExport
+		if err := rows.Scan(
+			&i.ID,
+			&i.SnapshotID,
+			&i.ExportFormat,
+			&i.FileName,
+			&i.ContentHash,
+			&i.StorageReference,
+			&i.ExportStatus,
+			&i.CreatedAt,
+			&i.FileSizeBytes,
+			&i.MimeType,
+			&i.ChecksumAlgorithm,
+			&i.UpdatedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listReportSnapshotsAdmin = `-- name: ListReportSnapshotsAdmin :many
-SELECT rs.id, rs.public_reference, rs.definition_id, rs.report_type, rs.title, rs.reporting_period, rs.period_start, rs.period_end, rs.scope_type, rs.zone_id, rs.state_id, rs.lga_id, rs.status, rs.aggregated_data, rs.data_hash, rs.publication_version, rs.correction_notes, rs.created_by_user_id, rs.created_at, rs.updated_at,
-       u.display_name AS creator_name,
+SELECT rs.id, rs.public_reference, rs.definition_id, rs.report_type, rs.title, rs.reporting_period, rs.period_start, rs.period_end, rs.scope_type, rs.zone_id, rs.state_id, rs.lga_id, rs.status, rs.aggregated_data, rs.data_hash, rs.publication_version, rs.correction_notes, rs.created_by_user_id, rs.created_at, rs.updated_at, rs.created_by_type,
+       COALESCE(u.display_name, CASE WHEN rs.created_by_type = 'system' THEN 'System' ELSE 'Administrator' END)::varchar AS creator_name,
        z.name AS zone_name,
        s.name AS state_name,
        l.name AS lga_name
 FROM public_report_snapshots rs
-JOIN users u ON u.id = rs.created_by_user_id
+LEFT JOIN users u ON u.id = rs.created_by_user_id
 LEFT JOIN zones z ON z.id = rs.zone_id
 LEFT JOIN states s ON s.id = rs.state_id
 LEFT JOIN lgas l ON l.id = rs.lga_id
@@ -1497,9 +1619,10 @@ type ListReportSnapshotsAdminRow struct {
 	DataHash           string             `json:"data_hash"`
 	PublicationVersion int32              `json:"publication_version"`
 	CorrectionNotes    pgtype.Text        `json:"correction_notes"`
-	CreatedByUserID    string             `json:"created_by_user_id"`
+	CreatedByUserID    pgtype.Text        `json:"created_by_user_id"`
 	CreatedAt          pgtype.Timestamptz `json:"created_at"`
 	UpdatedAt          pgtype.Timestamptz `json:"updated_at"`
+	CreatedByType      string             `json:"created_by_type"`
 	CreatorName        string             `json:"creator_name"`
 	ZoneName           pgtype.Text        `json:"zone_name"`
 	StateName          pgtype.Text        `json:"state_name"`
@@ -1543,6 +1666,7 @@ func (q *Queries) ListReportSnapshotsAdmin(ctx context.Context, arg ListReportSn
 			&i.CreatedByUserID,
 			&i.CreatedAt,
 			&i.UpdatedAt,
+			&i.CreatedByType,
 			&i.CreatorName,
 			&i.ZoneName,
 			&i.StateName,
@@ -1558,6 +1682,39 @@ func (q *Queries) ListReportSnapshotsAdmin(ctx context.Context, arg ListReportSn
 	return items, nil
 }
 
+const updateReportExportStatus = `-- name: UpdateReportExportStatus :one
+UPDATE public_report_exports
+SET export_status = $2,
+    updated_at = CURRENT_TIMESTAMP
+WHERE id = $1
+RETURNING id, snapshot_id, export_format, file_name, content_hash, storage_reference, export_status, created_at, file_size_bytes, mime_type, checksum_algorithm, updated_at
+`
+
+type UpdateReportExportStatusParams struct {
+	ID           string `json:"id"`
+	ExportStatus string `json:"export_status"`
+}
+
+func (q *Queries) UpdateReportExportStatus(ctx context.Context, arg UpdateReportExportStatusParams) (PublicReportExport, error) {
+	row := q.db.QueryRow(ctx, updateReportExportStatus, arg.ID, arg.ExportStatus)
+	var i PublicReportExport
+	err := row.Scan(
+		&i.ID,
+		&i.SnapshotID,
+		&i.ExportFormat,
+		&i.FileName,
+		&i.ContentHash,
+		&i.StorageReference,
+		&i.ExportStatus,
+		&i.CreatedAt,
+		&i.FileSizeBytes,
+		&i.MimeType,
+		&i.ChecksumAlgorithm,
+		&i.UpdatedAt,
+	)
+	return i, err
+}
+
 const updateReportSnapshotRevision = `-- name: UpdateReportSnapshotRevision :one
 UPDATE public_report_snapshots
 SET status = $2,
@@ -1565,7 +1722,7 @@ SET status = $2,
     correction_notes = $4,
     updated_at = CURRENT_TIMESTAMP
 WHERE id = $1
-RETURNING id, public_reference, definition_id, report_type, title, reporting_period, period_start, period_end, scope_type, zone_id, state_id, lga_id, status, aggregated_data, data_hash, publication_version, correction_notes, created_by_user_id, created_at, updated_at
+RETURNING id, public_reference, definition_id, report_type, title, reporting_period, period_start, period_end, scope_type, zone_id, state_id, lga_id, status, aggregated_data, data_hash, publication_version, correction_notes, created_by_user_id, created_at, updated_at, created_by_type
 `
 
 type UpdateReportSnapshotRevisionParams struct {
@@ -1604,6 +1761,7 @@ func (q *Queries) UpdateReportSnapshotRevision(ctx context.Context, arg UpdateRe
 		&i.CreatedByUserID,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.CreatedByType,
 	)
 	return i, err
 }
@@ -1613,7 +1771,7 @@ UPDATE public_report_snapshots
 SET status = $2,
     updated_at = CURRENT_TIMESTAMP
 WHERE id = $1
-RETURNING id, public_reference, definition_id, report_type, title, reporting_period, period_start, period_end, scope_type, zone_id, state_id, lga_id, status, aggregated_data, data_hash, publication_version, correction_notes, created_by_user_id, created_at, updated_at
+RETURNING id, public_reference, definition_id, report_type, title, reporting_period, period_start, period_end, scope_type, zone_id, state_id, lga_id, status, aggregated_data, data_hash, publication_version, correction_notes, created_by_user_id, created_at, updated_at, created_by_type
 `
 
 type UpdateReportSnapshotStatusParams struct {
@@ -1645,32 +1803,41 @@ func (q *Queries) UpdateReportSnapshotStatus(ctx context.Context, arg UpdateRepo
 		&i.CreatedByUserID,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.CreatedByType,
 	)
 	return i, err
 }
 
 const upsertReportExport = `-- name: UpsertReportExport :one
 INSERT INTO public_report_exports (
-    id, snapshot_id, export_format, file_name, content_hash, storage_reference, export_status, created_at
+    id, snapshot_id, export_format, file_name, file_size_bytes, mime_type,
+    checksum_algorithm, content_hash, storage_reference, export_status, created_at, updated_at
 ) VALUES (
-    $1, $2, $3, $4, $5, $6, $7, CURRENT_TIMESTAMP
+    $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP
 )
-ON CONFLICT (id) DO UPDATE SET
+ON CONFLICT (snapshot_id, export_format) DO UPDATE SET
     file_name = EXCLUDED.file_name,
+    file_size_bytes = EXCLUDED.file_size_bytes,
+    mime_type = EXCLUDED.mime_type,
+    checksum_algorithm = EXCLUDED.checksum_algorithm,
     content_hash = EXCLUDED.content_hash,
     storage_reference = EXCLUDED.storage_reference,
-    export_status = EXCLUDED.export_status
-RETURNING id, snapshot_id, export_format, file_name, content_hash, storage_reference, export_status, created_at
+    export_status = EXCLUDED.export_status,
+    updated_at = CURRENT_TIMESTAMP
+RETURNING id, snapshot_id, export_format, file_name, content_hash, storage_reference, export_status, created_at, file_size_bytes, mime_type, checksum_algorithm, updated_at
 `
 
 type UpsertReportExportParams struct {
-	ID               string      `json:"id"`
-	SnapshotID       string      `json:"snapshot_id"`
-	ExportFormat     string      `json:"export_format"`
-	FileName         string      `json:"file_name"`
-	ContentHash      string      `json:"content_hash"`
-	StorageReference pgtype.Text `json:"storage_reference"`
-	ExportStatus     string      `json:"export_status"`
+	ID                string      `json:"id"`
+	SnapshotID        string      `json:"snapshot_id"`
+	ExportFormat      string      `json:"export_format"`
+	FileName          string      `json:"file_name"`
+	FileSizeBytes     int64       `json:"file_size_bytes"`
+	MimeType          string      `json:"mime_type"`
+	ChecksumAlgorithm string      `json:"checksum_algorithm"`
+	ContentHash       string      `json:"content_hash"`
+	StorageReference  pgtype.Text `json:"storage_reference"`
+	ExportStatus      string      `json:"export_status"`
 }
 
 // Exports
@@ -1680,6 +1847,9 @@ func (q *Queries) UpsertReportExport(ctx context.Context, arg UpsertReportExport
 		arg.SnapshotID,
 		arg.ExportFormat,
 		arg.FileName,
+		arg.FileSizeBytes,
+		arg.MimeType,
+		arg.ChecksumAlgorithm,
 		arg.ContentHash,
 		arg.StorageReference,
 		arg.ExportStatus,
@@ -1694,6 +1864,10 @@ func (q *Queries) UpsertReportExport(ctx context.Context, arg UpsertReportExport
 		&i.StorageReference,
 		&i.ExportStatus,
 		&i.CreatedAt,
+		&i.FileSizeBytes,
+		&i.MimeType,
+		&i.ChecksumAlgorithm,
+		&i.UpdatedAt,
 	)
 	return i, err
 }

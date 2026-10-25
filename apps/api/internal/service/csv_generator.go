@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/csv"
 	"fmt"
+	"strings"
 	"time"
 )
 
@@ -15,6 +16,7 @@ type CSVReportData struct {
 	ReportingPeriod string
 	Scope           string
 	PublicationDate time.Time
+	Status          string // "draft", "published", "withdrawn"
 	DataHash        string
 	Headers         []string
 	Rows            [][]string
@@ -37,14 +39,20 @@ func GenerateCSV(data CSVReportData) ([]byte, error) {
 	var buf bytes.Buffer
 	writer := csv.NewWriter(&buf)
 
+	statusStr := strings.ToUpper(strings.TrimSpace(data.Status))
+	if statusStr == "" {
+		statusStr = "PUBLISHED"
+	}
+
 	// Metadata header
 	metaRows := [][]string{
-		{"# Ratels Worldwide Platform - Certified Public Report"},
+		{"# Platform", "Ratels Worldwide Platform - Official Report Export"},
 		{"Report Title", SanitizeCSVValue(data.Title)},
 		{"Public Reference", SanitizeCSVValue(data.PublicReference)},
 		{"Report Type", SanitizeCSVValue(data.ReportType)},
 		{"Reporting Period", SanitizeCSVValue(data.ReportingPeriod)},
 		{"Geographic Scope", SanitizeCSVValue(data.Scope)},
+		{"Publication Status", SanitizeCSVValue(statusStr)},
 		{"Publication Date", data.PublicationDate.Format(time.RFC3339)},
 		{"Data Hash (SHA-256)", SanitizeCSVValue(data.DataHash)},
 		{"Confidentiality Note", "Strict privacy protection applied. Internal ledgers and personal PII excluded."},

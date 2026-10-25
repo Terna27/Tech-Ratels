@@ -16,26 +16,26 @@ INSERT INTO public_report_snapshots (
     reporting_period, period_start, period_end,
     scope_type, zone_id, state_id, lga_id,
     status, aggregated_data, data_hash,
-    publication_version, correction_notes, created_by_user_id,
+    publication_version, correction_notes, created_by_user_id, created_by_type,
     created_at, updated_at
 ) VALUES (
     $1, $2, $3, $4, $5,
     $6, $7, $8,
     $9, $10, $11, $12,
     $13, $14, $15,
-    $16, $17, $18,
+    $16, $17, $18, $19,
     CURRENT_TIMESTAMP, CURRENT_TIMESTAMP
 )
 RETURNING *;
 
 -- name: GetReportSnapshotByID :one
 SELECT rs.*,
-       u.display_name AS creator_name,
+       COALESCE(u.display_name, CASE WHEN rs.created_by_type = 'system' THEN 'System' ELSE 'Administrator' END)::varchar AS creator_name,
        z.name AS zone_name,
        s.name AS state_name,
        l.name AS lga_name
 FROM public_report_snapshots rs
-JOIN users u ON u.id = rs.created_by_user_id
+LEFT JOIN users u ON u.id = rs.created_by_user_id
 LEFT JOIN zones z ON z.id = rs.zone_id
 LEFT JOIN states s ON s.id = rs.state_id
 LEFT JOIN lgas l ON l.id = rs.lga_id
@@ -44,12 +44,12 @@ LIMIT 1;
 
 -- name: GetReportSnapshotByRef :one
 SELECT rs.*,
-       u.display_name AS creator_name,
+       COALESCE(u.display_name, CASE WHEN rs.created_by_type = 'system' THEN 'System' ELSE 'Administrator' END)::varchar AS creator_name,
        z.name AS zone_name,
        s.name AS state_name,
        l.name AS lga_name
 FROM public_report_snapshots rs
-JOIN users u ON u.id = rs.created_by_user_id
+LEFT JOIN users u ON u.id = rs.created_by_user_id
 LEFT JOIN zones z ON z.id = rs.zone_id
 LEFT JOIN states s ON s.id = rs.state_id
 LEFT JOIN lgas l ON l.id = rs.lga_id
@@ -58,12 +58,12 @@ LIMIT 1;
 
 -- name: ListReportSnapshotsAdmin :many
 SELECT rs.*,
-       u.display_name AS creator_name,
+       COALESCE(u.display_name, CASE WHEN rs.created_by_type = 'system' THEN 'System' ELSE 'Administrator' END)::varchar AS creator_name,
        z.name AS zone_name,
        s.name AS state_name,
        l.name AS lga_name
 FROM public_report_snapshots rs
-JOIN users u ON u.id = rs.created_by_user_id
+LEFT JOIN users u ON u.id = rs.created_by_user_id
 LEFT JOIN zones z ON z.id = rs.zone_id
 LEFT JOIN states s ON s.id = rs.state_id
 LEFT JOIN lgas l ON l.id = rs.lga_id
@@ -238,15 +238,49 @@ LIMIT 1;
 -- Exports
 -- name: UpsertReportExport :one
 INSERT INTO public_report_exports (
-    id, snapshot_id, export_format, file_name, content_hash, storage_reference, export_status, created_at
+    id, snapshot_id, export_format, file_name, file_size_bytes, mime_type,
+    checksum_algorithm, content_hash, storage_reference, export_status, created_at, updated_at
 ) VALUES (
-    $1, $2, $3, $4, $5, $6, $7, CURRENT_TIMESTAMP
+    $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP
 )
-ON CONFLICT (id) DO UPDATE SET
+ON CONFLICT (snapshot_id, export_format) DO UPDATE SET
     file_name = EXCLUDED.file_name,
+    file_size_bytes = EXCLUDED.file_size_bytes,
+    mime_type = EXCLUDED.mime_type,
+    checksum_algorithm = EXCLUDED.checksum_algorithm,
     content_hash = EXCLUDED.content_hash,
     storage_reference = EXCLUDED.storage_reference,
-    export_status = EXCLUDED.export_status
+    export_status = EXCLUDED.export_status,
+    updated_at = CURRENT_TIMESTAMP
+RETURNING *;
+
+-- name: GetReportExportByID :one
+SELECT * FROM public_report_exports
+WHERE id = $1 LIMIT 1;
+
+-- name: GetReportExportBySnapshotAndFormat :one
+SELECT * FROM public_report_exports
+WHERE snapshot_id = $1 AND export_format = $2
+LIMIT 1;
+
+-- name: ListReportExportsBySnapshot :many
+SELECT * FROM public_report_exports
+WHERE snapshot_id = $1
+ORDER BY created_at DESC;
+
+-- name: DeleteReportExport :exec
+DELETE FROM public_report_exports
+WHERE id = $1;
+
+-- name: DeleteReportExportsBySnapshot :exec
+DELETE FROM public_report_exports
+WHERE snapshot_id = $1;
+
+-- name: UpdateReportExportStatus :one
+UPDATE public_report_exports
+SET export_status = $2,
+    updated_at = CURRENT_TIMESTAMP
+WHERE id = $1
 RETURNING *;
 
 -- Audit

@@ -609,6 +609,18 @@ func TestReportScheduler_SystemVsAdministratorAttribution(t *testing.T) {
 		t.Fatalf("expected 6 system audits with NULL performed_by_user_id, found %d (err: %v)", sysCount, err)
 	}
 
+	// Verify System snapshot records: created_by_user_id IS NULL and created_by_type == "system"
+	var sysSnapCount int
+	err = env.pool.QueryRow(ctx, `
+		SELECT COUNT(*) FROM public_report_snapshots
+		WHERE reporting_period = $1
+		  AND created_by_user_id IS NULL
+		  AND created_by_type = 'system'
+	`, pSystem).Scan(&sysSnapCount)
+	if err != nil || sysSnapCount != 6 {
+		t.Fatalf("expected 6 system snapshots with NULL created_by_user_id and created_by_type='system', found %d (err: %v)", sysSnapCount, err)
+	}
+
 	// Verify Admin audit records: performed_by_user_id == adminUser.ID and actor_type == "administrator"
 	var admCount int
 	err = env.pool.QueryRow(ctx, `
@@ -620,6 +632,18 @@ func TestReportScheduler_SystemVsAdministratorAttribution(t *testing.T) {
 	`, pAdmin, adminUser.ID).Scan(&admCount)
 	if err != nil || admCount != 6 {
 		t.Fatalf("expected 6 administrator audits with performed_by_user_id == %s, found %d (err: %v)", adminUser.ID, admCount, err)
+	}
+
+	// Verify Admin snapshot records: created_by_user_id == adminUser.ID and created_by_type == "administrator"
+	var admSnapCount int
+	err = env.pool.QueryRow(ctx, `
+		SELECT COUNT(*) FROM public_report_snapshots
+		WHERE reporting_period = $1
+		  AND created_by_user_id = $2
+		  AND created_by_type = 'administrator'
+	`, pAdmin, adminUser.ID).Scan(&admSnapCount)
+	if err != nil || admSnapCount != 6 {
+		t.Fatalf("expected 6 admin snapshots with created_by_user_id == %s and created_by_type='administrator', found %d (err: %v)", adminUser.ID, admSnapCount, err)
 	}
 }
 
