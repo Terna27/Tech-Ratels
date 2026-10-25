@@ -8,17 +8,15 @@ import (
 	"net/http"
 	"strconv"
 	"strings"
-	"time"
 
 	"github.com/go-chi/chi/v5"
-	"ratels-api/internal/db"
 	"ratels-api/internal/service"
 	"ratels-api/internal/worker"
 )
 
 // ReportSchedulerRunner defines the interface for triggering scheduled report cycles.
 type ReportSchedulerRunner interface {
-	RunScheduledCycle(ctx context.Context, targetMonth *time.Time, actorUser *db.User) (*worker.SchedulerRunResult, error)
+	RunScheduledCycle(ctx context.Context, params worker.RunSchedulerParams) (*worker.SchedulerRunResult, error)
 }
 
 type ReportHandler struct {
@@ -721,7 +719,13 @@ func (h *ReportHandler) GetSettingsAdmin(w http.ResponseWriter, r *http.Request)
 // -----------------------------------------------------------------------
 
 type RunSchedulerRequest struct {
-	TargetPeriod string `json:"target_period"` // Optional YYYY-MM
+	TargetPeriod string  `json:"target_period"` // Optional YYYY-MM or YYYY-Q[1-4]
+	PeriodType   string  `json:"period_type"`   // Optional "monthly", "quarterly", or "both"
+	ReportType   string  `json:"report_type"`   // Optional single category filter
+	ScopeType    string  `json:"scope_type"`    // Optional "national", "zone", "state", "lga"
+	ZoneID       *string `json:"zone_id"`
+	StateID      *string `json:"state_id"`
+	LgaID        *string `json:"lga_id"`
 }
 
 // RunSchedulerAdmin allows Super Admins and National Admins to trigger a scheduled report cycle.
@@ -743,17 +747,29 @@ func (h *ReportHandler) RunSchedulerAdmin(w http.ResponseWriter, r *http.Request
 		_ = json.NewDecoder(r.Body).Decode(&req)
 	}
 
-	var targetMonth *time.Time
-	if req.TargetPeriod != "" {
-		t, err := time.Parse("2006-01", strings.TrimSpace(req.TargetPeriod))
-		if err != nil {
-			ErrorJSON(w, http.StatusBadRequest, "INVALID_INPUT", "target_period must be in YYYY-MM format", err.Error())
+	var targetPeriodPtr *string
+	if strings.TrimSpace(req.TargetPeriod) != "" {
+		cleaned := strings.TrimSpace(req.TargetPeriod)
+		if _, _, _, _, err := worker.ParsePeriodUTC(cleaned); err != nil {
+			ErrorJSON(w, http.StatusBadRequest, "INVALID_INPUT", "target_period must be in YYYY-MM or YYYY-Q[1-4] format", err.Error())
 			return
 		}
-		targetMonth = &t
+		targetPeriodPtr = &cleaned
 	}
 
-	res, err := h.scheduler.RunScheduledCycle(ctx, targetMonth, user)
+	params := worker.RunSchedulerParams{
+		TargetPeriod:  targetPeriodPtr,
+		PeriodType:    req.PeriodType,
+		TriggerSource: "admin_manual",
+		ActorUser:     user,
+		ReportType:    req.ReportType,
+		ScopeType:     req.ScopeType,
+		ZoneID:        req.ZoneID,
+		StateID:       req.StateID,
+		LgaID:         req.LgaID,
+	}
+
+	res, err := h.scheduler.RunScheduledCycle(ctx, params)
 	if err != nil {
 		if errors.Is(err, worker.ErrSchedulerAlreadyRunning) {
 			ErrorJSON(w, http.StatusConflict, "LOCK_CONFLICT", "Scheduler cycle already running on another node", nil)
@@ -791,23 +807,42 @@ func (h *ReportHandler) RunSchedulerCron(w http.ResponseWriter, r *http.Request)
 
 	var req RunSchedulerRequest
 	targetParam := r.URL.Query().Get("target_period")
+	pTypeParam := r.URL.Query().Get("period_type")
+	repTypeParam := r.URL.Query().Get("report_type")
+
 	if targetParam != "" {
 		req.TargetPeriod = targetParam
-	} else if r.Body != nil {
+	}
+	if pTypeParam != "" {
+		req.PeriodType = pTypeParam
+	}
+	if repTypeParam != "" {
+		req.ReportType = repTypeParam
+	}
+
+	if r.Body != nil && r.ContentLength > 0 {
 		_ = json.NewDecoder(r.Body).Decode(&req)
 	}
 
-	var targetMonth *time.Time
-	if req.TargetPeriod != "" {
-		t, err := time.Parse("2006-01", strings.TrimSpace(req.TargetPeriod))
-		if err != nil {
-			ErrorJSON(w, http.StatusBadRequest, "INVALID_INPUT", "target_period must be in YYYY-MM format", err.Error())
+	var targetPeriodPtr *string
+	if strings.TrimSpace(req.TargetPeriod) != "" {
+		cleaned := strings.TrimSpace(req.TargetPeriod)
+		if _, _, _, _, err := worker.ParsePeriodUTC(cleaned); err != nil {
+			ErrorJSON(w, http.StatusBadRequest, "INVALID_INPUT", "target_period must be in YYYY-MM or YYYY-Q[1-4] format", err.Error())
 			return
 		}
-		targetMonth = &t
+		targetPeriodPtr = &cleaned
 	}
 
-	res, err := h.scheduler.RunScheduledCycle(ctx, targetMonth, nil)
+	params := worker.RunSchedulerParams{
+		TargetPeriod:  targetPeriodPtr,
+		PeriodType:    req.PeriodType,
+		TriggerSource: "external_cron",
+		ActorUser:     nil,
+		ReportType:    req.ReportType,
+	}
+
+	res, err := h.scheduler.RunScheduledCycle(ctx, params)
 	if err != nil {
 		if errors.Is(err, worker.ErrSchedulerAlreadyRunning) {
 			ErrorJSON(w, http.StatusConflict, "LOCK_CONFLICT", "Scheduler cycle already running on another node", nil)

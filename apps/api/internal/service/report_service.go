@@ -41,6 +41,8 @@ type GenerateReportRequest struct {
 	ZoneID          *string `json:"zone_id"`
 	StateID         *string `json:"state_id"`
 	LGAID           *string `json:"lga_id"`
+	TriggerSource   string  `json:"trigger_source,omitempty"` // "scheduled", "external_cron", "admin_manual"
+	IsSystemActor   bool    `json:"is_system_actor,omitempty"`
 }
 
 type ReviewReportRequest struct {
@@ -826,7 +828,15 @@ func (s *ReportService) GenerateSnapshot(ctx context.Context, adminUser *db.User
 		defPg = pgtype.Text{String: *definitionID, Valid: true}
 	}
 
-	row, err := s.repo.Queries().CreateReportSnapshot(ctx, db.CreateReportSnapshotParams{
+	tx, err := s.repo.Pool().Begin(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("failed to begin snapshot transaction: %w", err)
+	}
+	defer tx.Rollback(ctx)
+
+	qtx := s.repo.Queries().WithTx(tx)
+
+	row, err := qtx.CreateReportSnapshot(ctx, db.CreateReportSnapshotParams{
 		ID:                 snapshotID,
 		PublicReference:    publicRef,
 		DefinitionID:       defPg,
@@ -850,25 +860,60 @@ func (s *ReportService) GenerateSnapshot(ctx context.Context, adminUser *db.User
 		return nil, fmt.Errorf("failed creating report snapshot: %w", err)
 	}
 
-	// Log audit
+	triggerSource := req.TriggerSource
+	if triggerSource == "" {
+		if req.IsSystemActor {
+			triggerSource = "scheduled"
+		} else {
+			triggerSource = "admin_manual"
+		}
+	}
+
+	var auditUserPg pgtype.Text
+	actorType := "administrator"
+	actorIdentity := adminUser.DisplayName
+	if adminUser.Email.Valid && adminUser.Email.String != "" {
+		actorIdentity = adminUser.Email.String
+	}
+	if req.IsSystemActor {
+		actorType = "system"
+		actorIdentity = "system:" + triggerSource
+		auditUserPg = pgtype.Text{Valid: false}
+	} else {
+		auditUserPg = pgtype.Text{String: adminUser.ID, Valid: true}
+	}
+
 	detailsJSON, _ := json.Marshal(map[string]interface{}{
-		"report_type": req.ReportType,
-		"public_ref":  publicRef,
-		"scope_type":  scopeType,
-		"data_hash":   dataHash,
+		"report_category":    req.ReportType,
+		"reporting_period":   req.ReportingPeriod,
+		"scope_type":         scopeType,
+		"trigger_source":     triggerSource,
+		"actor_type":         actorType,
+		"actor_identity":     actorIdentity,
+		"outcome":            "generated",
+		"snapshot_reference": publicRef,
+		"data_hash":          dataHash,
+		"period_start":       pStart.Format("2006-01-02"),
+		"period_end":         pEnd.Format("2006-01-02"),
 	})
 	var ipPg pgtype.Text
 	if ipAddress != nil {
 		ipPg = pgtype.Text{String: *ipAddress, Valid: true}
 	}
-	_, _ = s.repo.Queries().CreateReportAudit(ctx, db.CreateReportAuditParams{
+	if _, err := qtx.CreateReportAudit(ctx, db.CreateReportAuditParams{
 		ID:                security.GenerateUUID(),
 		SnapshotID:        pgtype.Text{String: snapshotID, Valid: true},
 		Action:            "draft_created",
-		PerformedByUserID: pgtype.Text{String: adminUser.ID, Valid: true},
+		PerformedByUserID: auditUserPg,
 		Details:           detailsJSON,
 		IpAddress:         ipPg,
-	})
+	}); err != nil {
+		return nil, fmt.Errorf("failed creating report audit record: %w", err)
+	}
+
+	if err := tx.Commit(ctx); err != nil {
+		return nil, fmt.Errorf("failed committing report snapshot transaction: %w", err)
+	}
 
 	return s.GetSnapshotDetailAdmin(ctx, row.ID)
 }
