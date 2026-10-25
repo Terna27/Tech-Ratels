@@ -374,6 +374,43 @@ func (q *Queries) AggregateParticipationMetrics(ctx context.Context, arg Aggrega
 	return i, err
 }
 
+const checkReportSnapshotExists = `-- name: CheckReportSnapshotExists :one
+SELECT COUNT(*)::bigint FROM public_report_snapshots
+WHERE report_type = $1
+  AND reporting_period = $2
+  AND scope_type = $3
+  AND (
+      (scope_type = 'national' AND zone_id IS NULL AND state_id IS NULL AND lga_id IS NULL)
+      OR (scope_type = 'zone' AND zone_id = $4)
+      OR (scope_type = 'state' AND state_id = $5)
+      OR (scope_type = 'lga' AND lga_id = $6)
+  )
+  AND status NOT IN ('withdrawn', 'superseded')
+`
+
+type CheckReportSnapshotExistsParams struct {
+	ReportType      string      `json:"report_type"`
+	ReportingPeriod string      `json:"reporting_period"`
+	ScopeType       string      `json:"scope_type"`
+	ZoneID          pgtype.Text `json:"zone_id"`
+	StateID         pgtype.Text `json:"state_id"`
+	LgaID           pgtype.Text `json:"lga_id"`
+}
+
+func (q *Queries) CheckReportSnapshotExists(ctx context.Context, arg CheckReportSnapshotExistsParams) (int64, error) {
+	row := q.db.QueryRow(ctx, checkReportSnapshotExists,
+		arg.ReportType,
+		arg.ReportingPeriod,
+		arg.ScopeType,
+		arg.ZoneID,
+		arg.StateID,
+		arg.LgaID,
+	)
+	var column_1 int64
+	err := row.Scan(&column_1)
+	return column_1, err
+}
+
 const countPublicPublications = `-- name: CountPublicPublications :one
 SELECT COUNT(*)
 FROM public_report_publications rp
@@ -632,6 +669,34 @@ func (q *Queries) CreateReportSnapshot(ctx context.Context, arg CreateReportSnap
 		&i.CreatedByUserID,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+	)
+	return i, err
+}
+
+const getFirstActiveAdminUser = `-- name: GetFirstActiveAdminUser :one
+SELECT id, email, phone, password_hash, display_name, membership_reference, status, primary_role, is_verified, created_at, updated_at, version FROM users
+WHERE primary_role IN ('super_admin', 'national_admin')
+  AND status = 'active'
+ORDER BY created_at ASC
+LIMIT 1
+`
+
+func (q *Queries) GetFirstActiveAdminUser(ctx context.Context) (User, error) {
+	row := q.db.QueryRow(ctx, getFirstActiveAdminUser)
+	var i User
+	err := row.Scan(
+		&i.ID,
+		&i.Email,
+		&i.Phone,
+		&i.PasswordHash,
+		&i.DisplayName,
+		&i.MembershipReference,
+		&i.Status,
+		&i.PrimaryRole,
+		&i.IsVerified,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+		&i.Version,
 	)
 	return i, err
 }

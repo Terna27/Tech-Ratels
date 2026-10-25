@@ -1,24 +1,42 @@
 package handler
 
 import (
+	"context"
+	"crypto/subtle"
 	"encoding/json"
 	"errors"
 	"net/http"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/go-chi/chi/v5"
+	"ratels-api/internal/db"
 	"ratels-api/internal/service"
+	"ratels-api/internal/worker"
 )
+
+// ReportSchedulerRunner defines the interface for triggering scheduled report cycles.
+type ReportSchedulerRunner interface {
+	RunScheduledCycle(ctx context.Context, targetMonth *time.Time, actorUser *db.User) (*worker.SchedulerRunResult, error)
+}
 
 type ReportHandler struct {
 	reportService *service.ReportService
+	scheduler     ReportSchedulerRunner
+	cronSecret    string
 }
 
 func NewReportHandler(reportService *service.ReportService) *ReportHandler {
 	return &ReportHandler{
 		reportService: reportService,
 	}
+}
+
+// SetScheduler attaches a report scheduler engine and cron authentication secret.
+func (h *ReportHandler) SetScheduler(scheduler ReportSchedulerRunner, cronSecret string) {
+	h.scheduler = scheduler
+	h.cronSecret = cronSecret
 }
 
 // -----------------------------------------------------------------------
@@ -696,4 +714,108 @@ func (h *ReportHandler) GetSettingsAdmin(w http.ResponseWriter, r *http.Request)
 	}
 
 	JSON(w, http.StatusOK, defs)
+}
+
+// -----------------------------------------------------------------------
+// Scheduled Generation Triggers (Admin & Render Free Cron Trigger)
+// -----------------------------------------------------------------------
+
+type RunSchedulerRequest struct {
+	TargetPeriod string `json:"target_period"` // Optional YYYY-MM
+}
+
+// RunSchedulerAdmin allows Super Admins and National Admins to trigger a scheduled report cycle.
+func (h *ReportHandler) RunSchedulerAdmin(w http.ResponseWriter, r *http.Request) {
+	ctx := r.Context()
+	user := GetCurrentUser(ctx)
+	if user == nil {
+		ErrorJSON(w, http.StatusUnauthorized, "UNAUTHORIZED", "Authentication required", nil)
+		return
+	}
+
+	if h.scheduler == nil {
+		ErrorJSON(w, http.StatusServiceUnavailable, "SERVICE_UNAVAILABLE", "Report scheduler engine is not configured", nil)
+		return
+	}
+
+	var req RunSchedulerRequest
+	if r.Body != nil {
+		_ = json.NewDecoder(r.Body).Decode(&req)
+	}
+
+	var targetMonth *time.Time
+	if req.TargetPeriod != "" {
+		t, err := time.Parse("2006-01", strings.TrimSpace(req.TargetPeriod))
+		if err != nil {
+			ErrorJSON(w, http.StatusBadRequest, "INVALID_INPUT", "target_period must be in YYYY-MM format", err.Error())
+			return
+		}
+		targetMonth = &t
+	}
+
+	res, err := h.scheduler.RunScheduledCycle(ctx, targetMonth, user)
+	if err != nil {
+		if errors.Is(err, worker.ErrSchedulerAlreadyRunning) {
+			ErrorJSON(w, http.StatusConflict, "LOCK_CONFLICT", "Scheduler cycle already running on another node", nil)
+			return
+		}
+		ErrorJSON(w, http.StatusInternalServerError, "INTERNAL_ERROR", "Failed executing scheduled reports cycle", err.Error())
+		return
+	}
+
+	JSON(w, http.StatusOK, res)
+}
+
+// RunSchedulerCron allows external cron callers (Render Cron, GitHub Actions, monitoring) to trigger scheduled generation.
+func (h *ReportHandler) RunSchedulerCron(w http.ResponseWriter, r *http.Request) {
+	ctx := r.Context()
+
+	// Authenticate cron trigger via X-Cron-Secret header or Bearer token
+	cronSecret := r.Header.Get("X-Cron-Secret")
+	if cronSecret == "" {
+		authHeader := r.Header.Get("Authorization")
+		if strings.HasPrefix(authHeader, "Bearer ") {
+			cronSecret = strings.TrimPrefix(authHeader, "Bearer ")
+		}
+	}
+
+	if h.cronSecret == "" || subtle.ConstantTimeCompare([]byte(cronSecret), []byte(h.cronSecret)) != 1 {
+		ErrorJSON(w, http.StatusUnauthorized, "UNAUTHORIZED", "Invalid or missing cron secret", nil)
+		return
+	}
+
+	if h.scheduler == nil {
+		ErrorJSON(w, http.StatusServiceUnavailable, "SERVICE_UNAVAILABLE", "Report scheduler engine is not configured", nil)
+		return
+	}
+
+	var req RunSchedulerRequest
+	targetParam := r.URL.Query().Get("target_period")
+	if targetParam != "" {
+		req.TargetPeriod = targetParam
+	} else if r.Body != nil {
+		_ = json.NewDecoder(r.Body).Decode(&req)
+	}
+
+	var targetMonth *time.Time
+	if req.TargetPeriod != "" {
+		t, err := time.Parse("2006-01", strings.TrimSpace(req.TargetPeriod))
+		if err != nil {
+			ErrorJSON(w, http.StatusBadRequest, "INVALID_INPUT", "target_period must be in YYYY-MM format", err.Error())
+			return
+		}
+		targetMonth = &t
+	}
+
+	res, err := h.scheduler.RunScheduledCycle(ctx, targetMonth, nil)
+	if err != nil {
+		if errors.Is(err, worker.ErrSchedulerAlreadyRunning) {
+			ErrorJSON(w, http.StatusConflict, "LOCK_CONFLICT", "Scheduler cycle already running on another node", nil)
+			return
+		}
+		ErrorJSON(w, http.StatusInternalServerError, "INTERNAL_ERROR", "Failed executing scheduled reports cycle", err.Error())
+		return
+	}
+
+	JSON(w, http.StatusOK, res)
 }

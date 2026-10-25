@@ -68,14 +68,19 @@ func main() {
 	}
 
 	notifService := service.NewNotificationService(repo, auditService, emailSender, smsSender, cfg.FrontendBaseURL)
+	reportService := service.NewReportService(repo, notifService, auditService)
 
 	outboxWorker := worker.NewOutboxWorker(repo, notifService, emailSender, smsSender, nil)
 	outboxWorker.Start(ctx)
 
-	log.Println("Standalone Notification Outbox Worker running. Waiting for events...")
+	reportScheduler := worker.NewReportScheduler(repo, reportService, nil)
+	reportScheduler.Start(ctx)
+
+	log.Println("Standalone Notification Outbox & Reports Scheduler Worker running. Waiting for events...")
 	<-ctx.Done()
 
-	log.Println("Shutting down worker gracefully...")
+	log.Println("Shutting down workers gracefully...")
+	reportScheduler.Stop()
 	outboxWorker.Stop()
 	log.Println("Worker terminated.")
 }

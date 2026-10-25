@@ -663,14 +663,18 @@ func (s *ReportService) GenerateSnapshot(ctx context.Context, adminUser *db.User
 		return nil, fmt.Errorf("%w: %q", ErrInvalidReportScope, req.ReportType)
 	}
 
-	// Parse dates
+	// Parse dates in UTC with inclusive end-of-day boundary
 	pStart, err := time.Parse("2006-01-02", req.PeriodStart)
 	if err != nil {
-		pStart = time.Date(time.Now().Year(), 1, 1, 0, 0, 0, 0, time.UTC)
+		pStart = time.Date(time.Now().UTC().Year(), 1, 1, 0, 0, 0, 0, time.UTC)
+	} else {
+		pStart = time.Date(pStart.Year(), pStart.Month(), pStart.Day(), 0, 0, 0, 0, time.UTC)
 	}
 	pEnd, err := time.Parse("2006-01-02", req.PeriodEnd)
 	if err != nil {
-		pEnd = time.Now()
+		pEnd = time.Now().UTC()
+	} else {
+		pEnd = time.Date(pEnd.Year(), pEnd.Month(), pEnd.Day(), 23, 59, 59, 999999999, time.UTC)
 	}
 
 	scopeType := req.ScopeType

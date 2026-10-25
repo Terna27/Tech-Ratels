@@ -81,6 +81,26 @@ WHERE (sqlc.narg('status')::varchar IS NULL OR status = sqlc.narg('status'))
   AND (sqlc.narg('scope_type')::varchar IS NULL OR scope_type = sqlc.narg('scope_type'))
   AND (sqlc.narg('state_id')::varchar IS NULL OR state_id = sqlc.narg('state_id'));
 
+-- name: CheckReportSnapshotExists :one
+SELECT COUNT(*)::bigint FROM public_report_snapshots
+WHERE report_type = $1
+  AND reporting_period = $2
+  AND scope_type = $3
+  AND (
+      (scope_type = 'national' AND zone_id IS NULL AND state_id IS NULL AND lga_id IS NULL)
+      OR (scope_type = 'zone' AND zone_id = sqlc.narg('zone_id'))
+      OR (scope_type = 'state' AND state_id = sqlc.narg('state_id'))
+      OR (scope_type = 'lga' AND lga_id = sqlc.narg('lga_id'))
+  )
+  AND status NOT IN ('withdrawn', 'superseded');
+
+-- name: GetFirstActiveAdminUser :one
+SELECT * FROM users
+WHERE primary_role IN ('super_admin', 'national_admin')
+  AND status = 'active'
+ORDER BY created_at ASC
+LIMIT 1;
+
 -- name: UpdateReportSnapshotStatus :one
 UPDATE public_report_snapshots
 SET status = $2,

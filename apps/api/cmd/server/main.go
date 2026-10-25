@@ -230,7 +230,12 @@ func main() {
 
 	// Transparency & Public Reports Subsystem
 	reportService := service.NewReportService(repo, notifService, auditService)
+	reportScheduler := worker.NewReportScheduler(repo, reportService, nil)
+	reportScheduler.Start(ctx)
+	defer reportScheduler.Stop()
+
 	reportH := handler.NewReportHandler(reportService)
+	reportH.SetScheduler(reportScheduler, cfg.ReportCronSecret)
 
 	router := handler.NewRouter(handler.RouterParams{
 		Config:                  cfg,
