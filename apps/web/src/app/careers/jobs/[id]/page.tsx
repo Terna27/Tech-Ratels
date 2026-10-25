@@ -479,7 +479,7 @@ export default function JobDetailPage({ params }: { params: Promise<{ id: string
                 {!user ? (
                   <div className="space-y-4 py-4 text-center">
                     <Alert type="warning" title="Authentication Required">
-                      You must be signed in with your Nigerian Ratels member account to apply for
+                      You must be signed in with your Ratels Worldwide member account to apply for
                       vacancies.
                     </Alert>
                     <div className="pt-2 flex justify-center gap-3">

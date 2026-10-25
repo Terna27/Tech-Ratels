@@ -508,7 +508,7 @@ func (s *ReportService) AggregateSourceData(ctx context.Context, reportType, sco
 			TotalDonationsKobo:         fdMetrics.TotalDonationsKobo,
 			TotalDonationsFormatted:    "₦" + FormatKoboToNaira(fdMetrics.TotalDonationsKobo),
 			ProvisionalEntityNotice:    "Martinsvincent Ortse Foundation registration is provisional pending final CAC review. Dedicated charitable accounts operate with dual-signatory verification.",
-			StrictSegregationNotice:    "Foundation humanitarian funds are strictly separated from Nigerian Ratels operational funds in double-entry ledgers.",
+			StrictSegregationNotice:    "Foundation humanitarian funds are strictly separated from Ratels Worldwide operational funds in double-entry ledgers.",
 			PaymentSafetySwitchEnabled: true,
 			ReportingPeriod:            periodLabel,
 		}
@@ -1380,7 +1380,7 @@ func (s *ReportService) ExportReportPDF(ctx context.Context, idOrRef string) ([]
 		PublicationDate:   pub.PublishedAt,
 		Version:           pub.PublicationVersion,
 		DataHash:          pub.DataHash,
-		CertificationNote: "This document is a certified public transparency report issued by the Nigerian Ratels Management System.",
+		CertificationNote: "This document is a certified public transparency report issued by the Ratels Worldwide Platform.",
 	}
 
 	// Decode aggregated data to construct metrics and tables

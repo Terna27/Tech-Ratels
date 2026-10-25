@@ -78,7 +78,7 @@ export default function CleanupsReportPage() {
           </div>
           <h1 className="text-2xl sm:text-3xl font-extrabold">Cleanup Operations & Waste Metric Reports</h1>
           <p className="text-xs text-emerald-200 leading-relaxed">
-            Every last Saturday of the month, Nigerian Ratels volunteers mobilize across 774 LGAs to reclaim public spaces,
+            Every last Saturday of the month, Ratels Worldwide volunteers mobilize across 774 LGAs to reclaim public spaces,
             clear drainage channels, and prevent urban flooding.
           </p>
         </div>

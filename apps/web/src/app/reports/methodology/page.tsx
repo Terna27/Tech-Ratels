@@ -59,7 +59,7 @@ export default function MethodologyReportPage() {
           Data Sources, Aggregation Logic & Counting Rules
         </h1>
         <p className="text-sm text-emerald-100/90 max-w-3xl leading-relaxed">
-          The Nigerian Ratels platform maintains strict separation between verified field achievements,
+          The Ratels Worldwide platform maintains strict separation between verified field achievements,
           reconciled accounting ledgers, and provisional disclosures. This document details how each metric
           is collected, verified, and published.
         </p>

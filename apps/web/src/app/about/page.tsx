@@ -9,10 +9,10 @@ export default function AboutPage() {
       <div className="space-y-4">
         <Badge variant="primary" size="md">About the Platform</Badge>
         <h1 className="text-3xl font-extrabold text-gray-900 tracking-tight">
-          Nigerian Ratels Management System
+          Ratels Worldwide Platform
         </h1>
         <p className="text-gray-600 leading-relaxed">
-          The operational technology platform designed to support the Nigerian Ratels movement associated
+          The operational technology platform designed to support the Ratels Worldwide movement associated
           in the project brief with Chief VeryDarkMan (VDM). Built to provide simple, mobile-friendly tools
           for ordinary members while enforcing transparent, scoped administration for coordinators.
         </p>

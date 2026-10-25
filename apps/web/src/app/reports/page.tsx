@@ -134,7 +134,7 @@ export default function PublicReportsPage() {
               <span>Certified Public Transparency & Accountability Portal</span>
             </div>
             <h1 className="text-3xl sm:text-4xl font-extrabold tracking-tight">
-              Nigerian Ratels Impact & Performance Reports
+              Ratels Worldwide Impact & Performance Reports
             </h1>
             <p className="text-sm text-emerald-100/90 leading-relaxed">
               Real-time, audited figures covering environmental cleanups, civic volunteer participation,

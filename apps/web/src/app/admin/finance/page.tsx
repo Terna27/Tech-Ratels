@@ -1284,7 +1284,7 @@ export default function AdminFinancePage() {
               </div>
               <div className="flex gap-2 text-xs">
                 <span className="px-3 py-1 bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 rounded-full font-medium">
-                  Nigerian Ratels
+                  Ratels Worldwide
                 </span>
                 <span className="px-3 py-1 bg-blue-500/10 text-blue-400 border border-blue-500/20 rounded-full font-medium">
                   Martinsvincent Ortse Foundation
@@ -1312,7 +1312,7 @@ export default function AdminFinancePage() {
                           <td className="p-4 font-mono text-xs text-white">{don.reference}</td>
                           <td className="p-4 capitalize">
                             <Badge variant={don.entity_type === "foundation" ? "info" : "success"}>
-                              {don.entity_type === "foundation" ? "Ortse Foundation" : "Nigerian Ratels"}
+                              {don.entity_type === "foundation" ? "Ortse Foundation" : "Ratels Worldwide"}
                             </Badge>
                           </td>
                           <td className="p-4">
@@ -2251,7 +2251,7 @@ export default function AdminFinancePage() {
                 <input
                   type="text"
                   required
-                  placeholder="e.g. Nigerian Ratels Movement"
+                  placeholder="e.g. Ratels Worldwide Movement"
                   value={acctName}
                   onChange={(e) => setAcctName(e.target.value)}
                   className="w-full bg-slate-950 border border-slate-800 rounded-lg p-2.5 text-sm text-white"
@@ -2277,7 +2277,7 @@ export default function AdminFinancePage() {
                   onChange={(e) => setBankOrgType(e.target.value as any)}
                   className="w-full bg-slate-950 border border-slate-800 rounded-lg p-2.5 text-sm text-white"
                 >
-                  <option value="ratels">Nigerian Ratels Movement</option>
+                  <option value="ratels">Ratels Worldwide Movement</option>
                   <option value="foundation">Martinsvincent Ortse Foundation</option>
                 </select>
               </div>

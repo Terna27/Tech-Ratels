@@ -180,7 +180,7 @@ func GeneratePDF(data PDFReportData) ([]byte, error) {
 
 		certNote := data.CertificationNote
 		if certNote == "" {
-			certNote = "Certified official publication authorized by Nigerian Ratels National Governance & Transparency Office."
+			certNote = "Certified official publication authorized by Ratels Worldwide Governance & Transparency Office."
 		}
 		stream.WriteString(fmt.Sprintf("BT /F2 8 Tf 0.024 0.306 0.231 rg 46 %.2f Td (GOVERNANCE CERTIFICATION & DATA INTEGRITY SEAL) Tj ET\n", curY-16))
 		stream.WriteString(fmt.Sprintf("BT /F1 7.5 Tf 0.2 0.25 0.3 rg 46 %.2f Td (%s) Tj ET\n", curY-28, escapePDFText(certNote)))
@@ -190,7 +190,7 @@ func GeneratePDF(data PDFReportData) ([]byte, error) {
 
 	// Bottom Footer
 	stream.WriteString("0.85 0.88 0.9 rg 36 50 523.28 1 re f\n")
-	stream.WriteString("BT /F1 7 Tf 0.45 0.5 0.55 rg 36 38 Td (Nigerian Ratels Management System - Official Public Transparency Portal - https://ratels.onrender.com/reports) Tj ET\n")
+	stream.WriteString("BT /F1 7 Tf 0.45 0.5 0.55 rg 36 38 Td (Ratels Worldwide Platform - Official Public Transparency Portal - https://ratels.onrender.com/reports) Tj ET\n")
 	stream.WriteString("BT /F2 7 Tf 0.024 0.306 0.231 rg 470 38 Td (STRICT CONFIDENTIALITY PRESERVED) Tj ET\n")
 
 	contentBytes := stream.Bytes()

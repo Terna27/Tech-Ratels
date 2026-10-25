@@ -400,7 +400,7 @@ func (w *OutboxWorker) resolveEmailContent(ctx context.Context, eventType, recip
 	}
 
 	// Fallback generic content
-	title := fmt.Sprintf("Nigerian Ratels Notification: %s", strings.ReplaceAll(eventType, "_", " "))
+	title := fmt.Sprintf("Ratels Worldwide Notification: %s", strings.ReplaceAll(eventType, "_", " "))
 	body := fmt.Sprintf("Hello %s,\n\nYou have a new notification regarding %s.", recipientName, eventType)
 	htmlBody := fmt.Sprintf("<p>%s</p>", body)
 	return title, htmlBody, body

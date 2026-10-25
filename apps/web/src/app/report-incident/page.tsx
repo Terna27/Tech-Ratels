@@ -263,7 +263,7 @@ export default function ReportIncidentPage() {
               Emergency & Safety Notice
             </h2>
             <p className="text-xs sm:text-sm text-red-900 leading-relaxed font-medium">
-              <strong>Nigerian Ratels is NOT an emergency response service or law enforcement agency.</strong> If you or anyone else is facing immediate physical violence, a life-threatening medical situation, or imminent danger, please contact the <strong>Nigeria Police Force (112 / 199)</strong> or your local emergency dispatch immediately.
+              <strong>Ratels Worldwide is NOT an emergency response service or law enforcement agency.</strong> If you or anyone else is facing immediate physical violence, a life-threatening medical situation, or imminent danger, please contact the <strong>Nigeria Police Force (112 / 199)</strong> or your local emergency dispatch immediately.
             </p>
           </div>
         </div>
@@ -382,7 +382,7 @@ export default function ReportIncidentPage() {
               Report a Safeguarding or Conduct Concern
             </h1>
             <p className="text-xs sm:text-sm text-emerald-200 max-w-2xl leading-relaxed">
-              The Nigerian Ratels Movement enforces zero tolerance for harassment, exploitation, child endangerment, financial corruption, and retaliation. You may choose to report completely anonymously.
+              The Ratels Worldwide Movement enforces zero tolerance for harassment, exploitation, child endangerment, financial corruption, and retaliation. You may choose to report completely anonymously.
             </p>
           </div>
 

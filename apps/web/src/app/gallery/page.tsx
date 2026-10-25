@@ -223,7 +223,7 @@ export default function PublicGalleryPage() {
                 Movement Media Gallery
               </h1>
               <p className="text-sm sm:text-base text-emerald-100/90 leading-relaxed">
-                Explore sanitized and approved photographs and videos documenting Nigerian Ratels volunteer cleanup operations, community sanitation interventions, and civic stewardship across all 36 States and the FCT.
+                Explore sanitized and approved photographs and videos documenting Ratels Worldwide volunteer cleanup operations, community sanitation interventions, and civic stewardship across all 36 States and the FCT.
               </p>
             </div>
 

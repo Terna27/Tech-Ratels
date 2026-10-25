@@ -429,7 +429,7 @@ export default function AdminInventoryPage() {
     }
   };
 
-  if (isLoading || loading) return <Spinner text="Loading Nigerian Ratels Inventory System..." />;
+  if (isLoading || loading) return <Spinner text="Loading Ratels Worldwide Inventory System..." />;
   if (!user) return null;
 
   // Filtered Lists
@@ -486,7 +486,7 @@ export default function AdminInventoryPage() {
             Inventory & Material Distribution
           </h1>
           <p className="text-xs text-gray-500 mt-1">
-            Nigerian Ratels Complete Blueprint v2.0 Section 05 — Nationwide Supply Chain & Multi-Tier Material Tracking
+            Ratels Worldwide Complete Blueprint v2.0 Section 05 — Nationwide Supply Chain & Multi-Tier Material Tracking
           </p>
         </div>
 

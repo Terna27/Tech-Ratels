@@ -1152,7 +1152,7 @@ export default function SellerPortalPage() {
                   required
                   value={prodTitle}
                   onChange={(e) => setProdTitle(e.target.value)}
-                  placeholder="e.g. Official Nigerian Ratels Premium Beret"
+                  placeholder="e.g. Official Ratels Worldwide Premium Beret"
                   className="w-full px-3 py-2 border border-gray-300 rounded-xl focus:ring-2 focus:ring-emerald-500"
                 />
               </div>
