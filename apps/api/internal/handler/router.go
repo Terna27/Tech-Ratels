@@ -461,6 +461,11 @@ func NewRouter(p RouterParams) http.Handler {
 			}
 			api.Route("/reports", mountReports)
 			api.Route("/public/reports", mountReports)
+
+			// Internal Automated Triggers (Render Free / External Cron)
+			api.Route("/internal", func(in chi.Router) {
+				in.Post("/cron/reports", p.ReportHandler.RunSchedulerCron)
+			})
 		}
 
 		// Admin Workspace
@@ -575,6 +580,7 @@ func NewRouter(p RouterParams) http.Handler {
 					admRep.With(RequireRole("super_admin")).Post("/{id}/publish", p.ReportHandler.PublishSnapshotAdmin)
 					admRep.With(RequireRole("super_admin")).Post("/{id}/withdraw", p.ReportHandler.WithdrawSnapshotAdmin)
 					admRep.Post("/{id}/revise", p.ReportHandler.ReviseSnapshotAdmin)
+					admRep.With(RequireRole("super_admin", "national_admin")).Post("/scheduler/run", p.ReportHandler.RunSchedulerAdmin)
 				})
 			}
 		})

@@ -45,6 +45,7 @@ type Config struct {
 	SafeguardingReportingEnabled bool
 	R2SafeguardingBucketName     string
 	SafeguardingEncryptionKey    string
+	ReportCronSecret             string
 }
 
 func Load() *Config {
@@ -219,6 +220,7 @@ func Load() *Config {
 
 	r2SafeguardingBucket := strings.TrimSpace(os.Getenv("R2_SAFEGUARDING_BUCKET_NAME"))
 	safeguardingEncKey := strings.TrimSpace(os.Getenv("SAFEGUARDING_ENCRYPTION_KEY"))
+	reportCronSecret := strings.TrimSpace(os.Getenv("REPORT_CRON_SECRET"))
 
 	return &Config{
 		DatabaseURL:               dbURL,
@@ -251,6 +253,7 @@ func Load() *Config {
 		SafeguardingReportingEnabled: safeguardingEnabled,
 		R2SafeguardingBucketName:     r2SafeguardingBucket,
 		SafeguardingEncryptionKey:    safeguardingEncKey,
+		ReportCronSecret:             reportCronSecret,
 	}
 }
 

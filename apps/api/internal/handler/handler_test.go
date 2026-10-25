@@ -20,6 +20,7 @@ import (
 	"ratels-api/internal/repository"
 	"ratels-api/internal/service"
 	"ratels-api/internal/storage"
+	"ratels-api/internal/worker"
 )
 
 type TestHarness struct {
@@ -99,6 +100,8 @@ func setupTestHarness(t *testing.T) *TestHarness {
 	commProjectH := handler.NewCommunityProjectHandler(commProjectSvc)
 	galleryH := handler.NewGalleryHandler(gallerySvc)
 	reportH := handler.NewReportHandler(reportSvc)
+	reportScheduler := worker.NewReportScheduler(repo, reportSvc, nil)
+	reportH.SetScheduler(reportScheduler, "test_cron_secret_32_chars_long_123")
 
 	router := handler.NewRouter(handler.RouterParams{
 		Config:                  cfg,

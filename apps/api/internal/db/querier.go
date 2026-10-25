@@ -29,6 +29,7 @@ type Querier interface {
 	CalculateExternalInflowsAndOutflows(ctx context.Context, arg CalculateExternalInflowsAndOutflowsParams) (CalculateExternalInflowsAndOutflowsRow, error)
 	CalculateFundBalanceBeforeDate(ctx context.Context, arg CalculateFundBalanceBeforeDateParams) (int64, error)
 	CancelPendingSchedulesForEvent(ctx context.Context, eventID string) error
+	CheckReportSnapshotExists(ctx context.Context, arg CheckReportSnapshotExistsParams) (int64, error)
 	ClaimOutboxBatch(ctx context.Context, arg ClaimOutboxBatchParams) ([]NotificationOutbox, error)
 	CloseSafeguardingCase(ctx context.Context, id string) (SafeguardingCase, error)
 	CountActiveAppointments(ctx context.Context) (int64, error)
@@ -296,6 +297,7 @@ type Querier interface {
 	GetFinancialTransactionByID(ctx context.Context, id string) (GetFinancialTransactionByIDRow, error)
 	GetFinancialTransactionByIdempotencyKey(ctx context.Context, idempotencyKey pgtype.Text) (FinancialTransaction, error)
 	GetFinancialTransactionByReference(ctx context.Context, reference string) (FinancialTransaction, error)
+	GetFirstActiveAdminUser(ctx context.Context) (User, error)
 	GetFoundationEntity(ctx context.Context) (FoundationEntity, error)
 	GetHeroMediaByID(ctx context.Context, id string) (HomepageHeroMedium, error)
 	GetInventoryItemByID(ctx context.Context, id string) (InventoryItem, error)
