@@ -30,7 +30,7 @@ type BrevoDeliveryAdapter struct {
 
 func NewBrevoDeliveryAdapter(apiKey, fromName, fromAddress string) *BrevoDeliveryAdapter {
 	if fromName == "" {
-		fromName = "Nigerian Ratels"
+		fromName = "Ratels Worldwide"
 	}
 	return &BrevoDeliveryAdapter{
 		apiKey:      strings.TrimSpace(apiKey),
@@ -92,24 +92,24 @@ func (b *BrevoDeliveryAdapter) SendVerificationEmail(recipientEmail, recipientNa
 		return ErrBrevoNotConfigured
 	}
 
-	subject := "Verify your Nigerian Ratels account"
+	subject := "Verify your Ratels Worldwide account"
 	htmlBody := fmt.Sprintf(`<!DOCTYPE html>
 <html>
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Verify your Nigerian Ratels account</title>
+  <title>Verify your Ratels Worldwide account</title>
 </head>
 <body style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; background-color: #f8fafc; margin: 0; padding: 24px; color: #1e293b;">
   <div style="max-width: 600px; margin: 0 auto; background-color: #ffffff; border-radius: 12px; border: 1px solid #e2e8f0; padding: 32px; box-shadow: 0 1px 3px rgba(0,0,0,0.05);">
     <div style="text-align: center; margin-bottom: 24px;">
-      <h2 style="color: #064e3b; margin: 0; font-size: 24px; font-weight: 800;">Nigerian Ratels Movement</h2>
+      <h2 style="color: #064e3b; margin: 0; font-size: 24px; font-weight: 800;">Ratels Worldwide Movement</h2>
       <p style="color: #047857; margin: 4px 0 0 0; font-size: 14px; font-weight: 600;">Martins Vincent Otse Foundation</p>
     </div>
     <div style="border-top: 1px solid #e2e8f0; padding-top: 24px;">
       <p style="font-size: 16px; line-height: 1.6; margin: 0 0 16px 0;">Hello %s,</p>
       <p style="font-size: 16px; line-height: 1.6; margin: 0 0 24px 0;">
-        Thank you for joining the Nigerian Ratels Movement. Please verify your email address to activate your membership account and access your member dashboard.
+        Thank you for joining the Ratels Worldwide Movement. Please verify your email address to activate your membership account and access your member dashboard.
       </p>
       <div style="text-align: center; margin: 32px 0;">
         <a href="%s" style="background-color: #047857; color: #ffffff; padding: 14px 28px; font-size: 16px; font-weight: 700; text-decoration: none; border-radius: 8px; display: inline-block;">
@@ -120,7 +120,7 @@ func (b *BrevoDeliveryAdapter) SendVerificationEmail(recipientEmail, recipientNa
         This verification link expires in 24 hours and can only be used once.
       </p>
       <p style="font-size: 14px; line-height: 1.6; color: #64748b; margin: 0 0 24px 0;">
-        If you did not create an account with the Nigerian Ratels Movement, you can safely disregard this email.
+        If you did not create an account with the Ratels Worldwide Movement, you can safely disregard this email.
       </p>
       <div style="border-top: 1px solid #e2e8f0; padding-top: 16px; font-size: 12px; color: #94a3b8;">
         <p style="margin: 0;">If the button above does not work, copy and paste this link into your browser:</p>
@@ -131,7 +131,7 @@ func (b *BrevoDeliveryAdapter) SendVerificationEmail(recipientEmail, recipientNa
 </body>
 </html>`, recipientName, verificationURL, verificationURL)
 
-	textBody := fmt.Sprintf("Hello %s,\n\nThank you for joining the Nigerian Ratels Movement (Martins Vincent Otse Foundation).\n\nPlease verify your email address by visiting this link:\n%s\n\nThis verification link expires in 24 hours and can only be used once.\n\nIf you did not register for an account, please disregard this email.\n", recipientName, verificationURL)
+	textBody := fmt.Sprintf("Hello %s,\n\nThank you for joining the Ratels Worldwide Movement (Martins Vincent Otse Foundation).\n\nPlease verify your email address by visiting this link:\n%s\n\nThis verification link expires in 24 hours and can only be used once.\n\nIf you did not register for an account, please disregard this email.\n", recipientName, verificationURL)
 
 	payload := brevoEmailRequest{
 		Sender: brevoSender{

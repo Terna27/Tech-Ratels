@@ -39,7 +39,7 @@ func GenerateCSV(data CSVReportData) ([]byte, error) {
 
 	// Metadata header
 	metaRows := [][]string{
-		{"# Nigerian Ratels Management System - Certified Public Report"},
+		{"# Ratels Worldwide Platform - Certified Public Report"},
 		{"Report Title", SanitizeCSVValue(data.Title)},
 		{"Public Reference", SanitizeCSVValue(data.PublicReference)},
 		{"Report Type", SanitizeCSVValue(data.ReportType)},

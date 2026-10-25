@@ -76,7 +76,7 @@ export default function ParticipationReportPage() {
           </div>
           <h1 className="text-2xl sm:text-3xl font-extrabold">Verified Volunteer Participation Reports</h1>
           <p className="text-xs text-emerald-200 leading-relaxed">
-            Attendance at Nigerian Ratels community activities is verified through independent coordinator review,
+            Attendance at Ratels Worldwide community activities is verified through independent coordinator review,
             anti-self-approval validation, and strict volunteer deduplication rules.
           </p>
         </div>

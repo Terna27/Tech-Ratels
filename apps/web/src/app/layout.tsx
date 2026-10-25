@@ -2,12 +2,11 @@ import type { Metadata } from "next";
 import "./globals.css";
 import { AuthProvider } from "@/lib/auth-context";
 import { CartProvider } from "@/lib/cart-context";
-import { Navbar } from "@/components/layout/Navbar";
-import { Footer } from "@/components/layout/Footer";
+import { AppShell } from "@/components/layout/AppShell";
 
 export const metadata: Metadata = {
-  title: "Nigerian Ratels Management System",
-  description: "Operational management platform for the Nigerian Ratels movement — Phase 1 Foundation",
+  title: "Ratels Worldwide — Civic Action, Transparency & Operations Platform",
+  description: "Operational management platform for the Ratels Worldwide movement across Nigeria and global networks",
 };
 
 export default function RootLayout({
@@ -17,12 +16,10 @@ export default function RootLayout({
 }) {
   return (
     <html lang="en" className="h-full">
-      <body className="flex flex-col min-h-screen bg-gray-50 text-gray-900">
+      <body className="min-h-screen bg-gray-50 text-gray-900 antialiased font-sans">
         <AuthProvider>
           <CartProvider>
-            <Navbar />
-            <main className="flex-1">{children}</main>
-            <Footer />
+            <AppShell>{children}</AppShell>
           </CartProvider>
         </AuthProvider>
       </body>

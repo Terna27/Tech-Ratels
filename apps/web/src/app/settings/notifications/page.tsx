@@ -124,7 +124,7 @@ export default function NotificationPreferencesPage() {
           <div>
             <h1 className="text-xl sm:text-2xl font-bold text-gray-900">Notification Preferences</h1>
             <p className="text-xs sm:text-sm text-gray-500">
-              Customize how and when you receive communications from the Nigerian Ratels Movement.
+              Customize how and when you receive communications from the Ratels Worldwide Movement.
             </p>
           </div>
         </div>
@@ -235,7 +235,7 @@ export default function NotificationPreferencesPage() {
                     <ShieldCheck className="w-4 h-4 text-emerald-700 flex-shrink-0 mt-0.5" />
                     <div>
                       <span className="font-semibold text-gray-800">NDPA / NDPR SMS Consent Notice: </span>
-                      Enabling SMS gives consent under the Nigeria Data Protection Act for the Nigerian Ratels Movement to dispatch automated event reminders and squad logistics to your number.
+                      Enabling SMS gives consent under the Nigeria Data Protection Act for the Ratels Worldwide Movement to dispatch automated event reminders and squad logistics to your number.
                       {prefs.sms_consent_recorded_at && (
                         <p className="mt-1 text-[11px] text-emerald-800 font-medium">
                           Consent recorded on: {new Date(prefs.sms_consent_recorded_at).toLocaleDateString("en-NG", { dateStyle: "long" })}

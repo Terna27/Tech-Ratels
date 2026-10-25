@@ -123,7 +123,7 @@ func Load() *Config {
 
 	emailFromName := strings.TrimSpace(os.Getenv("EMAIL_FROM_NAME"))
 	if emailFromName == "" {
-		emailFromName = "Nigerian Ratels"
+		emailFromName = "Ratels Worldwide"
 	}
 
 	emailFromAddress := strings.TrimSpace(os.Getenv("EMAIL_FROM_ADDRESS"))
@@ -136,7 +136,7 @@ func Load() *Config {
 			parts := strings.Split(emailFrom, "<")
 			emailFromAddress = strings.Trim(parts[1], "> \t")
 			namePart := strings.TrimSpace(parts[0])
-			if namePart != "" && emailFromName == "Nigerian Ratels" {
+			if namePart != "" && (emailFromName == "Ratels Worldwide" || emailFromName == "Nigerian Ratels") {
 				emailFromName = namePart
 			}
 		} else {

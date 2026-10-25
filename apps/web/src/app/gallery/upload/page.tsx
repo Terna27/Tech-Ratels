@@ -307,7 +307,7 @@ function GalleryUploadForm() {
                 Submit Cleanup Media
               </h1>
               <p className="text-xs text-gray-500">
-                Authorized member photo & video contribution for Nigerian Ratels cleanup operations
+                Authorized member photo & video contribution for Ratels Worldwide cleanup operations
               </p>
             </div>
           </div>
@@ -487,7 +487,7 @@ function GalleryUploadForm() {
                   className="rounded border-gray-300 text-emerald-800 focus:ring-emerald-600 h-4 w-4 mt-0.5"
                 />
                 <span>
-                  <strong>Public Gallery Understanding:</strong> I understand that if approved by coordinators, this media will be displayed publicly in the Nigerian Ratels Movement Gallery.
+                  <strong>Public Gallery Understanding:</strong> I understand that if approved by coordinators, this media will be displayed publicly in the Ratels Worldwide Movement Gallery.
                 </span>
               </label>
 

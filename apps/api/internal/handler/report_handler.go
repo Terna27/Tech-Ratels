@@ -315,7 +315,7 @@ func (h *ReportHandler) DownloadCSV(w http.ResponseWriter, r *http.Request) {
 
 func (h *ReportHandler) GetMethodology(w http.ResponseWriter, r *http.Request) {
 	methodology := map[string]interface{}{
-		"system":             "Nigerian Ratels Transparency, Public Reports & Accountability Platform",
+		"system":             "Ratels Worldwide Transparency, Public Reports & Accountability Platform",
 		"governance_version": "Phase D Baseline 1.0 (Constitution 1999 & NBS Reference Geography)",
 		"currency_standard":  "Nigerian Naira (NGN), calculated internally in integer kobo to eliminate floating-point rounding errors",
 		"definitions": map[string]string{
@@ -326,7 +326,7 @@ func (h *ReportHandler) GetMethodology(w http.ResponseWriter, r *http.Request) {
 			"completed_project":      "A project whose physical milestones have reached 100% independent inspection sign-off, regardless of financial disbursement schedule.",
 			"approved_income":        "Funds received into official bank accounts that have been verified by the Financial Administration and reconciled against bank records.",
 			"approved_expenditure":   "Disbursements authorized by Super Admin / Financial Governance, supported by payment vouchers and reconciled against bank statements.",
-			"foundation_segregation": "Charitable contributions to the Martinsvincent Ortse Foundation are held in dedicated restricted accounts and are strictly separated from Nigerian Ratels operational funds.",
+			"foundation_segregation": "Charitable contributions to the Martinsvincent Ortse Foundation are held in dedicated restricted accounts and are strictly separated from Ratels Worldwide operational funds.",
 			"reporting_period":       "The defined calendar boundary (Annual, Quarterly, or Monthly) for which aggregate data was extracted and frozen.",
 			"data_revision":          "When an approved publication requires factual amendment, the previous version is marked superseded/withdrawn, and a new numbered revision (e.g. v2) is created with explicit public correction notices.",
 		},

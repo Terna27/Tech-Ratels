@@ -125,7 +125,7 @@ export default function MarketplaceStorefrontPage() {
             <div className="space-y-3 max-w-2xl">
               <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full text-xs font-bold tracking-wide uppercase bg-emerald-900/80 text-emerald-300 border border-emerald-800">
                 <Store className="w-3.5 h-3.5" />
-                Nigerian Ratels Commerce (Blueprint v2.0 Section 07)
+                Ratels Worldwide Commerce
               </div>
               <h1 className="text-3xl sm:text-4xl lg:text-5xl font-black tracking-tight text-white">
                 Ratels Marketplace

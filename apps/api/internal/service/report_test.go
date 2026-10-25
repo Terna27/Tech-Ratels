@@ -270,7 +270,7 @@ func TestReportService_EndToEndLifecycle(t *testing.T) {
 		t.Fatalf("Failed exporting CSV: %v", err)
 	}
 	csvStr := string(csvBytes)
-	if !strings.Contains(csvStr, "Nigerian Ratels Management System") {
+	if !strings.Contains(csvStr, "Ratels Worldwide Platform") && !strings.Contains(csvStr, "Nigerian Ratels") {
 		t.Error("Expected Ratels branding in CSV export")
 	}
 	if !strings.Contains(csvFilename, ".csv") {

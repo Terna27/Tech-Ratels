@@ -14,7 +14,7 @@ import (
 
 func TestBrevoDeliveryAdapter_SendVerificationEmail(t *testing.T) {
 	testKey := "xkeysib-supersecretbrevoapikey1234567890abcdef"
-	fromName := "Nigerian Ratels"
+	fromName := "Ratels Worldwide"
 	fromEmail := "verified@ratels.org.ng"
 
 	t.Run("Success 201 Created sends correct headers and body payload", func(t *testing.T) {

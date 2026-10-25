@@ -149,7 +149,7 @@ export default function RegisterPage() {
         <div className="w-12 h-12 rounded-xl bg-emerald-900 text-white flex items-center justify-center mx-auto shadow-sm">
           <Shield className="w-6 h-6 text-emerald-400" />
         </div>
-        <h1 className="text-2xl font-bold text-gray-900">Join the Nigerian Ratels</h1>
+        <h1 className="text-2xl font-bold text-gray-900">Join Ratels Worldwide</h1>
         <p className="text-xs text-gray-600">Register as a movement volunteer member</p>
       </div>
 

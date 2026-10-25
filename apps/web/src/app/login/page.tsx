@@ -141,7 +141,7 @@ function LoginForm() {
         <div className="w-12 h-12 rounded-xl bg-emerald-900 text-white flex items-center justify-center mx-auto shadow-sm">
           <Shield className="w-6 h-6 text-emerald-400" />
         </div>
-        <h1 className="text-2xl font-bold text-gray-900">Sign in to Nigerian Ratels</h1>
+        <h1 className="text-2xl font-bold text-gray-900">Sign in to Ratels Worldwide</h1>
         <p className="text-xs text-gray-600">Access your member portal or administrative workspace</p>
       </div>
 

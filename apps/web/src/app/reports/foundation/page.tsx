@@ -134,7 +134,7 @@ export default function FoundationReportPage() {
               </div>
               <p className="text-xs text-emerald-950 leading-relaxed">
                 {data?.strict_segregation_notice ||
-                  "Foundation humanitarian funds are strictly separated from Nigerian Ratels operational funds in double-entry ledgers. Zero cross-commingling of membership dues and charitable grants."}
+                  "Foundation humanitarian funds are strictly separated from Ratels Worldwide operational funds in double-entry ledgers. Zero cross-commingling of membership dues and charitable grants."}
               </p>
             </div>
           </div>

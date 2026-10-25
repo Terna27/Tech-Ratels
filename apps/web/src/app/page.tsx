@@ -128,7 +128,7 @@ export default function HomePage() {
         <div className="relative z-10 max-w-5xl mx-auto text-center space-y-6">
           <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-emerald-800/80 border border-emerald-700 text-emerald-200 text-xs font-semibold">
             <Sparkles className="w-3.5 h-3.5 text-emerald-300" />
-            <span>National Movement Platform • Phase 1 Operational Foundation</span>
+            <span>Ratels Worldwide Platform • Civic Action, Transparency & Operations</span>
           </div>
 
           <h1 className="text-3xl sm:text-5xl font-extrabold tracking-tight leading-tight">
@@ -146,7 +146,7 @@ export default function HomePage() {
               href="/register"
               className="inline-flex items-center justify-center px-6 py-3.5 text-base font-semibold rounded-xl text-emerald-950 bg-emerald-400 hover:bg-emerald-300 shadow-md transition"
             >
-              Join the Ratels Movement
+              Join Ratels Worldwide
               <ArrowRight className="w-4 h-4 ml-2" />
             </Link>
             <Link
@@ -544,7 +544,7 @@ export default function HomePage() {
 
         {/* Data Protection and Transparency Alert */}
         <Alert type="info" title="Privacy and Administrative Safeguards">
-          The Nigerian Ratels platform complies with Nigeria Data Protection Act (NDPA) 2023 principles.
+          The Ratels Worldwide platform complies with Nigeria Data Protection Act (NDPA) 2023 principles.
           Personal CVs, private contact details, and unverified bank accounts are strictly protected from public exposure.
           Privileged coordinator roles cannot be self-selected during registration.
         </Alert>

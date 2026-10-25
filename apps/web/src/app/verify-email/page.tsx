@@ -130,7 +130,7 @@ function VerifyEmailContent() {
                 Confirm Email Verification
               </h1>
               <p className="text-base sm:text-lg text-gray-600 leading-relaxed font-normal">
-                Click the confirmation button below to verify your email address and activate your Nigerian Ratels membership.
+                Click the confirmation button below to verify your email address and activate your Ratels Worldwide membership.
               </p>
             </div>
 
