@@ -362,11 +362,14 @@ func TestReportScheduler_AuditEntriesSkipped(t *testing.T) {
 	ctx := context.Background()
 
 	uid := time.Now().UnixNano()
-	period := fmt.Sprintf("206%d-%02d", uid%4, (uid%12)+1)
+	period := fmt.Sprintf("%04d-%02d", 2060+(uid%30), (uid%12)+1)
 
-	defer func() {
+	cleanup := func() {
 		_, _ = env.pool.Exec(ctx, "DELETE FROM public_report_snapshots WHERE reporting_period = $1", period)
-	}()
+		_, _ = env.pool.Exec(ctx, "DELETE FROM public_report_audit WHERE (details->>'reporting_period') = $1", period)
+	}
+	cleanup()
+	defer cleanup()
 
 	// Run 1: Generates
 	_, err := env.scheduler.RunScheduledCycle(ctx, worker.RunSchedulerParams{

@@ -1407,6 +1407,13 @@ func TestReportService_GeographicAggregationIntegrity(t *testing.T) {
 	eventTimeB := time.Date(baseYear, 5, 20, 8, 0, 0, 0, time.UTC)
 
 	campaignID := security.GenerateUUID()
+	_, _ = env.Pool.Exec(ctx, "DELETE FROM event_instances WHERE campaign_id IN (SELECT id FROM cleanup_campaigns WHERE year = $1 AND month = 5)", baseYear)
+	_, _ = env.Pool.Exec(ctx, "DELETE FROM cleanup_campaigns WHERE year = $1 AND month = 5", baseYear)
+	defer func() {
+		_, _ = env.Pool.Exec(ctx, "DELETE FROM event_instances WHERE campaign_id = $1", campaignID)
+		_, _ = env.Pool.Exec(ctx, "DELETE FROM cleanup_campaigns WHERE id = $1", campaignID)
+	}()
+
 	_, err = env.Pool.Exec(ctx, `
 		INSERT INTO cleanup_campaigns (id, year, month, scheduled_date, title, status)
 		VALUES ($1, $2, 5, $3, 'Future Clean Campaign', 'scheduled')

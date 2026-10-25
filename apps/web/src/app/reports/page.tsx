@@ -20,6 +20,9 @@ import {
   Search,
   ChevronRight,
   ExternalLink,
+  Loader2,
+  AlertCircle,
+  CheckCircle,
 } from "lucide-react";
 import { apiRequest } from "@/lib/api";
 import {
@@ -47,6 +50,11 @@ export default function PublicReportsPage() {
   const [selectedState, setSelectedState] = useState<string>("");
   const [selectedLGA, setSelectedLGA] = useState<string>("");
   const [selectedPeriod, setSelectedPeriod] = useState<string>("All Time");
+
+  // Download states and accessible alerts
+  const [downloading, setDownloading] = useState<Record<string, boolean>>({});
+  const [downloadError, setDownloadError] = useState<{ id: string; message: string } | null>(null);
+  const [downloadSuccess, setDownloadSuccess] = useState<{ id: string; message: string } | null>(null);
 
   const [loading, setLoading] = useState(true);
   const [filterLoading, startFilterTransition] = useTransition();
@@ -115,8 +123,91 @@ export default function PublicReportsPage() {
     });
   }, [selectedZone, selectedState, selectedLGA, selectedPeriod]);
 
-  const handleDownload = (pubId: string, format: "pdf" | "csv") => {
-    window.open(`/api/v1/public/reports/publications/${pubId}/${format}`, "_blank");
+  const handleDownload = async (pub: PublicPublicationDTO, format: "pdf" | "csv") => {
+    const key = `${pub.public_reference}-${format}`;
+    setDownloading((prev) => ({ ...prev, [key]: true }));
+    setDownloadError(null);
+    setDownloadSuccess(null);
+
+    try {
+      const url = `/api/v1/public/reports/publications/${encodeURIComponent(pub.public_reference)}/${format}`;
+      const res = await fetch(url, {
+        method: "GET",
+        headers: {
+          Accept: format === "pdf" ? "application/pdf" : "text/csv; charset=utf-8",
+        },
+      });
+
+      if (res.status === 429) {
+        setDownloadError({
+          id: pub.publication_id,
+          message: "Download rate limit exceeded. Please wait a moment before trying again.",
+        });
+        return;
+      }
+
+      if (res.status === 404) {
+        setDownloadError({
+          id: pub.publication_id,
+          message: "This report is currently unavailable for public download.",
+        });
+        return;
+      }
+
+      if (!res.ok) {
+        setDownloadError({
+          id: pub.publication_id,
+          message: `Unable to download ${format.toUpperCase()} report. Server returned status ${res.status}.`,
+        });
+        return;
+      }
+
+      let filename = `${pub.public_reference}.${format}`;
+      const disposition = res.headers.get("content-disposition");
+      if (disposition && disposition.includes("filename=")) {
+        const match = disposition.match(/filename="?([^";]+)"?/);
+        if (match && match[1]) {
+          filename = match[1].trim();
+        }
+      }
+
+      const blob = await res.blob();
+      const objectUrl = window.URL.createObjectURL(blob);
+      const anchor = document.createElement("a");
+      anchor.href = objectUrl;
+      anchor.download = filename;
+      document.body.appendChild(anchor);
+      anchor.click();
+      document.body.removeChild(anchor);
+      window.URL.revokeObjectURL(objectUrl);
+
+      setDownloadSuccess({
+        id: pub.publication_id,
+        message: `${pub.public_reference} (${format.toUpperCase()}) downloaded successfully.`,
+      });
+      setTimeout(() => setDownloadSuccess(null), 6000);
+    } catch (err) {
+      console.error("Public report download error:", err);
+      setDownloadError({
+        id: pub.publication_id,
+        message: "A network error occurred while streaming the download. Please check your internet connection.",
+      });
+    } finally {
+      setDownloading((prev) => ({ ...prev, [key]: false }));
+    }
+  };
+
+  const formatScope = (pub: PublicPublicationDTO) => {
+    if (pub.lga_name && pub.state_name) {
+      return `${pub.lga_name} LGA, ${pub.state_name} State`;
+    }
+    if (pub.state_name) {
+      return `${pub.state_name} State`;
+    }
+    if (pub.zone_name) {
+      return `${pub.zone_name} Zone`;
+    }
+    return "Nigeria (Nationwide)";
   };
 
   const filteredStates = selectedZone
@@ -462,6 +553,49 @@ export default function PublicReportsPage() {
               </div>
             </div>
 
+            {/* Download Status Alert Notifications */}
+            {downloadError && (
+              <div
+                role="alert"
+                aria-live="assertive"
+                className="flex items-center justify-between p-3.5 bg-red-50 border border-red-200 text-red-900 rounded-xl text-xs transition"
+              >
+                <div className="flex items-center gap-2.5">
+                  <AlertCircle className="w-4 h-4 text-red-600 shrink-0" />
+                  <span className="font-medium">{downloadError.message}</span>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setDownloadError(null)}
+                  className="text-red-700 hover:text-red-900 font-bold text-xs underline ml-3 shrink-0"
+                  aria-label="Dismiss download error"
+                >
+                  Dismiss
+                </button>
+              </div>
+            )}
+
+            {downloadSuccess && (
+              <div
+                role="status"
+                aria-live="polite"
+                className="flex items-center justify-between p-3.5 bg-emerald-50 border border-emerald-200 text-emerald-950 rounded-xl text-xs transition"
+              >
+                <div className="flex items-center gap-2.5">
+                  <CheckCircle className="w-4 h-4 text-emerald-600 shrink-0" />
+                  <span className="font-medium">{downloadSuccess.message}</span>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setDownloadSuccess(null)}
+                  className="text-emerald-800 hover:text-emerald-950 font-bold text-xs underline ml-3 shrink-0"
+                  aria-label="Dismiss download notification"
+                >
+                  Dismiss
+                </button>
+              </div>
+            )}
+
             {publications.length === 0 ? (
               <EmptyState
                 icon={<FileText className="w-6 h-6" />}
@@ -476,65 +610,102 @@ export default function PublicReportsPage() {
                       <th className="py-3 px-4">Report Reference</th>
                       <th className="py-3 px-4">Title</th>
                       <th className="py-3 px-4">Type</th>
-                      <th className="py-3 px-4">Scope</th>
+                      <th className="py-3 px-4">Geographic Scope</th>
                       <th className="py-3 px-4">Period</th>
                       <th className="py-3 px-4">Published Date</th>
-                      <th className="py-3 px-4">Version</th>
-                      <th className="py-3 px-4 text-right">Downloads</th>
+                      <th className="py-3 px-4">Status & Integrity</th>
+                      <th className="py-3 px-4 text-right">Official Downloads</th>
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-gray-100">
-                    {publications.map((pub) => (
-                      <tr key={pub.publication_id} className="hover:bg-gray-50/50 transition">
-                        <td className="py-3.5 px-4 font-mono font-bold text-emerald-950">
-                          {pub.public_reference}
-                        </td>
-                        <td className="py-3.5 px-4 font-medium text-gray-900">
-                          {pub.title}
-                        </td>
-                        <td className="py-3.5 px-4">
-                          <Badge variant="primary" size="sm">
-                            {pub.report_type.replace(/_/g, " ").toUpperCase()}
-                          </Badge>
-                        </td>
-                        <td className="py-3.5 px-4 text-gray-600">
-                          {pub.state_name ? `${pub.state_name} State` : "Nationwide"}
-                        </td>
-                        <td className="py-3.5 px-4 text-gray-600 font-medium">
-                          {pub.reporting_period}
-                        </td>
-                        <td className="py-3.5 px-4 text-gray-500">
-                          {new Date(pub.published_at).toLocaleDateString("en-GB", {
-                            day: "2-digit",
-                            month: "short",
-                            year: "numeric",
-                          })}
-                        </td>
-                        <td className="py-3.5 px-4">
-                          <span className="font-semibold text-gray-700">v{pub.publication_version}</span>
-                        </td>
-                        <td className="py-3.5 px-4 text-right">
-                          <div className="inline-flex items-center gap-1.5">
-                            <button
-                              onClick={() => handleDownload(pub.public_reference, "pdf")}
-                              title="Download Certified PDF Report"
-                              className="px-2.5 py-1.5 rounded-lg bg-emerald-50 hover:bg-emerald-100 text-emerald-800 text-[11px] font-bold border border-emerald-200 flex items-center gap-1 transition"
-                            >
-                              <Download className="w-3 h-3" />
-                              <span>PDF</span>
-                            </button>
-                            <button
-                              onClick={() => handleDownload(pub.public_reference, "csv")}
-                              title="Download Machine-Readable CSV"
-                              className="px-2.5 py-1.5 rounded-lg bg-gray-50 hover:bg-gray-100 text-gray-700 text-[11px] font-bold border border-gray-200 flex items-center gap-1 transition"
-                            >
-                              <Download className="w-3 h-3" />
-                              <span>CSV</span>
-                            </button>
-                          </div>
-                        </td>
-                      </tr>
-                    ))}
+                    {publications.map((pub) => {
+                      const isPdfLoading = !!downloading[`${pub.public_reference}-pdf`];
+                      const isCsvLoading = !!downloading[`${pub.public_reference}-csv`];
+
+                      return (
+                        <tr key={pub.publication_id} className="hover:bg-gray-50/50 transition">
+                          <td className="py-3.5 px-4 font-mono font-bold text-emerald-950">
+                            {pub.public_reference}
+                          </td>
+                          <td className="py-3.5 px-4 font-medium text-gray-900">
+                            {pub.title}
+                          </td>
+                          <td className="py-3.5 px-4">
+                            <Badge variant="primary" size="sm">
+                              {pub.report_type.replace(/_/g, " ").toUpperCase()}
+                            </Badge>
+                          </td>
+                          <td className="py-3.5 px-4 text-gray-700 font-medium">
+                            {formatScope(pub)}
+                          </td>
+                          <td className="py-3.5 px-4 text-gray-600 font-medium">
+                            {pub.reporting_period}
+                          </td>
+                          <td className="py-3.5 px-4 text-gray-500">
+                            {new Date(pub.published_at).toLocaleDateString("en-GB", {
+                              day: "2-digit",
+                              month: "short",
+                              year: "numeric",
+                            })}
+                          </td>
+                          <td className="py-3.5 px-4">
+                            <div className="flex flex-col gap-0.5">
+                              <span className="inline-flex items-center gap-1 font-semibold text-emerald-800 text-[11px]">
+                                <CheckCircle2 className="w-3.5 h-3.5 text-emerald-600 shrink-0" />
+                                <span>Certified Ready</span>
+                              </span>
+                              <span className="text-[10px] text-gray-400 font-mono">v{pub.publication_version}</span>
+                            </div>
+                          </td>
+                          <td className="py-3.5 px-4 text-right">
+                            <div className="inline-flex items-center gap-1.5">
+                              <button
+                                type="button"
+                                disabled={isPdfLoading || isCsvLoading}
+                                onClick={() => handleDownload(pub, "pdf")}
+                                aria-label={`Download certified PDF report for ${pub.title} (${pub.public_reference})`}
+                                aria-busy={isPdfLoading}
+                                title="Download Certified PDF Report"
+                                className="px-2.5 py-1.5 rounded-lg bg-emerald-50 hover:bg-emerald-100 disabled:opacity-50 text-emerald-800 text-[11px] font-bold border border-emerald-200 flex items-center gap-1 transition focus:outline-hidden focus:ring-2 focus:ring-emerald-500"
+                              >
+                                {isPdfLoading ? (
+                                  <>
+                                    <Loader2 className="w-3 h-3 animate-spin text-emerald-700" />
+                                    <span>Downloading...</span>
+                                  </>
+                                ) : (
+                                  <>
+                                    <Download className="w-3 h-3" />
+                                    <span>PDF</span>
+                                  </>
+                                )}
+                              </button>
+                              <button
+                                type="button"
+                                disabled={isPdfLoading || isCsvLoading}
+                                onClick={() => handleDownload(pub, "csv")}
+                                aria-label={`Download machine-readable CSV for ${pub.title} (${pub.public_reference})`}
+                                aria-busy={isCsvLoading}
+                                title="Download Machine-Readable CSV"
+                                className="px-2.5 py-1.5 rounded-lg bg-gray-50 hover:bg-gray-100 disabled:opacity-50 text-gray-700 text-[11px] font-bold border border-gray-200 flex items-center gap-1 transition focus:outline-hidden focus:ring-2 focus:ring-gray-400"
+                              >
+                                {isCsvLoading ? (
+                                  <>
+                                    <Loader2 className="w-3 h-3 animate-spin text-gray-700" />
+                                    <span>Downloading...</span>
+                                  </>
+                                ) : (
+                                  <>
+                                    <Download className="w-3 h-3" />
+                                    <span>CSV</span>
+                                  </>
+                                )}
+                              </button>
+                            </div>
+                          </td>
+                        </tr>
+                      );
+                    })}
                   </tbody>
                 </table>
               </div>

@@ -42,6 +42,7 @@ type TestHarness struct {
 	CareersService   *service.CareersService
 	GalleryService   *service.GalleryService
 	ReportService    *service.ReportService
+	ReportHandler    *handler.ReportHandler
 	Storage          storage.StorageService
 	Cleanup          func()
 }
@@ -144,6 +145,7 @@ func setupTestHarness(t *testing.T) *TestHarness {
 		CareersService:     careersSvc,
 		GalleryService:     gallerySvc,
 		ReportService:      reportSvc,
+		ReportHandler:      reportH,
 		Storage:            mockStorage,
 		Cleanup: func() {
 			pool.Close()

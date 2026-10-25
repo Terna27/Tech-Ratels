@@ -1,15 +1,20 @@
 package handler
 
 import (
+	"bytes"
 	"context"
 	"crypto/subtle"
 	"encoding/json"
 	"errors"
+	"fmt"
+	"io"
 	"net/http"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/go-chi/chi/v5"
+	"ratels-api/internal/security"
 	"ratels-api/internal/service"
 	"ratels-api/internal/worker"
 )
@@ -23,12 +28,25 @@ type ReportHandler struct {
 	reportService *service.ReportService
 	scheduler     ReportSchedulerRunner
 	cronSecret    string
+	rateLimiter   *security.DownloadRateLimiter
 }
 
-func NewReportHandler(reportService *service.ReportService) *ReportHandler {
+func NewReportHandler(reportService *service.ReportService, rateLimiter ...*security.DownloadRateLimiter) *ReportHandler {
+	var rl *security.DownloadRateLimiter
+	if len(rateLimiter) > 0 && rateLimiter[0] != nil {
+		rl = rateLimiter[0]
+	} else {
+		rl = security.NewDownloadRateLimiter(30, time.Minute)
+	}
 	return &ReportHandler{
 		reportService: reportService,
+		rateLimiter:   rl,
 	}
+}
+
+// SetRateLimiter configures a custom download rate limiter (e.g. for testing).
+func (h *ReportHandler) SetRateLimiter(rl *security.DownloadRateLimiter) {
+	h.rateLimiter = rl
 }
 
 // SetScheduler attaches a report scheduler engine and cron authentication secret.
@@ -263,7 +281,27 @@ func (h *ReportHandler) GetPublicationByID(w http.ResponseWriter, r *http.Reques
 
 func (h *ReportHandler) DownloadPDF(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
-	id := chi.URLParam(r, "id")
+	clientIP := security.GetClientIP(r)
+
+	// Rate limiting enforcement
+	if h.rateLimiter != nil {
+		allowed, retryAfter := h.rateLimiter.Allow(clientIP)
+		if !allowed {
+			secs := int(retryAfter.Seconds())
+			if secs < 1 {
+				secs = 1
+			}
+			w.Header().Set("Retry-After", strconv.Itoa(secs))
+			h.reportService.RecordDownloadAudit(ctx, nil, "report_download_throttled", clientIP, map[string]interface{}{
+				"format": "pdf",
+				"reason": "rate_limit_exceeded",
+			})
+			ErrorJSON(w, http.StatusTooManyRequests, "RATE_LIMIT_EXCEEDED", "Download rate limit exceeded. Please wait a moment before trying again.", nil)
+			return
+		}
+	}
+
+	id := strings.TrimSpace(chi.URLParam(r, "id"))
 	if id == "" {
 		ErrorJSON(w, http.StatusBadRequest, "INVALID_REQUEST", "Report ID or reference is required", nil)
 		return
@@ -271,24 +309,72 @@ func (h *ReportHandler) DownloadPDF(w http.ResponseWriter, r *http.Request) {
 
 	pdfBytes, filename, err := h.reportService.ExportReportPDF(ctx, id)
 	if err != nil {
-		if err == service.ErrReportPublicationNotFound {
-			ErrorJSON(w, http.StatusNotFound, "NOT_FOUND", "Published report not found", nil)
+		if errors.Is(err, service.ErrReportPublicationNotFound) ||
+			errors.Is(err, service.ErrReportSnapshotNotFound) ||
+			errors.Is(err, service.ErrReportWithdrawn) ||
+			errors.Is(err, service.ErrExportRevoked) ||
+			errors.Is(err, service.ErrUnauthorizedExportAccess) ||
+			errors.Is(err, service.ErrReportNotAvailable) {
+			ErrorJSON(w, http.StatusNotFound, "NOT_FOUND", "The requested publication is not available for public download", nil)
 			return
 		}
-		ErrorJSON(w, http.StatusInternalServerError, "INTERNAL_ERROR", "Failed generating report PDF", err.Error())
+
+		h.reportService.RecordDownloadAudit(ctx, nil, "report_download_failed", clientIP, map[string]interface{}{
+			"publication_id": id,
+			"format":         "pdf",
+			"error":          "storage_read_error",
+		})
+		ErrorJSON(w, http.StatusInternalServerError, "INTERNAL_ERROR", "Failed generating report PDF", nil)
 		return
 	}
 
+	h.reportService.RecordDownloadAudit(ctx, nil, "report_downloaded", clientIP, map[string]interface{}{
+		"publication_id":  id,
+		"format":          "pdf",
+		"file_name":       filename,
+		"file_size_bytes": len(pdfBytes),
+		"status":          "success",
+	})
+
+	safeName := security.SanitizeFilename(filename)
+	if safeName == "" {
+		safeName = "report.pdf"
+	}
+
 	w.Header().Set("Content-Type", "application/pdf")
-	w.Header().Set("Content-Disposition", `attachment; filename="`+filename+`"`)
+	w.Header().Set("Content-Disposition", fmt.Sprintf(`attachment; filename="%s"`, safeName))
 	w.Header().Set("Content-Length", strconv.Itoa(len(pdfBytes)))
+	w.Header().Set("Cache-Control", "private, no-cache, no-store, must-revalidate")
+	w.Header().Set("Pragma", "no-cache")
+	w.Header().Set("Expires", "0")
+	w.Header().Set("X-Content-Type-Options", "nosniff")
 	w.WriteHeader(http.StatusOK)
-	_, _ = w.Write(pdfBytes)
+	_, _ = io.Copy(w, bytes.NewReader(pdfBytes))
 }
 
 func (h *ReportHandler) DownloadCSV(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
-	id := chi.URLParam(r, "id")
+	clientIP := security.GetClientIP(r)
+
+	// Rate limiting enforcement
+	if h.rateLimiter != nil {
+		allowed, retryAfter := h.rateLimiter.Allow(clientIP)
+		if !allowed {
+			secs := int(retryAfter.Seconds())
+			if secs < 1 {
+				secs = 1
+			}
+			w.Header().Set("Retry-After", strconv.Itoa(secs))
+			h.reportService.RecordDownloadAudit(ctx, nil, "report_download_throttled", clientIP, map[string]interface{}{
+				"format": "csv",
+				"reason": "rate_limit_exceeded",
+			})
+			ErrorJSON(w, http.StatusTooManyRequests, "RATE_LIMIT_EXCEEDED", "Download rate limit exceeded. Please wait a moment before trying again.", nil)
+			return
+		}
+	}
+
+	id := strings.TrimSpace(chi.URLParam(r, "id"))
 	if id == "" {
 		ErrorJSON(w, http.StatusBadRequest, "INVALID_REQUEST", "Report ID or reference is required", nil)
 		return
@@ -296,19 +382,47 @@ func (h *ReportHandler) DownloadCSV(w http.ResponseWriter, r *http.Request) {
 
 	csvBytes, filename, err := h.reportService.ExportReportCSV(ctx, id)
 	if err != nil {
-		if err == service.ErrReportPublicationNotFound {
-			ErrorJSON(w, http.StatusNotFound, "NOT_FOUND", "Published report not found", nil)
+		if errors.Is(err, service.ErrReportPublicationNotFound) ||
+			errors.Is(err, service.ErrReportSnapshotNotFound) ||
+			errors.Is(err, service.ErrReportWithdrawn) ||
+			errors.Is(err, service.ErrExportRevoked) ||
+			errors.Is(err, service.ErrUnauthorizedExportAccess) ||
+			errors.Is(err, service.ErrReportNotAvailable) {
+			ErrorJSON(w, http.StatusNotFound, "NOT_FOUND", "The requested publication is not available for public download", nil)
 			return
 		}
-		ErrorJSON(w, http.StatusInternalServerError, "INTERNAL_ERROR", "Failed generating report CSV", err.Error())
+
+		h.reportService.RecordDownloadAudit(ctx, nil, "report_download_failed", clientIP, map[string]interface{}{
+			"publication_id": id,
+			"format":         "csv",
+			"error":          "storage_read_error",
+		})
+		ErrorJSON(w, http.StatusInternalServerError, "INTERNAL_ERROR", "Failed generating report CSV", nil)
 		return
 	}
 
+	h.reportService.RecordDownloadAudit(ctx, nil, "report_downloaded", clientIP, map[string]interface{}{
+		"publication_id":  id,
+		"format":          "csv",
+		"file_name":       filename,
+		"file_size_bytes": len(csvBytes),
+		"status":          "success",
+	})
+
+	safeName := security.SanitizeFilename(filename)
+	if safeName == "" {
+		safeName = "report.csv"
+	}
+
 	w.Header().Set("Content-Type", "text/csv; charset=utf-8")
-	w.Header().Set("Content-Disposition", `attachment; filename="`+filename+`"`)
+	w.Header().Set("Content-Disposition", fmt.Sprintf(`attachment; filename="%s"`, safeName))
 	w.Header().Set("Content-Length", strconv.Itoa(len(csvBytes)))
+	w.Header().Set("Cache-Control", "private, no-cache, no-store, must-revalidate")
+	w.Header().Set("Pragma", "no-cache")
+	w.Header().Set("Expires", "0")
+	w.Header().Set("X-Content-Type-Options", "nosniff")
 	w.WriteHeader(http.StatusOK)
-	_, _ = w.Write(csvBytes)
+	_, _ = io.Copy(w, bytes.NewReader(csvBytes))
 }
 
 func (h *ReportHandler) GetMethodology(w http.ResponseWriter, r *http.Request) {

@@ -15,6 +15,8 @@ import (
 	"time"
 
 	"github.com/aws/aws-sdk-go-v2/aws"
+	awsconfig "github.com/aws/aws-sdk-go-v2/config"
+	"github.com/aws/aws-sdk-go-v2/credentials"
 	"github.com/aws/aws-sdk-go-v2/service/s3"
 	"github.com/google/uuid"
 )
@@ -55,6 +57,45 @@ func NewR2ReportExportStorage(client *s3.Client, presignClient *s3.PresignClient
 		s3Client:      client,
 		presignClient: presignClient,
 	}
+}
+
+// NewR2ReportExportStorageFromConfig creates a private Cloudflare R2 storage client specifically
+// for report exports from the provided R2Config.
+func NewR2ReportExportStorageFromConfig(ctx context.Context, cfg R2Config) (*R2ReportExportStorage, error) {
+	if cfg.AccessKeyID == "" || cfg.SecretAccessKey == "" || cfg.BucketName == "" {
+		return nil, errors.New("R2 access key, secret key, and bucket name are required")
+	}
+
+	endpointURL := cfg.Endpoint
+	if endpointURL == "" {
+		if cfg.AccountID == "" {
+			return nil, errors.New("R2 Account ID or custom Endpoint is required")
+		}
+		endpointURL = fmt.Sprintf("https://%s.r2.cloudflarestorage.com", cfg.AccountID)
+	}
+
+	customResolver := aws.EndpointResolverWithOptionsFunc(func(service, region string, options ...interface{}) (aws.Endpoint, error) {
+		return aws.Endpoint{
+			URL:           endpointURL,
+			SigningRegion: "auto",
+		}, nil
+	})
+
+	awsCfg, err := awsconfig.LoadDefaultConfig(ctx,
+		awsconfig.WithEndpointResolverWithOptions(customResolver),
+		awsconfig.WithCredentialsProvider(credentials.NewStaticCredentialsProvider(cfg.AccessKeyID, cfg.SecretAccessKey, "")),
+		awsconfig.WithRegion("auto"),
+	)
+	if err != nil {
+		return nil, fmt.Errorf("failed to load AWS/R2 configuration for report exports: %w", err)
+	}
+
+	s3Client := s3.NewFromConfig(awsCfg, func(o *s3.Options) {
+		o.UsePathStyle = true
+	})
+	presignClient := s3.NewPresignClient(s3Client)
+
+	return NewR2ReportExportStorage(s3Client, presignClient, cfg.BucketName), nil
 }
 
 func (s *R2ReportExportStorage) IsConfigured() bool {

@@ -33,6 +33,8 @@ var (
 	ErrReportRejected              = errors.New("report is rejected; export generation is prohibited")
 	ErrUnauthorizedExportAccess    = errors.New("unauthorized export access; drafts require administrator authorization")
 	ErrUnsupportedExportFormat     = errors.New("unsupported export format; only 'pdf' and 'csv' are supported")
+	ErrExportRevoked               = errors.New("report export has been revoked")
+	ErrReportNotAvailable          = errors.New("report publication is not available for public download")
 )
 
 // Request / Response DTOs
@@ -1891,6 +1893,10 @@ func (s *ReportService) GetExportPrivateStream(
 	format string,
 ) ([]byte, string, string, error) {
 	cleanFormat := strings.ToLower(strings.TrimSpace(format))
+	if cleanFormat != "pdf" && cleanFormat != "csv" {
+		return nil, "", "", ErrUnsupportedExportFormat
+	}
+
 	snap, err := s.repo.Queries().GetReportSnapshotByID(ctx, snapshotID)
 	if err != nil {
 		return nil, "", "", ErrReportSnapshotNotFound
@@ -1900,7 +1906,7 @@ func (s *ReportService) GetExportPrivateStream(
 		return nil, "", "", ErrReportWithdrawn
 	}
 
-	// Draft reports require administrator authorization
+	// Draft or unapproved reports require administrator authorization
 	if snap.Status != "published" {
 		if actor == nil || (actor.PrimaryRole != "super_admin" && actor.PrimaryRole != "national_admin") {
 			return nil, "", "", ErrUnauthorizedExportAccess
@@ -1911,25 +1917,31 @@ func (s *ReportService) GetExportPrivateStream(
 		SnapshotID:   snapshotID,
 		ExportFormat: cleanFormat,
 	})
-	if err != nil || exp.ExportStatus != "generated" || !exp.StorageReference.Valid {
-		// Generate on demand if missing or ungenerated
-		dto, err := s.GenerateAndStoreExport(ctx, actor, snapshotID, cleanFormat, nil)
-		if err != nil {
-			return nil, "", "", err
+	if err == nil {
+		// If export was explicitly revoked, reject with ErrExportRevoked
+		if exp.ExportStatus == "revoked" {
+			return nil, "", "", ErrExportRevoked
 		}
-		bytes, err := s.exportStorage.ReadExport(ctx, *dto.StorageReference)
-		if err != nil {
-			return nil, "", "", err
+		// If export exists and is generated, read from private storage
+		if exp.ExportStatus == "generated" && exp.StorageReference.Valid {
+			bytes, err := s.exportStorage.ReadExport(ctx, exp.StorageReference.String)
+			if err != nil {
+				return nil, "", "", fmt.Errorf("failed reading export from private storage: %w", err)
+			}
+			return bytes, exp.FileName, exp.MimeType, nil
 		}
-		return bytes, dto.FileName, dto.MimeType, nil
 	}
 
-	bytes, err := s.exportStorage.ReadExport(ctx, exp.StorageReference.String)
+	// Missing or ungenerated (and not revoked): generate and store on demand
+	dto, err := s.GenerateAndStoreExport(ctx, actor, snapshotID, cleanFormat, nil)
 	if err != nil {
-		return nil, "", "", fmt.Errorf("failed reading export from private storage: %w", err)
+		return nil, "", "", err
 	}
-
-	return bytes, exp.FileName, exp.MimeType, nil
+	bytes, err := s.exportStorage.ReadExport(ctx, *dto.StorageReference)
+	if err != nil {
+		return nil, "", "", err
+	}
+	return bytes, dto.FileName, dto.MimeType, nil
 }
 
 func (s *ReportService) GetExportPresignedDownloadURL(
@@ -1940,6 +1952,10 @@ func (s *ReportService) GetExportPresignedDownloadURL(
 	expiry time.Duration,
 ) (string, error) {
 	cleanFormat := strings.ToLower(strings.TrimSpace(format))
+	if cleanFormat != "pdf" && cleanFormat != "csv" {
+		return "", ErrUnsupportedExportFormat
+	}
+
 	snap, err := s.repo.Queries().GetReportSnapshotByID(ctx, snapshotID)
 	if err != nil {
 		return "", ErrReportSnapshotNotFound
@@ -1959,15 +1975,20 @@ func (s *ReportService) GetExportPresignedDownloadURL(
 		SnapshotID:   snapshotID,
 		ExportFormat: cleanFormat,
 	})
-	if err != nil || exp.ExportStatus != "generated" || !exp.StorageReference.Valid {
-		dto, err := s.GenerateAndStoreExport(ctx, actor, snapshotID, cleanFormat, nil)
-		if err != nil {
-			return "", err
+	if err == nil {
+		if exp.ExportStatus == "revoked" {
+			return "", ErrExportRevoked
 		}
-		return s.exportStorage.GeneratePresignedDownload(ctx, *dto.StorageReference, dto.FileName, expiry)
+		if exp.ExportStatus == "generated" && exp.StorageReference.Valid {
+			return s.exportStorage.GeneratePresignedDownload(ctx, exp.StorageReference.String, exp.FileName, expiry)
+		}
 	}
 
-	return s.exportStorage.GeneratePresignedDownload(ctx, exp.StorageReference.String, exp.FileName, expiry)
+	dto, err := s.GenerateAndStoreExport(ctx, actor, snapshotID, cleanFormat, nil)
+	if err != nil {
+		return "", err
+	}
+	return s.exportStorage.GeneratePresignedDownload(ctx, *dto.StorageReference, dto.FileName, expiry)
 }
 
 func (s *ReportService) ExportReportPDF(ctx context.Context, idOrRef string) ([]byte, string, error) {
@@ -1982,7 +2003,7 @@ func (s *ReportService) ExportReportPDF(ctx context.Context, idOrRef string) ([]
 	}
 
 	if snap.Status != "published" {
-		return nil, "", ErrReportWithdrawn
+		return nil, "", ErrReportNotAvailable
 	}
 
 	bytes, fileName, _, err := s.GetExportPrivateStream(ctx, nil, pub.SnapshotID, "pdf")
@@ -2004,7 +2025,7 @@ func (s *ReportService) ExportReportCSV(ctx context.Context, idOrRef string) ([]
 	}
 
 	if snap.Status != "published" {
-		return nil, "", ErrReportWithdrawn
+		return nil, "", ErrReportNotAvailable
 	}
 
 	bytes, fileName, _, err := s.GetExportPrivateStream(ctx, nil, pub.SnapshotID, "csv")
@@ -2012,6 +2033,27 @@ func (s *ReportService) ExportReportCSV(ctx context.Context, idOrRef string) ([]
 		return nil, "", err
 	}
 	return bytes, fileName, nil
+}
+
+func (s *ReportService) RecordDownloadAudit(ctx context.Context, snapshotID *string, action string, clientIP string, details map[string]interface{}) {
+	detailsJSON, _ := json.Marshal(details)
+	var snapIDPg pgtype.Text
+	if snapshotID != nil && *snapshotID != "" {
+		snapIDPg = pgtype.Text{String: *snapshotID, Valid: true}
+	}
+	var ipPg pgtype.Text
+	if clientIP != "" && clientIP != "unknown" {
+		ipPg = pgtype.Text{String: clientIP, Valid: true}
+	}
+
+	_, _ = s.repo.Queries().CreateReportAudit(ctx, db.CreateReportAuditParams{
+		ID:                security.GenerateUUID(),
+		SnapshotID:        snapIDPg,
+		Action:            action,
+		PerformedByUserID: pgtype.Text{},
+		Details:           detailsJSON,
+		IpAddress:         ipPg,
+	})
 }
 
 // -----------------------------------------------------------------------

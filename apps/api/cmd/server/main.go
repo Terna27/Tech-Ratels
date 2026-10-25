@@ -229,7 +229,28 @@ func main() {
 	safeguardH := handler.NewSafeguardingHandler(safeguardService, safeguardStorage, cfg)
 
 	// Transparency & Public Reports Subsystem
-	reportService := service.NewReportService(repo, notifService, auditService)
+	var reportExportStorage storage.ReportExportStorage
+	if cfg.R2AccessKeyID != "" && cfg.R2SecretAccessKey != "" && cfg.R2ReportsBucketName != "" {
+		r2Exp, err := storage.NewR2ReportExportStorageFromConfig(ctx, storage.R2Config{
+			AccountID:       cfg.R2AccountID,
+			AccessKeyID:     cfg.R2AccessKeyID,
+			SecretAccessKey: cfg.R2SecretAccessKey,
+			BucketName:      cfg.R2ReportsBucketName,
+			Endpoint:        cfg.R2Endpoint,
+		})
+		if err != nil {
+			log.Printf("WARNING: Failed to initialize private Cloudflare R2 report export storage: %v; falling back to dev sandbox\n", err)
+			reportExportStorage = storage.NewDevSandboxReportExportStorage()
+		} else {
+			reportExportStorage = r2Exp
+			log.Printf("Report export storage initialized via Cloudflare R2 (private bucket: %s)\n", cfg.R2ReportsBucketName)
+		}
+	} else {
+		reportExportStorage = storage.NewDevSandboxReportExportStorage()
+		log.Println("Report export storage running in development safe sandbox mode (in-memory mock).")
+	}
+
+	reportService := service.NewReportService(repo, notifService, auditService, reportExportStorage)
 	reportScheduler := worker.NewReportScheduler(repo, reportService, nil)
 	reportScheduler.Start(ctx)
 	defer reportScheduler.Stop()
