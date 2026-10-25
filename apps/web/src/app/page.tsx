@@ -16,9 +16,11 @@ import {
   Camera,
   Play,
   Video,
+  BarChart3,
+  FileText,
 } from "lucide-react";
 import { apiRequest } from "@/lib/api";
-import { EventInstance, PublicLeader, HeroMedia, ActiveHeroMediaResponse, GalleryMedia } from "@/lib/types";
+import { EventInstance, PublicLeader, HeroMedia, ActiveHeroMediaResponse, GalleryMedia, PublicOverviewData } from "@/lib/types";
 import { Badge } from "@/components/ui/Badge";
 import { Alert } from "@/components/ui/Alert";
 
@@ -27,6 +29,7 @@ export default function HomePage() {
   const [leaders, setLeaders] = useState<PublicLeader[]>([]);
   const [heroMedia, setHeroMedia] = useState<HeroMedia | null>(null);
   const [featuredMedia, setFeaturedMedia] = useState<GalleryMedia[]>([]);
+  const [impactMetrics, setImpactMetrics] = useState<PublicOverviewData | null>(null);
   const [videoPlaybackError, setVideoPlaybackError] = useState(false);
   const [reducedMotion, setReducedMotion] = useState(false);
   const [loading, setLoading] = useState(true);
@@ -67,6 +70,14 @@ export default function HomePage() {
           }
         } catch (_) {
           // Graceful fallback if no media exists yet
+        }
+        try {
+          const overview = await apiRequest<PublicOverviewData>("/public/reports/overview");
+          if (overview) {
+            setImpactMetrics(overview);
+          }
+        } catch (_) {
+          // Graceful fallback if no report published yet
         }
       } catch (err) {
         console.error("Failed to load initial data", err);
@@ -218,6 +229,74 @@ export default function HomePage() {
           </div>
         </section>
 
+        {/* Transparency & Impact Section */}
+        <section className="bg-gradient-to-br from-emerald-950 via-emerald-900 to-gray-950 text-white rounded-2xl p-6 sm:p-8 space-y-6 border border-emerald-800 shadow-sm">
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+            <div className="space-y-1">
+              <div className="flex items-center gap-2">
+                <span className="p-1.5 rounded-lg bg-emerald-800/80 text-emerald-300">
+                  <BarChart3 className="w-4 h-4" />
+                </span>
+                <span className="text-xs font-bold text-emerald-300 uppercase tracking-wider">
+                  Public Transparency & Impact
+                </span>
+              </div>
+              <h3 className="text-xl sm:text-2xl font-extrabold text-white">
+                Measurable Achievements Across Nigeria
+              </h3>
+              <p className="text-xs text-emerald-200/80">
+                Certified metrics derived directly from verified cleanup operations, approved claims, and audited ledgers.
+              </p>
+            </div>
+            <Link
+              href="/reports"
+              className="inline-flex items-center gap-1.5 px-4 py-2.5 bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-bold rounded-xl transition shadow-sm self-start sm:self-auto"
+            >
+              <FileText className="w-4 h-4" />
+              <span>Explore Public Reports Portal</span>
+              <ArrowRight className="w-3.5 h-3.5" />
+            </Link>
+          </div>
+
+          <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
+            <div className="bg-emerald-900/40 border border-emerald-700/50 rounded-xl p-4 space-y-1">
+              <div className="text-xs text-emerald-300 font-medium">Completed Cleanups</div>
+              <div className="text-2xl sm:text-3xl font-extrabold text-white">
+                {impactMetrics?.completed_cleanups_count ?? 0}
+              </div>
+              <div className="text-[10px] text-emerald-400">Verified community venues</div>
+            </div>
+
+            <div className="bg-emerald-900/40 border border-emerald-700/50 rounded-xl p-4 space-y-1">
+              <div className="text-xs text-emerald-300 font-medium">Verified Attendees</div>
+              <div className="text-2xl sm:text-3xl font-extrabold text-white">
+                {impactMetrics?.verified_attendees_count ?? 0}
+              </div>
+              <div className="text-[10px] text-emerald-400">
+                {impactMetrics?.unique_participants_count ?? 0} unique members
+              </div>
+            </div>
+
+            <div className="bg-emerald-900/40 border border-emerald-700/50 rounded-xl p-4 space-y-1">
+              <div className="text-xs text-emerald-300 font-medium">Completed Projects</div>
+              <div className="text-2xl sm:text-3xl font-extrabold text-white">
+                {impactMetrics?.completed_projects_count ?? 0}
+              </div>
+              <div className="text-[10px] text-emerald-400">
+                {impactMetrics?.approved_projects_count ?? 0} approved across LGAs
+              </div>
+            </div>
+
+            <div className="bg-emerald-900/40 border border-emerald-700/50 rounded-xl p-4 space-y-1">
+              <div className="text-xs text-emerald-300 font-medium">Approved Revenue</div>
+              <div className="text-2xl sm:text-3xl font-extrabold text-white">
+                {impactMetrics?.approved_income_formatted || "₦0.00"}
+              </div>
+              <div className="text-[10px] text-emerald-400">Super Admin certified ledger</div>
+            </div>
+          </div>
+        </section>
+
         {/* 4 Pillars Grid */}
         <section className="space-y-6">
           <div className="text-center max-w-2xl mx-auto space-y-2">
@@ -270,6 +349,74 @@ export default function HomePage() {
                 Official Foundation fundraising preparation. Bank accounts require dual verification before
                 publication. Live payments inactive in Phase 1.
               </p>
+            </div>
+          </div>
+        </section>
+
+        {/* Transparency & Impact Section */}
+        <section className="bg-gradient-to-br from-emerald-950 via-emerald-900 to-gray-950 text-white rounded-2xl p-6 sm:p-8 space-y-6 border border-emerald-800 shadow-sm">
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+            <div className="space-y-1">
+              <div className="flex items-center gap-2">
+                <span className="p-1.5 rounded-lg bg-emerald-800/80 text-emerald-300">
+                  <BarChart3 className="w-4 h-4" />
+                </span>
+                <span className="text-xs font-bold text-emerald-300 uppercase tracking-wider">
+                  Public Transparency & Impact
+                </span>
+              </div>
+              <h3 className="text-xl sm:text-2xl font-extrabold text-white">
+                Measurable Achievements Across Nigeria
+              </h3>
+              <p className="text-xs text-emerald-200/80">
+                Certified metrics derived directly from verified cleanup operations, approved claims, and audited ledgers.
+              </p>
+            </div>
+            <Link
+              href="/reports"
+              className="inline-flex items-center gap-1.5 px-4 py-2.5 bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-bold rounded-xl transition shadow-sm self-start sm:self-auto"
+            >
+              <FileText className="w-4 h-4" />
+              <span>Explore Public Reports Portal</span>
+              <ArrowRight className="w-3.5 h-3.5" />
+            </Link>
+          </div>
+
+          <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
+            <div className="bg-emerald-900/40 border border-emerald-700/50 rounded-xl p-4 space-y-1">
+              <div className="text-xs text-emerald-300 font-medium">Completed Cleanups</div>
+              <div className="text-2xl sm:text-3xl font-extrabold text-white">
+                {impactMetrics?.completed_cleanups_count ?? 0}
+              </div>
+              <div className="text-[10px] text-emerald-400">Verified community venues</div>
+            </div>
+
+            <div className="bg-emerald-900/40 border border-emerald-700/50 rounded-xl p-4 space-y-1">
+              <div className="text-xs text-emerald-300 font-medium">Verified Attendees</div>
+              <div className="text-2xl sm:text-3xl font-extrabold text-white">
+                {impactMetrics?.verified_attendees_count ?? 0}
+              </div>
+              <div className="text-[10px] text-emerald-400">
+                {impactMetrics?.unique_participants_count ?? 0} unique members
+              </div>
+            </div>
+
+            <div className="bg-emerald-900/40 border border-emerald-700/50 rounded-xl p-4 space-y-1">
+              <div className="text-xs text-emerald-300 font-medium">Completed Projects</div>
+              <div className="text-2xl sm:text-3xl font-extrabold text-white">
+                {impactMetrics?.completed_projects_count ?? 0}
+              </div>
+              <div className="text-[10px] text-emerald-400">
+                {impactMetrics?.approved_projects_count ?? 0} approved across LGAs
+              </div>
+            </div>
+
+            <div className="bg-emerald-900/40 border border-emerald-700/50 rounded-xl p-4 space-y-1">
+              <div className="text-xs text-emerald-300 font-medium">Approved Revenue</div>
+              <div className="text-2xl sm:text-3xl font-extrabold text-white">
+                {impactMetrics?.approved_income_formatted || "₦0.00"}
+              </div>
+              <div className="text-[10px] text-emerald-400">Super Admin certified ledger</div>
             </div>
           </div>
         </section>

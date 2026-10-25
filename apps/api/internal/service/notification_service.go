@@ -1319,6 +1319,91 @@ func (s *NotificationService) OnEventRescheduled(ctx context.Context, qtx *db.Qu
 	}
 }
 
+func (s *NotificationService) OnReportSubmittedForReview(ctx context.Context, qtx *db.Queries, targetUserID, snapshotID, title, reference string) {
+	actionURL := fmt.Sprintf("%s/admin/reports", s.appBaseURL)
+	notifTitle := fmt.Sprintf("Report Submitted for Review: %s", reference)
+	notifBody := fmt.Sprintf("The report draft '%s' (%s) has been submitted for governance review and approval.", title, reference)
+
+	_, _ = s.CreateInAppNotification(ctx, qtx, CreateInAppNotificationInput{
+		RecipientID:         targetUserID,
+		NotificationType:    "report_review_requested",
+		Title:               notifTitle,
+		Body:                notifBody,
+		RelatedResourceType: strPtr("report"),
+		RelatedResourceID:   &snapshotID,
+		ActionURL:           &actionURL,
+		Priority:            "high",
+	})
+}
+
+func (s *NotificationService) OnReportApproved(ctx context.Context, qtx *db.Queries, targetUserID, snapshotID, title, reference string) {
+	actionURL := fmt.Sprintf("%s/admin/reports", s.appBaseURL)
+	notifTitle := fmt.Sprintf("Report Approved: %s", reference)
+	notifBody := fmt.Sprintf("Report snapshot '%s' (%s) has received governance approval and is ready for publication.", title, reference)
+
+	_, _ = s.CreateInAppNotification(ctx, qtx, CreateInAppNotificationInput{
+		RecipientID:         targetUserID,
+		NotificationType:    "report_approved",
+		Title:               notifTitle,
+		Body:                notifBody,
+		RelatedResourceType: strPtr("report"),
+		RelatedResourceID:   &snapshotID,
+		ActionURL:           &actionURL,
+		Priority:            "high",
+	})
+}
+
+func (s *NotificationService) OnReportRejected(ctx context.Context, qtx *db.Queries, targetUserID, snapshotID, title, reference, reason string) {
+	actionURL := fmt.Sprintf("%s/admin/reports", s.appBaseURL)
+	notifTitle := fmt.Sprintf("Report Rejected: %s", reference)
+	notifBody := fmt.Sprintf("Report draft '%s' (%s) was rejected. Reason: %s", title, reference, reason)
+
+	_, _ = s.CreateInAppNotification(ctx, qtx, CreateInAppNotificationInput{
+		RecipientID:         targetUserID,
+		NotificationType:    "report_rejected",
+		Title:               notifTitle,
+		Body:                notifBody,
+		RelatedResourceType: strPtr("report"),
+		RelatedResourceID:   &snapshotID,
+		ActionURL:           &actionURL,
+		Priority:            "normal",
+	})
+}
+
+func (s *NotificationService) OnReportPublished(ctx context.Context, qtx *db.Queries, targetUserID, snapshotID, title, reference string) {
+	actionURL := fmt.Sprintf("%s/reports", s.appBaseURL)
+	notifTitle := fmt.Sprintf("Public Report Published: %s", reference)
+	notifBody := fmt.Sprintf("Report '%s' (%s) has been officially published to the public transparency portal.", title, reference)
+
+	_, _ = s.CreateInAppNotification(ctx, qtx, CreateInAppNotificationInput{
+		RecipientID:         targetUserID,
+		NotificationType:    "report_published",
+		Title:               notifTitle,
+		Body:                notifBody,
+		RelatedResourceType: strPtr("report"),
+		RelatedResourceID:   &snapshotID,
+		ActionURL:           &actionURL,
+		Priority:            "normal",
+	})
+}
+
+func (s *NotificationService) OnReportWithdrawn(ctx context.Context, qtx *db.Queries, targetUserID, snapshotID, title, reference, reason string) {
+	actionURL := fmt.Sprintf("%s/admin/reports", s.appBaseURL)
+	notifTitle := fmt.Sprintf("Published Report Withdrawn: %s", reference)
+	notifBody := fmt.Sprintf("Notice: Published report '%s' (%s) was withdrawn. Reason: %s", title, reference, reason)
+
+	_, _ = s.CreateInAppNotification(ctx, qtx, CreateInAppNotificationInput{
+		RecipientID:         targetUserID,
+		NotificationType:    "report_withdrawn",
+		Title:               notifTitle,
+		Body:                notifBody,
+		RelatedResourceType: strPtr("report"),
+		RelatedResourceID:   &snapshotID,
+		ActionURL:           &actionURL,
+		Priority:            "high",
+	})
+}
+
 // -------------------------------------------------------------
 // Safe Template Rendering Helper
 // -------------------------------------------------------------

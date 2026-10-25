@@ -35,6 +35,8 @@ export interface Zone {
   states?: State[];
 }
 
+export type GeopoliticalZone = Zone;
+
 export interface State {
   id: string;
   zone_id: string;
@@ -1957,6 +1959,223 @@ export interface SafeguardingOfficer {
   email: string;
   is_active: boolean;
   appointed_at: string;
+}
+
+// -------------------------------------------------------------
+// Phase D: Public Transparency, Reports & Accountability Types
+// -------------------------------------------------------------
+
+export interface PublicReportDefinition {
+  id: string;
+  report_type: string;
+  name: string;
+  description: string;
+  reporting_scope: string;
+  is_active: boolean;
+  created_at: string;
+}
+
+export interface PublicOverviewData {
+  completed_cleanups_count: number;
+  total_registered_volunteers: number;
+  verified_attendees_count: number;
+  unique_participants_count: number;
+  active_states_count: number;
+  active_lgas_count: number;
+  approved_projects_count: number;
+  completed_projects_count: number;
+  approved_income_kobo: number;
+  approved_income_formatted: string;
+  approved_expenditure_kobo: number;
+  approved_expenditure_formatted: string;
+  foundation_donations_kobo: number;
+  foundation_donations_formatted: string;
+  total_waste_collected_kg: number;
+  reporting_period: string;
+  scope: string;
+}
+
+export interface CleanupStateRow {
+  state_id: string;
+  state_name: string;
+  cleanups_count: number;
+  waste_collected_kg: number;
+  verified_attendees: number;
+}
+
+export interface PublicCleanupsData {
+  completed_cleanups_count: number;
+  active_states_count: number;
+  active_lgas_count: number;
+  total_waste_collected_kg: number;
+  total_waste_bags: number;
+  total_duration_hours: number;
+  verified_attendees_count: number;
+  unique_participants_count: number;
+  state_breakdown: CleanupStateRow[];
+  reporting_period: string;
+}
+
+export interface PublicParticipationData {
+  total_claims_submitted: number;
+  approved_claims_count: number;
+  rejected_claims_count: number;
+  approval_rate_percent: number;
+  unique_verified_members: number;
+  unique_members_suppressed?: string;
+  reporting_period: string;
+}
+
+export interface PublicCategorySpend {
+  category: string;
+  category_label: string;
+  expense_count: number;
+  total_kobo: number;
+  amount_formatted: string;
+}
+
+export interface PublicFinanceData {
+  approved_income_kobo: number;
+  approved_income_formatted: string;
+  approved_expenditure_kobo: number;
+  approved_expenditure_formatted: string;
+  net_surplus_deficit_kobo: number;
+  net_surplus_deficit_formatted: string;
+  total_approved_budget_kobo: number;
+  total_approved_budget_formatted: string;
+  budget_variance_kobo: number;
+  budget_variance_formatted: string;
+  spending_categories: PublicCategorySpend[];
+  reporting_period: string;
+}
+
+export interface PublicFoundationData {
+  verified_donations_count: number;
+  total_donations_kobo: number;
+  total_donations_formatted: string;
+  provisional_entity_notice: string;
+  strict_segregation_notice: string;
+  payment_safety_switch_enabled: boolean;
+  reporting_period: string;
+}
+
+export interface PublicProjectSummaryItem {
+  id: string;
+  reference: string;
+  title: string;
+  description: string;
+  category: string;
+  state_name: string;
+  lga_name: string;
+  community_ward: string;
+  location_details: string;
+  funding_status: string;
+  execution_status: string;
+  progress_percentage: number;
+  approved_budget_kobo: number;
+  approved_budget_formatted: string;
+  recorded_expenditure_kobo: number;
+  recorded_expenditure_formatted: string;
+}
+
+export interface PublicCommunityProjectsData {
+  total_projects_count: number;
+  completed_projects_count: number;
+  in_progress_projects_count: number;
+  planned_projects_count: number;
+  total_approved_budget_kobo: number;
+  total_approved_budget_formatted: string;
+  total_recorded_expenditure_kobo: number;
+  total_recorded_expenditure_formatted: string;
+  projects: PublicProjectSummaryItem[];
+  reporting_period: string;
+}
+
+export interface PublicPublicationDTO {
+  publication_id: string;
+  snapshot_id: string;
+  public_reference: string;
+  report_type: string;
+  title: string;
+  reporting_period: string;
+  period_start: string;
+  period_end: string;
+  scope_type: string;
+  zone_name?: string;
+  state_name?: string;
+  lga_name?: string;
+  publication_version: number;
+  data_hash: string;
+  published_at: string;
+  publisher_name: string;
+  aggregated_data: any;
+  correction_notice?: string;
+}
+
+export interface PaginatedPublicationsResponse {
+  publications: PublicPublicationDTO[];
+  total_count: number;
+  page: number;
+  page_size: number;
+}
+
+export interface ReportApprovalItem {
+  id: string;
+  reviewer_id: string;
+  reviewer_name: string;
+  reviewer_email: string;
+  decision: string;
+  decision_reason: string;
+  governance_scope: string;
+  created_at: string;
+}
+
+export interface ReportAuditItem {
+  id: string;
+  snapshot_id?: string;
+  action: string;
+  performed_by_id?: string;
+  actor_name?: string;
+  actor_email?: string;
+  details: any;
+  ip_address?: string;
+  created_at: string;
+}
+
+export interface AdminSnapshotDetailDTO {
+  snapshot_id: string;
+  public_reference: string;
+  definition_id?: string;
+  report_type: string;
+  title: string;
+  reporting_period: string;
+  period_start: string;
+  period_end: string;
+  scope_type: string;
+  zone_id?: string;
+  zone_name?: string;
+  state_id?: string;
+  state_name?: string;
+  lga_id?: string;
+  lga_name?: string;
+  status: string;
+  publication_version: number;
+  data_hash: string;
+  created_by_user_id: string;
+  creator_name: string;
+  correction_notes?: string;
+  aggregated_data: any;
+  created_at: string;
+  updated_at: string;
+  approvals: ReportApprovalItem[];
+  audit_logs: ReportAuditItem[];
+}
+
+export interface PaginatedSnapshotsResponse {
+  snapshots: AdminSnapshotDetailDTO[];
+  total_count: number;
+  page: number;
+  page_size: number;
 }
 
 

@@ -38,6 +38,7 @@ export function Navbar() {
     { href: "/careers", label: "Ratels Careers" },
     { href: "/leadership", label: "Leadership" },
     { href: "/foundation", label: "Foundation" },
+    { href: "/reports", label: "Reports" },
   ];
 
   const isActive = (path: string) => {
