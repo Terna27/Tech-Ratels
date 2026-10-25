@@ -373,31 +373,36 @@ type EmailVerificationToken struct {
 }
 
 type EventInstance struct {
-	ID                 string             `json:"id"`
-	CampaignID         pgtype.Text        `json:"campaign_id"`
-	ProgrammeType      string             `json:"programme_type"`
-	Title              string             `json:"title"`
-	StateID            string             `json:"state_id"`
-	LgaID              string             `json:"lga_id"`
-	Address            string             `json:"address"`
-	Landmark           string             `json:"landmark"`
-	Latitude           pgtype.Float8      `json:"latitude"`
-	Longitude          pgtype.Float8      `json:"longitude"`
-	StartTime          pgtype.Timestamptz `json:"start_time"`
-	EndTime            pgtype.Timestamptz `json:"end_time"`
-	Capacity           int32              `json:"capacity"`
-	RegisteredCount    int32              `json:"registered_count"`
-	CoordinatorID      string             `json:"coordinator_id"`
-	PublicContact      string             `json:"public_contact"`
-	AccessibilityNotes pgtype.Text        `json:"accessibility_notes"`
-	SafetyNotes        pgtype.Text        `json:"safety_notes"`
-	Status             string             `json:"status"`
-	RejectionReason    pgtype.Text        `json:"rejection_reason"`
-	RescheduledFrom    pgtype.Timestamptz `json:"rescheduled_from"`
-	RescheduledReason  pgtype.Text        `json:"rescheduled_reason"`
-	CreatedAt          pgtype.Timestamptz `json:"created_at"`
-	UpdatedAt          pgtype.Timestamptz `json:"updated_at"`
-	Version            int32              `json:"version"`
+	ID                   string             `json:"id"`
+	CampaignID           pgtype.Text        `json:"campaign_id"`
+	ProgrammeType        string             `json:"programme_type"`
+	Title                string             `json:"title"`
+	StateID              string             `json:"state_id"`
+	LgaID                string             `json:"lga_id"`
+	Address              string             `json:"address"`
+	Landmark             string             `json:"landmark"`
+	Latitude             pgtype.Float8      `json:"latitude"`
+	Longitude            pgtype.Float8      `json:"longitude"`
+	StartTime            pgtype.Timestamptz `json:"start_time"`
+	EndTime              pgtype.Timestamptz `json:"end_time"`
+	Capacity             int32              `json:"capacity"`
+	RegisteredCount      int32              `json:"registered_count"`
+	CoordinatorID        string             `json:"coordinator_id"`
+	PublicContact        string             `json:"public_contact"`
+	AccessibilityNotes   pgtype.Text        `json:"accessibility_notes"`
+	SafetyNotes          pgtype.Text        `json:"safety_notes"`
+	Status               string             `json:"status"`
+	RejectionReason      pgtype.Text        `json:"rejection_reason"`
+	RescheduledFrom      pgtype.Timestamptz `json:"rescheduled_from"`
+	RescheduledReason    pgtype.Text        `json:"rescheduled_reason"`
+	CreatedAt            pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt            pgtype.Timestamptz `json:"updated_at"`
+	Version              int32              `json:"version"`
+	WasteCollectedKg     int64              `json:"waste_collected_kg"`
+	WasteBagsCount       int32              `json:"waste_bags_count"`
+	RecyclablesKg        int64              `json:"recyclables_kg"`
+	CleanupDurationHours pgtype.Numeric     `json:"cleanup_duration_hours"`
+	EnvironmentalNotes   pgtype.Text        `json:"environmental_notes"`
 }
 
 type EventMediaConsent struct {
@@ -1185,6 +1190,87 @@ type ParticipationClaim struct {
 	CreatedAt        pgtype.Timestamptz `json:"created_at"`
 	UpdatedAt        pgtype.Timestamptz `json:"updated_at"`
 	Version          int32              `json:"version"`
+}
+
+type PublicReportApproval struct {
+	ID              string             `json:"id"`
+	SnapshotID      string             `json:"snapshot_id"`
+	ReviewerID      string             `json:"reviewer_id"`
+	Decision        string             `json:"decision"`
+	DecisionReason  string             `json:"decision_reason"`
+	GovernanceScope string             `json:"governance_scope"`
+	CreatedAt       pgtype.Timestamptz `json:"created_at"`
+}
+
+type PublicReportAudit struct {
+	ID                string             `json:"id"`
+	SnapshotID        pgtype.Text        `json:"snapshot_id"`
+	Action            string             `json:"action"`
+	PerformedByUserID pgtype.Text        `json:"performed_by_user_id"`
+	Details           json.RawMessage    `json:"details"`
+	IpAddress         pgtype.Text        `json:"ip_address"`
+	CreatedAt         pgtype.Timestamptz `json:"created_at"`
+}
+
+type PublicReportDefinition struct {
+	ID               string             `json:"id"`
+	ReportType       string             `json:"report_type"`
+	Name             string             `json:"name"`
+	Description      string             `json:"description"`
+	ReportingScope   string             `json:"reporting_scope"`
+	AggregationRules json.RawMessage    `json:"aggregation_rules"`
+	VisibilityConfig json.RawMessage    `json:"visibility_config"`
+	IsActive         bool               `json:"is_active"`
+	CreatedAt        pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt        pgtype.Timestamptz `json:"updated_at"`
+}
+
+type PublicReportExport struct {
+	ID               string             `json:"id"`
+	SnapshotID       string             `json:"snapshot_id"`
+	ExportFormat     string             `json:"export_format"`
+	FileName         string             `json:"file_name"`
+	ContentHash      string             `json:"content_hash"`
+	StorageReference pgtype.Text        `json:"storage_reference"`
+	ExportStatus     string             `json:"export_status"`
+	CreatedAt        pgtype.Timestamptz `json:"created_at"`
+}
+
+type PublicReportPublication struct {
+	ID                     string             `json:"id"`
+	SnapshotID             string             `json:"snapshot_id"`
+	Status                 string             `json:"status"`
+	PublishedByUserID      string             `json:"published_by_user_id"`
+	PublishedAt            pgtype.Timestamptz `json:"published_at"`
+	WithdrawnByUserID      pgtype.Text        `json:"withdrawn_by_user_id"`
+	WithdrawnAt            pgtype.Timestamptz `json:"withdrawn_at"`
+	WithdrawalReason       pgtype.Text        `json:"withdrawal_reason"`
+	SupersededBySnapshotID pgtype.Text        `json:"superseded_by_snapshot_id"`
+	CorrectionNotice       pgtype.Text        `json:"correction_notice"`
+	CreatedAt              pgtype.Timestamptz `json:"created_at"`
+}
+
+type PublicReportSnapshot struct {
+	ID                 string             `json:"id"`
+	PublicReference    string             `json:"public_reference"`
+	DefinitionID       pgtype.Text        `json:"definition_id"`
+	ReportType         string             `json:"report_type"`
+	Title              string             `json:"title"`
+	ReportingPeriod    string             `json:"reporting_period"`
+	PeriodStart        pgtype.Date        `json:"period_start"`
+	PeriodEnd          pgtype.Date        `json:"period_end"`
+	ScopeType          string             `json:"scope_type"`
+	ZoneID             pgtype.Text        `json:"zone_id"`
+	StateID            pgtype.Text        `json:"state_id"`
+	LgaID              pgtype.Text        `json:"lga_id"`
+	Status             string             `json:"status"`
+	AggregatedData     json.RawMessage    `json:"aggregated_data"`
+	DataHash           string             `json:"data_hash"`
+	PublicationVersion int32              `json:"publication_version"`
+	CorrectionNotes    pgtype.Text        `json:"correction_notes"`
+	CreatedByUserID    string             `json:"created_by_user_id"`
+	CreatedAt          pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt          pgtype.Timestamptz `json:"updated_at"`
 }
 
 type SafeguardingAccessLog struct {

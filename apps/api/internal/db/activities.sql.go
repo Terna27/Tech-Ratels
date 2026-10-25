@@ -100,7 +100,7 @@ INSERT INTO event_instances (
     $9, $10, $11, $12, $13, 0,
     $14, $15, $16, $17,
     $18, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, 1
-) RETURNING id, campaign_id, programme_type, title, state_id, lga_id, address, landmark, latitude, longitude, start_time, end_time, capacity, registered_count, coordinator_id, public_contact, accessibility_notes, safety_notes, status, rejection_reason, rescheduled_from, rescheduled_reason, created_at, updated_at, version
+) RETURNING id, campaign_id, programme_type, title, state_id, lga_id, address, landmark, latitude, longitude, start_time, end_time, capacity, registered_count, coordinator_id, public_contact, accessibility_notes, safety_notes, status, rejection_reason, rescheduled_from, rescheduled_reason, created_at, updated_at, version, waste_collected_kg, waste_bags_count, recyclables_kg, cleanup_duration_hours, environmental_notes
 `
 
 type CreateEventInstanceParams struct {
@@ -172,6 +172,11 @@ func (q *Queries) CreateEventInstance(ctx context.Context, arg CreateEventInstan
 		&i.CreatedAt,
 		&i.UpdatedAt,
 		&i.Version,
+		&i.WasteCollectedKg,
+		&i.WasteBagsCount,
+		&i.RecyclablesKg,
+		&i.CleanupDurationHours,
+		&i.EnvironmentalNotes,
 	)
 	return i, err
 }
@@ -211,7 +216,7 @@ const decrementRegisteredCount = `-- name: DecrementRegisteredCount :one
 UPDATE event_instances
 SET registered_count = GREATEST(0, registered_count - 1), updated_at = CURRENT_TIMESTAMP
 WHERE id = $1
-RETURNING id, campaign_id, programme_type, title, state_id, lga_id, address, landmark, latitude, longitude, start_time, end_time, capacity, registered_count, coordinator_id, public_contact, accessibility_notes, safety_notes, status, rejection_reason, rescheduled_from, rescheduled_reason, created_at, updated_at, version
+RETURNING id, campaign_id, programme_type, title, state_id, lga_id, address, landmark, latitude, longitude, start_time, end_time, capacity, registered_count, coordinator_id, public_contact, accessibility_notes, safety_notes, status, rejection_reason, rescheduled_from, rescheduled_reason, created_at, updated_at, version, waste_collected_kg, waste_bags_count, recyclables_kg, cleanup_duration_hours, environmental_notes
 `
 
 func (q *Queries) DecrementRegisteredCount(ctx context.Context, id string) (EventInstance, error) {
@@ -243,6 +248,11 @@ func (q *Queries) DecrementRegisteredCount(ctx context.Context, id string) (Even
 		&i.CreatedAt,
 		&i.UpdatedAt,
 		&i.Version,
+		&i.WasteCollectedKg,
+		&i.WasteBagsCount,
+		&i.RecyclablesKg,
+		&i.CleanupDurationHours,
+		&i.EnvironmentalNotes,
 	)
 	return i, err
 }
@@ -299,7 +309,7 @@ func (q *Queries) GetCleanupCampaignByYearMonth(ctx context.Context, arg GetClea
 }
 
 const getEventInstanceByID = `-- name: GetEventInstanceByID :one
-SELECT id, campaign_id, programme_type, title, state_id, lga_id, address, landmark, latitude, longitude, start_time, end_time, capacity, registered_count, coordinator_id, public_contact, accessibility_notes, safety_notes, status, rejection_reason, rescheduled_from, rescheduled_reason, created_at, updated_at, version FROM event_instances
+SELECT id, campaign_id, programme_type, title, state_id, lga_id, address, landmark, latitude, longitude, start_time, end_time, capacity, registered_count, coordinator_id, public_contact, accessibility_notes, safety_notes, status, rejection_reason, rescheduled_from, rescheduled_reason, created_at, updated_at, version, waste_collected_kg, waste_bags_count, recyclables_kg, cleanup_duration_hours, environmental_notes FROM event_instances
 WHERE id = $1
 `
 
@@ -332,12 +342,17 @@ func (q *Queries) GetEventInstanceByID(ctx context.Context, id string) (EventIns
 		&i.CreatedAt,
 		&i.UpdatedAt,
 		&i.Version,
+		&i.WasteCollectedKg,
+		&i.WasteBagsCount,
+		&i.RecyclablesKg,
+		&i.CleanupDurationHours,
+		&i.EnvironmentalNotes,
 	)
 	return i, err
 }
 
 const getEventInstanceForUpdate = `-- name: GetEventInstanceForUpdate :one
-SELECT id, campaign_id, programme_type, title, state_id, lga_id, address, landmark, latitude, longitude, start_time, end_time, capacity, registered_count, coordinator_id, public_contact, accessibility_notes, safety_notes, status, rejection_reason, rescheduled_from, rescheduled_reason, created_at, updated_at, version FROM event_instances
+SELECT id, campaign_id, programme_type, title, state_id, lga_id, address, landmark, latitude, longitude, start_time, end_time, capacity, registered_count, coordinator_id, public_contact, accessibility_notes, safety_notes, status, rejection_reason, rescheduled_from, rescheduled_reason, created_at, updated_at, version, waste_collected_kg, waste_bags_count, recyclables_kg, cleanup_duration_hours, environmental_notes FROM event_instances
 WHERE id = $1 FOR UPDATE
 `
 
@@ -370,6 +385,11 @@ func (q *Queries) GetEventInstanceForUpdate(ctx context.Context, id string) (Eve
 		&i.CreatedAt,
 		&i.UpdatedAt,
 		&i.Version,
+		&i.WasteCollectedKg,
+		&i.WasteBagsCount,
+		&i.RecyclablesKg,
+		&i.CleanupDurationHours,
+		&i.EnvironmentalNotes,
 	)
 	return i, err
 }
@@ -405,7 +425,7 @@ const incrementRegisteredCount = `-- name: IncrementRegisteredCount :one
 UPDATE event_instances
 SET registered_count = registered_count + 1, updated_at = CURRENT_TIMESTAMP
 WHERE id = $1
-RETURNING id, campaign_id, programme_type, title, state_id, lga_id, address, landmark, latitude, longitude, start_time, end_time, capacity, registered_count, coordinator_id, public_contact, accessibility_notes, safety_notes, status, rejection_reason, rescheduled_from, rescheduled_reason, created_at, updated_at, version
+RETURNING id, campaign_id, programme_type, title, state_id, lga_id, address, landmark, latitude, longitude, start_time, end_time, capacity, registered_count, coordinator_id, public_contact, accessibility_notes, safety_notes, status, rejection_reason, rescheduled_from, rescheduled_reason, created_at, updated_at, version, waste_collected_kg, waste_bags_count, recyclables_kg, cleanup_duration_hours, environmental_notes
 `
 
 func (q *Queries) IncrementRegisteredCount(ctx context.Context, id string) (EventInstance, error) {
@@ -437,12 +457,17 @@ func (q *Queries) IncrementRegisteredCount(ctx context.Context, id string) (Even
 		&i.CreatedAt,
 		&i.UpdatedAt,
 		&i.Version,
+		&i.WasteCollectedKg,
+		&i.WasteBagsCount,
+		&i.RecyclablesKg,
+		&i.CleanupDurationHours,
+		&i.EnvironmentalNotes,
 	)
 	return i, err
 }
 
 const listAllEvents = `-- name: ListAllEvents :many
-SELECT e.id, e.campaign_id, e.programme_type, e.title, e.state_id, e.lga_id, e.address, e.landmark, e.latitude, e.longitude, e.start_time, e.end_time, e.capacity, e.registered_count, e.coordinator_id, e.public_contact, e.accessibility_notes, e.safety_notes, e.status, e.rejection_reason, e.rescheduled_from, e.rescheduled_reason, e.created_at, e.updated_at, e.version, s.name as state_name, l.name as lga_name, u.display_name as coordinator_name
+SELECT e.id, e.campaign_id, e.programme_type, e.title, e.state_id, e.lga_id, e.address, e.landmark, e.latitude, e.longitude, e.start_time, e.end_time, e.capacity, e.registered_count, e.coordinator_id, e.public_contact, e.accessibility_notes, e.safety_notes, e.status, e.rejection_reason, e.rescheduled_from, e.rescheduled_reason, e.created_at, e.updated_at, e.version, e.waste_collected_kg, e.waste_bags_count, e.recyclables_kg, e.cleanup_duration_hours, e.environmental_notes, s.name as state_name, l.name as lga_name, u.display_name as coordinator_name
 FROM event_instances e
 JOIN states s ON e.state_id = s.id
 JOIN lgas l ON e.lga_id = l.id
@@ -451,34 +476,39 @@ ORDER BY e.start_time DESC
 `
 
 type ListAllEventsRow struct {
-	ID                 string             `json:"id"`
-	CampaignID         pgtype.Text        `json:"campaign_id"`
-	ProgrammeType      string             `json:"programme_type"`
-	Title              string             `json:"title"`
-	StateID            string             `json:"state_id"`
-	LgaID              string             `json:"lga_id"`
-	Address            string             `json:"address"`
-	Landmark           string             `json:"landmark"`
-	Latitude           pgtype.Float8      `json:"latitude"`
-	Longitude          pgtype.Float8      `json:"longitude"`
-	StartTime          pgtype.Timestamptz `json:"start_time"`
-	EndTime            pgtype.Timestamptz `json:"end_time"`
-	Capacity           int32              `json:"capacity"`
-	RegisteredCount    int32              `json:"registered_count"`
-	CoordinatorID      string             `json:"coordinator_id"`
-	PublicContact      string             `json:"public_contact"`
-	AccessibilityNotes pgtype.Text        `json:"accessibility_notes"`
-	SafetyNotes        pgtype.Text        `json:"safety_notes"`
-	Status             string             `json:"status"`
-	RejectionReason    pgtype.Text        `json:"rejection_reason"`
-	RescheduledFrom    pgtype.Timestamptz `json:"rescheduled_from"`
-	RescheduledReason  pgtype.Text        `json:"rescheduled_reason"`
-	CreatedAt          pgtype.Timestamptz `json:"created_at"`
-	UpdatedAt          pgtype.Timestamptz `json:"updated_at"`
-	Version            int32              `json:"version"`
-	StateName          string             `json:"state_name"`
-	LgaName            string             `json:"lga_name"`
-	CoordinatorName    string             `json:"coordinator_name"`
+	ID                   string             `json:"id"`
+	CampaignID           pgtype.Text        `json:"campaign_id"`
+	ProgrammeType        string             `json:"programme_type"`
+	Title                string             `json:"title"`
+	StateID              string             `json:"state_id"`
+	LgaID                string             `json:"lga_id"`
+	Address              string             `json:"address"`
+	Landmark             string             `json:"landmark"`
+	Latitude             pgtype.Float8      `json:"latitude"`
+	Longitude            pgtype.Float8      `json:"longitude"`
+	StartTime            pgtype.Timestamptz `json:"start_time"`
+	EndTime              pgtype.Timestamptz `json:"end_time"`
+	Capacity             int32              `json:"capacity"`
+	RegisteredCount      int32              `json:"registered_count"`
+	CoordinatorID        string             `json:"coordinator_id"`
+	PublicContact        string             `json:"public_contact"`
+	AccessibilityNotes   pgtype.Text        `json:"accessibility_notes"`
+	SafetyNotes          pgtype.Text        `json:"safety_notes"`
+	Status               string             `json:"status"`
+	RejectionReason      pgtype.Text        `json:"rejection_reason"`
+	RescheduledFrom      pgtype.Timestamptz `json:"rescheduled_from"`
+	RescheduledReason    pgtype.Text        `json:"rescheduled_reason"`
+	CreatedAt            pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt            pgtype.Timestamptz `json:"updated_at"`
+	Version              int32              `json:"version"`
+	WasteCollectedKg     int64              `json:"waste_collected_kg"`
+	WasteBagsCount       int32              `json:"waste_bags_count"`
+	RecyclablesKg        int64              `json:"recyclables_kg"`
+	CleanupDurationHours pgtype.Numeric     `json:"cleanup_duration_hours"`
+	EnvironmentalNotes   pgtype.Text        `json:"environmental_notes"`
+	StateName            string             `json:"state_name"`
+	LgaName              string             `json:"lga_name"`
+	CoordinatorName      string             `json:"coordinator_name"`
 }
 
 func (q *Queries) ListAllEvents(ctx context.Context) ([]ListAllEventsRow, error) {
@@ -516,6 +546,11 @@ func (q *Queries) ListAllEvents(ctx context.Context) ([]ListAllEventsRow, error)
 			&i.CreatedAt,
 			&i.UpdatedAt,
 			&i.Version,
+			&i.WasteCollectedKg,
+			&i.WasteBagsCount,
+			&i.RecyclablesKg,
+			&i.CleanupDurationHours,
+			&i.EnvironmentalNotes,
 			&i.StateName,
 			&i.LgaName,
 			&i.CoordinatorName,
@@ -567,7 +602,7 @@ func (q *Queries) ListCleanupCampaigns(ctx context.Context) ([]CleanupCampaign, 
 }
 
 const listEventsByState = `-- name: ListEventsByState :many
-SELECT e.id, e.campaign_id, e.programme_type, e.title, e.state_id, e.lga_id, e.address, e.landmark, e.latitude, e.longitude, e.start_time, e.end_time, e.capacity, e.registered_count, e.coordinator_id, e.public_contact, e.accessibility_notes, e.safety_notes, e.status, e.rejection_reason, e.rescheduled_from, e.rescheduled_reason, e.created_at, e.updated_at, e.version, s.name as state_name, l.name as lga_name, u.display_name as coordinator_name
+SELECT e.id, e.campaign_id, e.programme_type, e.title, e.state_id, e.lga_id, e.address, e.landmark, e.latitude, e.longitude, e.start_time, e.end_time, e.capacity, e.registered_count, e.coordinator_id, e.public_contact, e.accessibility_notes, e.safety_notes, e.status, e.rejection_reason, e.rescheduled_from, e.rescheduled_reason, e.created_at, e.updated_at, e.version, e.waste_collected_kg, e.waste_bags_count, e.recyclables_kg, e.cleanup_duration_hours, e.environmental_notes, s.name as state_name, l.name as lga_name, u.display_name as coordinator_name
 FROM event_instances e
 JOIN states s ON e.state_id = s.id
 JOIN lgas l ON e.lga_id = l.id
@@ -577,34 +612,39 @@ ORDER BY e.start_time DESC
 `
 
 type ListEventsByStateRow struct {
-	ID                 string             `json:"id"`
-	CampaignID         pgtype.Text        `json:"campaign_id"`
-	ProgrammeType      string             `json:"programme_type"`
-	Title              string             `json:"title"`
-	StateID            string             `json:"state_id"`
-	LgaID              string             `json:"lga_id"`
-	Address            string             `json:"address"`
-	Landmark           string             `json:"landmark"`
-	Latitude           pgtype.Float8      `json:"latitude"`
-	Longitude          pgtype.Float8      `json:"longitude"`
-	StartTime          pgtype.Timestamptz `json:"start_time"`
-	EndTime            pgtype.Timestamptz `json:"end_time"`
-	Capacity           int32              `json:"capacity"`
-	RegisteredCount    int32              `json:"registered_count"`
-	CoordinatorID      string             `json:"coordinator_id"`
-	PublicContact      string             `json:"public_contact"`
-	AccessibilityNotes pgtype.Text        `json:"accessibility_notes"`
-	SafetyNotes        pgtype.Text        `json:"safety_notes"`
-	Status             string             `json:"status"`
-	RejectionReason    pgtype.Text        `json:"rejection_reason"`
-	RescheduledFrom    pgtype.Timestamptz `json:"rescheduled_from"`
-	RescheduledReason  pgtype.Text        `json:"rescheduled_reason"`
-	CreatedAt          pgtype.Timestamptz `json:"created_at"`
-	UpdatedAt          pgtype.Timestamptz `json:"updated_at"`
-	Version            int32              `json:"version"`
-	StateName          string             `json:"state_name"`
-	LgaName            string             `json:"lga_name"`
-	CoordinatorName    string             `json:"coordinator_name"`
+	ID                   string             `json:"id"`
+	CampaignID           pgtype.Text        `json:"campaign_id"`
+	ProgrammeType        string             `json:"programme_type"`
+	Title                string             `json:"title"`
+	StateID              string             `json:"state_id"`
+	LgaID                string             `json:"lga_id"`
+	Address              string             `json:"address"`
+	Landmark             string             `json:"landmark"`
+	Latitude             pgtype.Float8      `json:"latitude"`
+	Longitude            pgtype.Float8      `json:"longitude"`
+	StartTime            pgtype.Timestamptz `json:"start_time"`
+	EndTime              pgtype.Timestamptz `json:"end_time"`
+	Capacity             int32              `json:"capacity"`
+	RegisteredCount      int32              `json:"registered_count"`
+	CoordinatorID        string             `json:"coordinator_id"`
+	PublicContact        string             `json:"public_contact"`
+	AccessibilityNotes   pgtype.Text        `json:"accessibility_notes"`
+	SafetyNotes          pgtype.Text        `json:"safety_notes"`
+	Status               string             `json:"status"`
+	RejectionReason      pgtype.Text        `json:"rejection_reason"`
+	RescheduledFrom      pgtype.Timestamptz `json:"rescheduled_from"`
+	RescheduledReason    pgtype.Text        `json:"rescheduled_reason"`
+	CreatedAt            pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt            pgtype.Timestamptz `json:"updated_at"`
+	Version              int32              `json:"version"`
+	WasteCollectedKg     int64              `json:"waste_collected_kg"`
+	WasteBagsCount       int32              `json:"waste_bags_count"`
+	RecyclablesKg        int64              `json:"recyclables_kg"`
+	CleanupDurationHours pgtype.Numeric     `json:"cleanup_duration_hours"`
+	EnvironmentalNotes   pgtype.Text        `json:"environmental_notes"`
+	StateName            string             `json:"state_name"`
+	LgaName              string             `json:"lga_name"`
+	CoordinatorName      string             `json:"coordinator_name"`
 }
 
 func (q *Queries) ListEventsByState(ctx context.Context, stateID string) ([]ListEventsByStateRow, error) {
@@ -642,6 +682,11 @@ func (q *Queries) ListEventsByState(ctx context.Context, stateID string) ([]List
 			&i.CreatedAt,
 			&i.UpdatedAt,
 			&i.Version,
+			&i.WasteCollectedKg,
+			&i.WasteBagsCount,
+			&i.RecyclablesKg,
+			&i.CleanupDurationHours,
+			&i.EnvironmentalNotes,
 			&i.StateName,
 			&i.LgaName,
 			&i.CoordinatorName,
@@ -657,7 +702,7 @@ func (q *Queries) ListEventsByState(ctx context.Context, stateID string) ([]List
 }
 
 const listPublishedEvents = `-- name: ListPublishedEvents :many
-SELECT e.id, e.campaign_id, e.programme_type, e.title, e.state_id, e.lga_id, e.address, e.landmark, e.latitude, e.longitude, e.start_time, e.end_time, e.capacity, e.registered_count, e.coordinator_id, e.public_contact, e.accessibility_notes, e.safety_notes, e.status, e.rejection_reason, e.rescheduled_from, e.rescheduled_reason, e.created_at, e.updated_at, e.version, s.name as state_name, l.name as lga_name, u.display_name as coordinator_name
+SELECT e.id, e.campaign_id, e.programme_type, e.title, e.state_id, e.lga_id, e.address, e.landmark, e.latitude, e.longitude, e.start_time, e.end_time, e.capacity, e.registered_count, e.coordinator_id, e.public_contact, e.accessibility_notes, e.safety_notes, e.status, e.rejection_reason, e.rescheduled_from, e.rescheduled_reason, e.created_at, e.updated_at, e.version, e.waste_collected_kg, e.waste_bags_count, e.recyclables_kg, e.cleanup_duration_hours, e.environmental_notes, s.name as state_name, l.name as lga_name, u.display_name as coordinator_name
 FROM event_instances e
 JOIN states s ON e.state_id = s.id
 JOIN lgas l ON e.lga_id = l.id
@@ -667,34 +712,39 @@ ORDER BY e.start_time ASC
 `
 
 type ListPublishedEventsRow struct {
-	ID                 string             `json:"id"`
-	CampaignID         pgtype.Text        `json:"campaign_id"`
-	ProgrammeType      string             `json:"programme_type"`
-	Title              string             `json:"title"`
-	StateID            string             `json:"state_id"`
-	LgaID              string             `json:"lga_id"`
-	Address            string             `json:"address"`
-	Landmark           string             `json:"landmark"`
-	Latitude           pgtype.Float8      `json:"latitude"`
-	Longitude          pgtype.Float8      `json:"longitude"`
-	StartTime          pgtype.Timestamptz `json:"start_time"`
-	EndTime            pgtype.Timestamptz `json:"end_time"`
-	Capacity           int32              `json:"capacity"`
-	RegisteredCount    int32              `json:"registered_count"`
-	CoordinatorID      string             `json:"coordinator_id"`
-	PublicContact      string             `json:"public_contact"`
-	AccessibilityNotes pgtype.Text        `json:"accessibility_notes"`
-	SafetyNotes        pgtype.Text        `json:"safety_notes"`
-	Status             string             `json:"status"`
-	RejectionReason    pgtype.Text        `json:"rejection_reason"`
-	RescheduledFrom    pgtype.Timestamptz `json:"rescheduled_from"`
-	RescheduledReason  pgtype.Text        `json:"rescheduled_reason"`
-	CreatedAt          pgtype.Timestamptz `json:"created_at"`
-	UpdatedAt          pgtype.Timestamptz `json:"updated_at"`
-	Version            int32              `json:"version"`
-	StateName          string             `json:"state_name"`
-	LgaName            string             `json:"lga_name"`
-	CoordinatorName    string             `json:"coordinator_name"`
+	ID                   string             `json:"id"`
+	CampaignID           pgtype.Text        `json:"campaign_id"`
+	ProgrammeType        string             `json:"programme_type"`
+	Title                string             `json:"title"`
+	StateID              string             `json:"state_id"`
+	LgaID                string             `json:"lga_id"`
+	Address              string             `json:"address"`
+	Landmark             string             `json:"landmark"`
+	Latitude             pgtype.Float8      `json:"latitude"`
+	Longitude            pgtype.Float8      `json:"longitude"`
+	StartTime            pgtype.Timestamptz `json:"start_time"`
+	EndTime              pgtype.Timestamptz `json:"end_time"`
+	Capacity             int32              `json:"capacity"`
+	RegisteredCount      int32              `json:"registered_count"`
+	CoordinatorID        string             `json:"coordinator_id"`
+	PublicContact        string             `json:"public_contact"`
+	AccessibilityNotes   pgtype.Text        `json:"accessibility_notes"`
+	SafetyNotes          pgtype.Text        `json:"safety_notes"`
+	Status               string             `json:"status"`
+	RejectionReason      pgtype.Text        `json:"rejection_reason"`
+	RescheduledFrom      pgtype.Timestamptz `json:"rescheduled_from"`
+	RescheduledReason    pgtype.Text        `json:"rescheduled_reason"`
+	CreatedAt            pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt            pgtype.Timestamptz `json:"updated_at"`
+	Version              int32              `json:"version"`
+	WasteCollectedKg     int64              `json:"waste_collected_kg"`
+	WasteBagsCount       int32              `json:"waste_bags_count"`
+	RecyclablesKg        int64              `json:"recyclables_kg"`
+	CleanupDurationHours pgtype.Numeric     `json:"cleanup_duration_hours"`
+	EnvironmentalNotes   pgtype.Text        `json:"environmental_notes"`
+	StateName            string             `json:"state_name"`
+	LgaName              string             `json:"lga_name"`
+	CoordinatorName      string             `json:"coordinator_name"`
 }
 
 func (q *Queries) ListPublishedEvents(ctx context.Context) ([]ListPublishedEventsRow, error) {
@@ -732,6 +782,11 @@ func (q *Queries) ListPublishedEvents(ctx context.Context) ([]ListPublishedEvent
 			&i.CreatedAt,
 			&i.UpdatedAt,
 			&i.Version,
+			&i.WasteCollectedKg,
+			&i.WasteBagsCount,
+			&i.RecyclablesKg,
+			&i.CleanupDurationHours,
+			&i.EnvironmentalNotes,
 			&i.StateName,
 			&i.LgaName,
 			&i.CoordinatorName,
@@ -747,7 +802,7 @@ func (q *Queries) ListPublishedEvents(ctx context.Context) ([]ListPublishedEvent
 }
 
 const listPublishedEventsByState = `-- name: ListPublishedEventsByState :many
-SELECT e.id, e.campaign_id, e.programme_type, e.title, e.state_id, e.lga_id, e.address, e.landmark, e.latitude, e.longitude, e.start_time, e.end_time, e.capacity, e.registered_count, e.coordinator_id, e.public_contact, e.accessibility_notes, e.safety_notes, e.status, e.rejection_reason, e.rescheduled_from, e.rescheduled_reason, e.created_at, e.updated_at, e.version, s.name as state_name, l.name as lga_name, u.display_name as coordinator_name
+SELECT e.id, e.campaign_id, e.programme_type, e.title, e.state_id, e.lga_id, e.address, e.landmark, e.latitude, e.longitude, e.start_time, e.end_time, e.capacity, e.registered_count, e.coordinator_id, e.public_contact, e.accessibility_notes, e.safety_notes, e.status, e.rejection_reason, e.rescheduled_from, e.rescheduled_reason, e.created_at, e.updated_at, e.version, e.waste_collected_kg, e.waste_bags_count, e.recyclables_kg, e.cleanup_duration_hours, e.environmental_notes, s.name as state_name, l.name as lga_name, u.display_name as coordinator_name
 FROM event_instances e
 JOIN states s ON e.state_id = s.id
 JOIN lgas l ON e.lga_id = l.id
@@ -757,34 +812,39 @@ ORDER BY e.start_time ASC
 `
 
 type ListPublishedEventsByStateRow struct {
-	ID                 string             `json:"id"`
-	CampaignID         pgtype.Text        `json:"campaign_id"`
-	ProgrammeType      string             `json:"programme_type"`
-	Title              string             `json:"title"`
-	StateID            string             `json:"state_id"`
-	LgaID              string             `json:"lga_id"`
-	Address            string             `json:"address"`
-	Landmark           string             `json:"landmark"`
-	Latitude           pgtype.Float8      `json:"latitude"`
-	Longitude          pgtype.Float8      `json:"longitude"`
-	StartTime          pgtype.Timestamptz `json:"start_time"`
-	EndTime            pgtype.Timestamptz `json:"end_time"`
-	Capacity           int32              `json:"capacity"`
-	RegisteredCount    int32              `json:"registered_count"`
-	CoordinatorID      string             `json:"coordinator_id"`
-	PublicContact      string             `json:"public_contact"`
-	AccessibilityNotes pgtype.Text        `json:"accessibility_notes"`
-	SafetyNotes        pgtype.Text        `json:"safety_notes"`
-	Status             string             `json:"status"`
-	RejectionReason    pgtype.Text        `json:"rejection_reason"`
-	RescheduledFrom    pgtype.Timestamptz `json:"rescheduled_from"`
-	RescheduledReason  pgtype.Text        `json:"rescheduled_reason"`
-	CreatedAt          pgtype.Timestamptz `json:"created_at"`
-	UpdatedAt          pgtype.Timestamptz `json:"updated_at"`
-	Version            int32              `json:"version"`
-	StateName          string             `json:"state_name"`
-	LgaName            string             `json:"lga_name"`
-	CoordinatorName    string             `json:"coordinator_name"`
+	ID                   string             `json:"id"`
+	CampaignID           pgtype.Text        `json:"campaign_id"`
+	ProgrammeType        string             `json:"programme_type"`
+	Title                string             `json:"title"`
+	StateID              string             `json:"state_id"`
+	LgaID                string             `json:"lga_id"`
+	Address              string             `json:"address"`
+	Landmark             string             `json:"landmark"`
+	Latitude             pgtype.Float8      `json:"latitude"`
+	Longitude            pgtype.Float8      `json:"longitude"`
+	StartTime            pgtype.Timestamptz `json:"start_time"`
+	EndTime              pgtype.Timestamptz `json:"end_time"`
+	Capacity             int32              `json:"capacity"`
+	RegisteredCount      int32              `json:"registered_count"`
+	CoordinatorID        string             `json:"coordinator_id"`
+	PublicContact        string             `json:"public_contact"`
+	AccessibilityNotes   pgtype.Text        `json:"accessibility_notes"`
+	SafetyNotes          pgtype.Text        `json:"safety_notes"`
+	Status               string             `json:"status"`
+	RejectionReason      pgtype.Text        `json:"rejection_reason"`
+	RescheduledFrom      pgtype.Timestamptz `json:"rescheduled_from"`
+	RescheduledReason    pgtype.Text        `json:"rescheduled_reason"`
+	CreatedAt            pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt            pgtype.Timestamptz `json:"updated_at"`
+	Version              int32              `json:"version"`
+	WasteCollectedKg     int64              `json:"waste_collected_kg"`
+	WasteBagsCount       int32              `json:"waste_bags_count"`
+	RecyclablesKg        int64              `json:"recyclables_kg"`
+	CleanupDurationHours pgtype.Numeric     `json:"cleanup_duration_hours"`
+	EnvironmentalNotes   pgtype.Text        `json:"environmental_notes"`
+	StateName            string             `json:"state_name"`
+	LgaName              string             `json:"lga_name"`
+	CoordinatorName      string             `json:"coordinator_name"`
 }
 
 func (q *Queries) ListPublishedEventsByState(ctx context.Context, stateID string) ([]ListPublishedEventsByStateRow, error) {
@@ -822,6 +882,11 @@ func (q *Queries) ListPublishedEventsByState(ctx context.Context, stateID string
 			&i.CreatedAt,
 			&i.UpdatedAt,
 			&i.Version,
+			&i.WasteCollectedKg,
+			&i.WasteBagsCount,
+			&i.RecyclablesKg,
+			&i.CleanupDurationHours,
+			&i.EnvironmentalNotes,
 			&i.StateName,
 			&i.LgaName,
 			&i.CoordinatorName,
@@ -899,7 +964,7 @@ const rescheduleEvent = `-- name: RescheduleEvent :one
 UPDATE event_instances
 SET start_time = $2, end_time = $3, rescheduled_from = $4, rescheduled_reason = $5, updated_at = CURRENT_TIMESTAMP
 WHERE id = $1
-RETURNING id, campaign_id, programme_type, title, state_id, lga_id, address, landmark, latitude, longitude, start_time, end_time, capacity, registered_count, coordinator_id, public_contact, accessibility_notes, safety_notes, status, rejection_reason, rescheduled_from, rescheduled_reason, created_at, updated_at, version
+RETURNING id, campaign_id, programme_type, title, state_id, lga_id, address, landmark, latitude, longitude, start_time, end_time, capacity, registered_count, coordinator_id, public_contact, accessibility_notes, safety_notes, status, rejection_reason, rescheduled_from, rescheduled_reason, created_at, updated_at, version, waste_collected_kg, waste_bags_count, recyclables_kg, cleanup_duration_hours, environmental_notes
 `
 
 type RescheduleEventParams struct {
@@ -945,6 +1010,11 @@ func (q *Queries) RescheduleEvent(ctx context.Context, arg RescheduleEventParams
 		&i.CreatedAt,
 		&i.UpdatedAt,
 		&i.Version,
+		&i.WasteCollectedKg,
+		&i.WasteBagsCount,
+		&i.RecyclablesKg,
+		&i.CleanupDurationHours,
+		&i.EnvironmentalNotes,
 	)
 	return i, err
 }
@@ -989,7 +1059,7 @@ const updateEventStatus = `-- name: UpdateEventStatus :one
 UPDATE event_instances
 SET status = $2, rejection_reason = $3, updated_at = CURRENT_TIMESTAMP
 WHERE id = $1
-RETURNING id, campaign_id, programme_type, title, state_id, lga_id, address, landmark, latitude, longitude, start_time, end_time, capacity, registered_count, coordinator_id, public_contact, accessibility_notes, safety_notes, status, rejection_reason, rescheduled_from, rescheduled_reason, created_at, updated_at, version
+RETURNING id, campaign_id, programme_type, title, state_id, lga_id, address, landmark, latitude, longitude, start_time, end_time, capacity, registered_count, coordinator_id, public_contact, accessibility_notes, safety_notes, status, rejection_reason, rescheduled_from, rescheduled_reason, created_at, updated_at, version, waste_collected_kg, waste_bags_count, recyclables_kg, cleanup_duration_hours, environmental_notes
 `
 
 type UpdateEventStatusParams struct {
@@ -1027,6 +1097,11 @@ func (q *Queries) UpdateEventStatus(ctx context.Context, arg UpdateEventStatusPa
 		&i.CreatedAt,
 		&i.UpdatedAt,
 		&i.Version,
+		&i.WasteCollectedKg,
+		&i.WasteBagsCount,
+		&i.RecyclablesKg,
+		&i.CleanupDurationHours,
+		&i.EnvironmentalNotes,
 	)
 	return i, err
 }

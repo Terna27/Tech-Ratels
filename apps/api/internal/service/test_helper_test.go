@@ -38,6 +38,7 @@ type TestEnv struct {
 	GalleryService          *service.GalleryService
 	NotificationService     *service.NotificationService
 	SafeguardingService     *service.SafeguardingService
+	ReportService           *service.ReportService
 	EmailSender             *delivery.DevSafeEmailSender
 	SMSSender               *delivery.DevSafeSMSSender
 	MockStorage             storage.StorageService
@@ -85,6 +86,7 @@ func setupTestEnv(t *testing.T) *TestEnv {
 	cipher, _ := security.NewSafeguardingCipher("dev-safeguarding-key-32bytes-secure-for-tests!", false)
 	safeguardStorage := storage.NewDevSafeguardingStorageService()
 	safeguardSvc := service.NewSafeguardingService(repo, cipher, safeguardStorage, notifSvc, cfg)
+	reportSvc := service.NewReportService(repo, notifSvc, auditSvc)
 
 	return &TestEnv{
 		Pool:                    pool,
@@ -108,6 +110,7 @@ func setupTestEnv(t *testing.T) *TestEnv {
 		GalleryService:          gallerySvc,
 		NotificationService:     notifSvc,
 		SafeguardingService:     safeguardSvc,
+		ReportService:           reportSvc,
 		EmailSender:             devEmail,
 		SMSSender:               devSMS,
 		MockStorage:             mockStorage,

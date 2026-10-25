@@ -27,6 +27,7 @@ import {
   Camera,
   Send,
   ShieldAlert,
+  BarChart3,
 } from "lucide-react";
 import { useAuth } from "@/lib/auth-context";
 import { apiRequest } from "@/lib/api";
@@ -451,6 +452,24 @@ export default function AdminOverviewPage() {
             </div>
             <p className="text-xs text-gray-600 leading-relaxed">
               Triage confidential member and public incident reports, manage encrypted case narratives, assign investigating officers, and enforce conflict recusal.
+            </p>
+          </Link>
+
+          <Link
+            href="/admin/reports"
+            className="p-5 bg-white rounded-xl border border-gray-200 hover:border-emerald-500 shadow-sm space-y-2 group transition"
+          >
+            <div className="w-9 h-9 rounded-lg bg-emerald-50 text-emerald-800 flex items-center justify-center font-bold">
+              <BarChart3 className="w-5 h-5" />
+            </div>
+            <div className="flex items-center gap-2">
+              <h3 className="font-bold text-gray-900 text-sm group-hover:text-emerald-800 transition">
+                Public Transparency & Reports
+              </h3>
+              <Badge variant="primary" size="sm">PHASE D</Badge>
+            </div>
+            <p className="text-xs text-gray-600 leading-relaxed">
+              Prepare, review, approve, and publish certified transparency reports across Nigeria, 6 Zones, 36 States, and 774 LGAs.
             </p>
           </Link>
         </div>

@@ -11,26 +11,27 @@ import (
 )
 
 type RouterParams struct {
-	Config               *config.Config
-	Repo                 *repository.Repository
-	HealthHandler        *HealthHandler
-	AuthHandler          *AuthHandler
-	MemberHandler        *MemberHandler
-	GeographyHandler     *GeographyHandler
-	LeadershipHandler    *LeadershipHandler
-	ActivityHandler      *ActivityHandler
-	ParticipationHandler *ParticipationHandler
-	FoundationHandler    *FoundationHandler
-	AdminHandler         *AdminHandler
-	FinanceHandler       *FinanceHandler
-	InventoryHandler     *InventoryHandler
-	MarketplaceHandler   *MarketplaceHandler
+	Config                  *config.Config
+	Repo                    *repository.Repository
+	HealthHandler           *HealthHandler
+	AuthHandler             *AuthHandler
+	MemberHandler           *MemberHandler
+	GeographyHandler        *GeographyHandler
+	LeadershipHandler       *LeadershipHandler
+	ActivityHandler         *ActivityHandler
+	ParticipationHandler    *ParticipationHandler
+	FoundationHandler       *FoundationHandler
+	AdminHandler            *AdminHandler
+	FinanceHandler          *FinanceHandler
+	InventoryHandler        *InventoryHandler
+	MarketplaceHandler      *MarketplaceHandler
 	CareersHandler          *CareersHandler
 	HeroMediaHandler        *HeroMediaHandler
 	CommunityProjectHandler *CommunityProjectHandler
 	GalleryHandler          *GalleryHandler
 	NotificationHandler     *NotificationHandler
 	SafeguardingHandler     *SafeguardingHandler
+	ReportHandler           *ReportHandler
 }
 
 func NewRouter(p RouterParams) http.Handler {
@@ -443,6 +444,25 @@ func NewRouter(p RouterParams) http.Handler {
 			})
 		}
 
+		// Public Transparency, Reports & Accountability Portal
+		if p.ReportHandler != nil {
+			mountReports := func(rep chi.Router) {
+				rep.Get("/overview", p.ReportHandler.GetOverview)
+				rep.Get("/cleanups", p.ReportHandler.GetCleanups)
+				rep.Get("/participation", p.ReportHandler.GetParticipation)
+				rep.Get("/finance", p.ReportHandler.GetFinance)
+				rep.Get("/foundation", p.ReportHandler.GetFoundation)
+				rep.Get("/projects", p.ReportHandler.GetCommunityProjects)
+				rep.Get("/publications", p.ReportHandler.ListPublications)
+				rep.Get("/publications/{id}", p.ReportHandler.GetPublicationByID)
+				rep.Get("/publications/{id}/pdf", p.ReportHandler.DownloadPDF)
+				rep.Get("/publications/{id}/csv", p.ReportHandler.DownloadCSV)
+				rep.Get("/methodology", p.ReportHandler.GetMethodology)
+			}
+			api.Route("/reports", mountReports)
+			api.Route("/public/reports", mountReports)
+		}
+
 		// Admin Workspace
 		api.Route("/admin", func(adm chi.Router) {
 			adm.With(RequireRole("national_admin", "state_coordinator", "zonal_coordinator", "lga_representative")).Get("/overview", p.AdminHandler.GetOverview)
@@ -537,6 +557,24 @@ func NewRouter(p RouterParams) http.Handler {
 					admSg.Get("/access-logs", p.SafeguardingHandler.ListAccessLogs)
 					admSg.Get("/officers", p.SafeguardingHandler.ListActiveOfficers)
 					admSg.Post("/officers", p.SafeguardingHandler.AppointOfficer)
+				})
+			}
+
+			// Public Transparency & Reports Administration Workspace
+			if p.ReportHandler != nil {
+				adm.Route("/reports", func(admRep chi.Router) {
+					admRep.Use(RequireRole("national_admin", "super_admin", "zonal_coordinator", "state_coordinator", "lga_representative"))
+					admRep.Get("/", p.ReportHandler.ListSnapshotsAdmin)
+					admRep.Post("/generate", p.ReportHandler.GenerateSnapshotAdmin)
+					admRep.Get("/audit", p.ReportHandler.ListAuditsAdmin)
+					admRep.Get("/settings", p.ReportHandler.GetSettingsAdmin)
+					admRep.Get("/{id}", p.ReportHandler.GetSnapshotDetailAdmin)
+					admRep.Post("/{id}/submit-review", p.ReportHandler.SubmitReviewAdmin)
+					admRep.Post("/{id}/approve", p.ReportHandler.ApproveSnapshotAdmin)
+					admRep.Post("/{id}/reject", p.ReportHandler.RejectSnapshotAdmin)
+					admRep.With(RequireRole("super_admin")).Post("/{id}/publish", p.ReportHandler.PublishSnapshotAdmin)
+					admRep.With(RequireRole("super_admin")).Post("/{id}/withdraw", p.ReportHandler.WithdrawSnapshotAdmin)
+					admRep.Post("/{id}/revise", p.ReportHandler.ReviseSnapshotAdmin)
 				})
 			}
 		})

@@ -6,6 +6,7 @@ package db
 
 import (
 	"context"
+	"encoding/json"
 
 	"github.com/jackc/pgx/v5/pgtype"
 )
@@ -16,6 +17,14 @@ type Querier interface {
 	// Recruiters
 	// -------------------------------------------------------------
 	AddCareersRecruiter(ctx context.Context, arg AddCareersRecruiterParams) (CareersRecruiter, error)
+	AggregateBudgetsMetrics(ctx context.Context, arg AggregateBudgetsMetricsParams) (AggregateBudgetsMetricsRow, error)
+	AggregateCleanupsMetrics(ctx context.Context, arg AggregateCleanupsMetricsParams) (AggregateCleanupsMetricsRow, error)
+	AggregateCleanupsParticipation(ctx context.Context, arg AggregateCleanupsParticipationParams) (AggregateCleanupsParticipationRow, error)
+	AggregateCommunityProjectsMetrics(ctx context.Context, arg AggregateCommunityProjectsMetricsParams) (AggregateCommunityProjectsMetricsRow, error)
+	AggregateExpenseCategories(ctx context.Context, arg AggregateExpenseCategoriesParams) ([]AggregateExpenseCategoriesRow, error)
+	AggregateFinanceMetrics(ctx context.Context, arg AggregateFinanceMetricsParams) (AggregateFinanceMetricsRow, error)
+	AggregateFoundationDonations(ctx context.Context, arg AggregateFoundationDonationsParams) (AggregateFoundationDonationsRow, error)
+	AggregateParticipationMetrics(ctx context.Context, arg AggregateParticipationMetricsParams) (AggregateParticipationMetricsRow, error)
 	ApproveEventMedia(ctx context.Context, arg ApproveEventMediaParams) (EventMedium, error)
 	CalculateExternalInflowsAndOutflows(ctx context.Context, arg CalculateExternalInflowsAndOutflowsParams) (CalculateExternalInflowsAndOutflowsRow, error)
 	CalculateFundBalanceBeforeDate(ctx context.Context, arg CalculateFundBalanceBeforeDateParams) (int64, error)
@@ -43,7 +52,9 @@ type Querier interface {
 	CountPendingVerificationUsers(ctx context.Context) (int64, error)
 	CountPublicCommunityProjects(ctx context.Context, arg CountPublicCommunityProjectsParams) (int64, error)
 	CountPublicGalleryMedia(ctx context.Context, arg CountPublicGalleryMediaParams) (int64, error)
+	CountPublicPublications(ctx context.Context, arg CountPublicPublicationsParams) (int64, error)
 	CountPublishedEvents(ctx context.Context) (int64, error)
+	CountReportSnapshotsAdmin(ctx context.Context, arg CountReportSnapshotsAdminParams) (int64, error)
 	CountSafeguardingAccessLogs(ctx context.Context) (int64, error)
 	CountSafeguardingCases(ctx context.Context, arg CountSafeguardingCasesParams) (int64, error)
 	CountStates(ctx context.Context) (int64, error)
@@ -172,6 +183,14 @@ type Querier interface {
 	// -------------------------------------------------------------
 	CreateProjectUpdate(ctx context.Context, arg CreateProjectUpdateParams) (CommunityProjectUpdate, error)
 	CreateReconciliationPeriod(ctx context.Context, arg CreateReconciliationPeriodParams) (FinancialReconciliationPeriod, error)
+	// Approvals
+	CreateReportApproval(ctx context.Context, arg CreateReportApprovalParams) (PublicReportApproval, error)
+	// Audit
+	CreateReportAudit(ctx context.Context, arg CreateReportAuditParams) (PublicReportAudit, error)
+	// Publications
+	CreateReportPublication(ctx context.Context, arg CreateReportPublicationParams) (PublicReportPublication, error)
+	// Snapshots
+	CreateReportSnapshot(ctx context.Context, arg CreateReportSnapshotParams) (PublicReportSnapshot, error)
 	// Safeguarding Access Logs
 	CreateSafeguardingAccessLog(ctx context.Context, arg CreateSafeguardingAccessLogParams) (SafeguardingAccessLog, error)
 	// Safeguarding Assignments
@@ -321,7 +340,12 @@ type Querier interface {
 	GetParticipationClaimByEventAndUser(ctx context.Context, arg GetParticipationClaimByEventAndUserParams) (ParticipationClaim, error)
 	GetParticipationClaimByID(ctx context.Context, id string) (ParticipationClaim, error)
 	GetProjectMilestoneByID(ctx context.Context, id string) (GetProjectMilestoneByIDRow, error)
+	GetPublishedOverviewByScope(ctx context.Context, arg GetPublishedOverviewByScopeParams) (json.RawMessage, error)
+	GetPublishedReportByID(ctx context.Context, id string) (GetPublishedReportByIDRow, error)
 	GetReconciliationPeriodByID(ctx context.Context, id string) (GetReconciliationPeriodByIDRow, error)
+	GetReportDefinitionByType(ctx context.Context, reportType string) (PublicReportDefinition, error)
+	GetReportSnapshotByID(ctx context.Context, id string) (GetReportSnapshotByIDRow, error)
+	GetReportSnapshotByRef(ctx context.Context, publicReference string) (GetReportSnapshotByRefRow, error)
 	GetSafeguardingCaseByID(ctx context.Context, id string) (GetSafeguardingCaseByIDRow, error)
 	GetSafeguardingCaseByPublicRef(ctx context.Context, publicReference string) (GetSafeguardingCaseByPublicRefRow, error)
 	GetSafeguardingConflict(ctx context.Context, arg GetSafeguardingConflictParams) (SafeguardingConflict, error)
@@ -389,6 +413,8 @@ type Querier interface {
 	ListCareersRecruitersByEmployer(ctx context.Context, employerID string) ([]ListCareersRecruitersByEmployerRow, error)
 	ListClaimsByUser(ctx context.Context, userID string) ([]ListClaimsByUserRow, error)
 	ListCleanupCampaigns(ctx context.Context) ([]CleanupCampaign, error)
+	ListCleanupsBreakdownByState(ctx context.Context, arg ListCleanupsBreakdownByStateParams) ([]ListCleanupsBreakdownByStateRow, error)
+	ListCommunityProjectsPublicReport(ctx context.Context, arg ListCommunityProjectsPublicReportParams) ([]ListCommunityProjectsPublicReportRow, error)
 	ListCommunityRequestsByRequester(ctx context.Context, requesterID string) ([]ListCommunityRequestsByRequesterRow, error)
 	ListDeliveriesAdmin(ctx context.Context, arg ListDeliveriesAdminParams) ([]NotificationDelivery, error)
 	ListDonationsFiltered(ctx context.Context, arg ListDonationsFilteredParams) ([]ListDonationsFilteredRow, error)
@@ -433,12 +459,18 @@ type Querier interface {
 	ListPublicCommunityProjects(ctx context.Context, arg ListPublicCommunityProjectsParams) ([]ListPublicCommunityProjectsRow, error)
 	ListPublicGalleryMedia(ctx context.Context, arg ListPublicGalleryMediaParams) ([]ListPublicGalleryMediaRow, error)
 	ListPublicLeadershipDirectory(ctx context.Context) ([]ListPublicLeadershipDirectoryRow, error)
+	ListPublicPublications(ctx context.Context, arg ListPublicPublicationsParams) ([]ListPublicPublicationsRow, error)
 	ListPublicUpdatesByProjectID(ctx context.Context, projectID string) ([]ListPublicUpdatesByProjectIDRow, error)
 	ListPublishedEvents(ctx context.Context) ([]ListPublishedEventsRow, error)
 	ListPublishedEventsByState(ctx context.Context, stateID string) ([]ListPublishedEventsByStateRow, error)
 	ListReconciliationPeriodsByAccount(ctx context.Context, arg ListReconciliationPeriodsByAccountParams) ([]ListReconciliationPeriodsByAccountRow, error)
 	ListRegisteredUsersForEvent(ctx context.Context, eventID string) ([]ListRegisteredUsersForEventRow, error)
 	ListRegistrationsByUser(ctx context.Context, userID string) ([]ListRegistrationsByUserRow, error)
+	ListReportApprovalsBySnapshot(ctx context.Context, snapshotID string) ([]ListReportApprovalsBySnapshotRow, error)
+	ListReportAudits(ctx context.Context, arg ListReportAuditsParams) ([]ListReportAuditsRow, error)
+	// Public Report Definitions
+	ListReportDefinitions(ctx context.Context) ([]PublicReportDefinition, error)
+	ListReportSnapshotsAdmin(ctx context.Context, arg ListReportSnapshotsAdminParams) ([]ListReportSnapshotsAdminRow, error)
 	ListReporterVisibleMessagesByCaseID(ctx context.Context, caseID string) ([]ListReporterVisibleMessagesByCaseIDRow, error)
 	ListSafeguardingAccessLogs(ctx context.Context, arg ListSafeguardingAccessLogsParams) ([]ListSafeguardingAccessLogsRow, error)
 	ListSafeguardingCaseActionsByCaseID(ctx context.Context, caseID string) ([]ListSafeguardingCaseActionsByCaseIDRow, error)
@@ -537,6 +569,8 @@ type Querier interface {
 	UpdateNotificationTemplate(ctx context.Context, arg UpdateNotificationTemplateParams) (NotificationTemplate, error)
 	UpdateProjectMilestone(ctx context.Context, arg UpdateProjectMilestoneParams) (CommunityProjectMilestone, error)
 	UpdateReconciliationPeriodStatus(ctx context.Context, arg UpdateReconciliationPeriodStatusParams) (FinancialReconciliationPeriod, error)
+	UpdateReportSnapshotRevision(ctx context.Context, arg UpdateReportSnapshotRevisionParams) (PublicReportSnapshot, error)
+	UpdateReportSnapshotStatus(ctx context.Context, arg UpdateReportSnapshotStatusParams) (PublicReportSnapshot, error)
 	UpdateSafeguardingCaseStatus(ctx context.Context, arg UpdateSafeguardingCaseStatusParams) (SafeguardingCase, error)
 	UpdateSafeguardingCaseTriage(ctx context.Context, arg UpdateSafeguardingCaseTriageParams) (SafeguardingCase, error)
 	UpdateSafeguardingLegalHold(ctx context.Context, arg UpdateSafeguardingLegalHoldParams) (SafeguardingRetentionRecord, error)
@@ -552,6 +586,8 @@ type Querier interface {
 	// -------------------------------------------------------------
 	UpsertCandidateProfile(ctx context.Context, arg UpsertCandidateProfileParams) (CareersCandidateProfile, error)
 	UpsertNotificationPreferences(ctx context.Context, arg UpsertNotificationPreferencesParams) (NotificationPreference, error)
+	// Exports
+	UpsertReportExport(ctx context.Context, arg UpsertReportExportParams) (PublicReportExport, error)
 	UpsertSafeguardingOfficer(ctx context.Context, arg UpsertSafeguardingOfficerParams) (SafeguardingOfficer, error)
 	UpsertSafeguardingSetting(ctx context.Context, arg UpsertSafeguardingSettingParams) (SafeguardingSetting, error)
 	UpsertStockBalance(ctx context.Context, arg UpsertStockBalanceParams) (StockBalance, error)
@@ -560,6 +596,7 @@ type Querier interface {
 	VerifyFinancialIncomeTransaction(ctx context.Context, arg VerifyFinancialIncomeTransactionParams) (FinancialTransaction, error)
 	VerifyProjectMilestone(ctx context.Context, arg VerifyProjectMilestoneParams) (CommunityProjectMilestone, error)
 	WithdrawEventMedia(ctx context.Context, arg WithdrawEventMediaParams) (EventMedium, error)
+	WithdrawReportPublication(ctx context.Context, arg WithdrawReportPublicationParams) (PublicReportPublication, error)
 }
 
 var _ Querier = (*Queries)(nil)

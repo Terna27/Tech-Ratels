@@ -40,6 +40,7 @@ type TestHarness struct {
 	MarketplaceService *service.MarketplaceService
 	CareersService   *service.CareersService
 	GalleryService   *service.GalleryService
+	ReportService    *service.ReportService
 	Storage          storage.StorageService
 	Cleanup          func()
 }
@@ -79,6 +80,7 @@ func setupTestHarness(t *testing.T) *TestHarness {
 	heroMediaSvc := service.NewHeroMediaService(repo, auditSvc, mockStorage)
 	commProjectSvc := service.NewCommunityProjectService(repo, auditSvc, mockStorage, financeSvc)
 	gallerySvc := service.NewGalleryService(repo, mockStorage, auditSvc)
+	reportSvc := service.NewReportService(repo, nil, auditSvc)
 
 	healthH := handler.NewHealthHandler(repo)
 	authH := handler.NewAuthHandler(authSvc, cfg)
@@ -96,6 +98,7 @@ func setupTestHarness(t *testing.T) *TestHarness {
 	heroMediaH := handler.NewHeroMediaHandler(heroMediaSvc)
 	commProjectH := handler.NewCommunityProjectHandler(commProjectSvc)
 	galleryH := handler.NewGalleryHandler(gallerySvc)
+	reportH := handler.NewReportHandler(reportSvc)
 
 	router := handler.NewRouter(handler.RouterParams{
 		Config:                  cfg,
@@ -116,6 +119,7 @@ func setupTestHarness(t *testing.T) *TestHarness {
 		HeroMediaHandler:        heroMediaH,
 		CommunityProjectHandler: commProjectH,
 		GalleryHandler:          galleryH,
+		ReportHandler:           reportH,
 	})
 
 	return &TestHarness{
@@ -136,6 +140,7 @@ func setupTestHarness(t *testing.T) *TestHarness {
 		MarketplaceService: marketplaceSvc,
 		CareersService:     careersSvc,
 		GalleryService:     gallerySvc,
+		ReportService:      reportSvc,
 		Storage:            mockStorage,
 		Cleanup: func() {
 			pool.Close()

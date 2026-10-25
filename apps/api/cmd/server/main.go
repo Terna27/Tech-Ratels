@@ -228,6 +228,10 @@ func main() {
 	safeguardService := service.NewSafeguardingService(repo, safeguardCipher, safeguardStorage, notifService, cfg)
 	safeguardH := handler.NewSafeguardingHandler(safeguardService, safeguardStorage, cfg)
 
+	// Transparency & Public Reports Subsystem
+	reportService := service.NewReportService(repo, notifService, auditService)
+	reportH := handler.NewReportHandler(reportService)
+
 	router := handler.NewRouter(handler.RouterParams{
 		Config:                  cfg,
 		Repo:                    repo,
@@ -249,6 +253,7 @@ func main() {
 		GalleryHandler:          galleryH,
 		NotificationHandler:     notifH,
 		SafeguardingHandler:     safeguardH,
+		ReportHandler:           reportH,
 	})
 
 	srv := &http.Server{
