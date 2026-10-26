@@ -89,9 +89,10 @@ func TestReportScheduler_CronEndpointSecurity(t *testing.T) {
 	defer h.Cleanup()
 
 	uid := time.Now().UnixNano()
-	targetPeriod := fmt.Sprintf("205%d-%02d", uid%4, (uid%12)+1)
+	targetPeriod := fmt.Sprintf("202%d-%02d", uid%4, (uid%12)+1)
 	defer func() {
 		_, _ = h.Pool.Exec(context.Background(), "DELETE FROM public_report_snapshots WHERE reporting_period = $1", targetPeriod)
+		_, _ = h.Pool.Exec(context.Background(), "DELETE FROM public_report_scheduler_runs WHERE reporting_period = $1", targetPeriod)
 	}()
 
 	body, _ := json.Marshal(map[string]string{

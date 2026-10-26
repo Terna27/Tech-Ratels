@@ -579,6 +579,7 @@ func NewRouter(p RouterParams) http.Handler {
 					admRep.Get("/settings", p.ReportHandler.GetSettingsAdmin)
 					admRep.Get("/{id}", p.ReportHandler.GetSnapshotDetailAdmin)
 					admRep.Post("/{id}/submit-review", p.ReportHandler.SubmitReviewAdmin)
+					admRep.Post("/{id}/submit", p.ReportHandler.SubmitReviewAdmin)
 					admRep.Post("/{id}/approve", p.ReportHandler.ApproveSnapshotAdmin)
 					admRep.Post("/{id}/reject", p.ReportHandler.RejectSnapshotAdmin)
 					admRep.With(RequireRole("super_admin")).Post("/{id}/publish", p.ReportHandler.PublishSnapshotAdmin)

@@ -312,15 +312,36 @@ func TestConfig_EmailProviderConfiguration(t *testing.T) {
 		}
 	})
 
-	t.Run("Rejects unknown EMAIL_PROVIDER", func(t *testing.T) {
-		os.Setenv("EMAIL_PROVIDER", "unknown_smtp_service")
-		defer os.Unsetenv("EMAIL_PROVIDER")
+	t.Run("Rejects public media bucket reuse for R2 reports in production", func(t *testing.T) {
+		os.Setenv("APP_ENV", "production")
+		os.Setenv("DATABASE_URL", "postgres://user:pass@localhost:5432/ratels_prod")
+		os.Setenv("JWT_SECRET", "super-secret-jwt-key-with-over-32-characters!")
+		os.Setenv("ALLOWED_ORIGINS", "https://ratels-web.onrender.com")
+		os.Setenv("EMAIL_PROVIDER", "unconfigured")
+		os.Setenv("R2_ACCOUNT_ID", "cf_acc_123")
+		os.Setenv("R2_ACCESS_KEY_ID", "cf_key_123")
+		os.Setenv("R2_SECRET_ACCESS_KEY", "cf_secret_123")
+		os.Setenv("R2_BUCKET_NAME", "ratels-media-public")
+		os.Setenv("R2_REPORTS_BUCKET_NAME", "ratels-media-public")
+		defer func() {
+			os.Unsetenv("APP_ENV")
+			os.Unsetenv("DATABASE_URL")
+			os.Unsetenv("JWT_SECRET")
+			os.Unsetenv("ALLOWED_ORIGINS")
+			os.Unsetenv("EMAIL_PROVIDER")
+			os.Unsetenv("R2_ACCOUNT_ID")
+			os.Unsetenv("R2_ACCESS_KEY_ID")
+			os.Unsetenv("R2_SECRET_ACCESS_KEY")
+			os.Unsetenv("R2_BUCKET_NAME")
+			os.Unsetenv("R2_REPORTS_BUCKET_NAME")
+		}()
 
 		cfg := Load()
 		err := cfg.Validate()
-		if err == nil || !strings.Contains(err.Error(), "unsupported EMAIL_PROVIDER") {
-			t.Errorf("expected error for unsupported EMAIL_PROVIDER, got: %v", err)
+		if err == nil || !strings.Contains(err.Error(), "R2_REPORTS_BUCKET_NAME must not share the public media bucket") {
+			t.Errorf("expected error when R2_REPORTS_BUCKET_NAME shares the public media bucket, got: %v", err)
 		}
 	})
 }
+
 

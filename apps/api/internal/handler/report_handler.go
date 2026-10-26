@@ -1122,8 +1122,11 @@ func (h *ReportHandler) RunSchedulerAdmin(w http.ResponseWriter, r *http.Request
 func (h *ReportHandler) RunSchedulerCron(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 
-	// Authenticate cron trigger via X-Cron-Secret header or Bearer token
+	// Authenticate cron trigger via X-Cron-Secret, X-Report-Cron-Secret, or Bearer token
 	cronSecret := r.Header.Get("X-Cron-Secret")
+	if cronSecret == "" {
+		cronSecret = r.Header.Get("X-Report-Cron-Secret")
+	}
 	if cronSecret == "" {
 		authHeader := r.Header.Get("Authorization")
 		if strings.HasPrefix(authHeader, "Bearer ") {
@@ -1163,25 +1166,35 @@ func (h *ReportHandler) RunSchedulerCron(w http.ResponseWriter, r *http.Request)
 	var targetPeriodPtr *string
 	if strings.TrimSpace(req.TargetPeriod) != "" {
 		cleaned := strings.TrimSpace(req.TargetPeriod)
-		if _, _, _, _, err := worker.ParsePeriodUTC(cleaned); err != nil {
+		_, pEnd, _, _, err := worker.ParsePeriodUTC(cleaned)
+		if err != nil {
 			ErrorJSON(w, http.StatusBadRequest, "INVALID_INPUT", "target_period must be in YYYY-MM or YYYY-Q[1-4] format", err.Error())
+			return
+		}
+		if pEnd.After(time.Now().UTC()) {
+			ErrorJSON(w, http.StatusBadRequest, "FUTURE_PERIOD_REJECTED", "Reporting period is incomplete or in the future; reports can only be generated for concluded historical periods", nil)
 			return
 		}
 		targetPeriodPtr = &cleaned
 	}
 
 	params := worker.RunSchedulerParams{
-		TargetPeriod:  targetPeriodPtr,
-		PeriodType:    req.PeriodType,
-		TriggerSource: "external_cron",
-		ActorUser:     nil,
-		ReportType:    req.ReportType,
+		TargetPeriod:     targetPeriodPtr,
+		PeriodType:       req.PeriodType,
+		TriggerSource:    "external_cron",
+		ActorUser:        nil,
+		StrictHistorical: true,
+		ReportType:       req.ReportType,
 	}
 
 	res, err := h.scheduler.RunScheduledCycle(ctx, params)
 	if err != nil {
 		if errors.Is(err, worker.ErrSchedulerAlreadyRunning) {
 			ErrorJSON(w, http.StatusConflict, "LOCK_CONFLICT", "Scheduler cycle already running on another node", nil)
+			return
+		}
+		if errors.Is(err, worker.ErrFutureReportingPeriod) {
+			ErrorJSON(w, http.StatusBadRequest, "FUTURE_PERIOD_REJECTED", err.Error(), nil)
 			return
 		}
 		ErrorJSON(w, http.StatusInternalServerError, "INTERNAL_ERROR", "Failed executing scheduled reports cycle", err.Error())

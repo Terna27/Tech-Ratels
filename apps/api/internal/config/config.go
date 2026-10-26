@@ -224,7 +224,7 @@ func Load() *Config {
 	if r2ReportsBucket == "" {
 		r2ReportsBucket = r2SafeguardingBucket
 	}
-	if r2ReportsBucket == "" {
+	if r2ReportsBucket == "" && !isProduction {
 		r2ReportsBucket = r2BucketName
 	}
 	safeguardingEncKey := strings.TrimSpace(os.Getenv("SAFEGUARDING_ENCRYPTION_KEY"))
@@ -351,6 +351,11 @@ func (c *Config) Validate() error {
 			if c.R2AccountID == "" && c.R2Endpoint == "" {
 				return errors.New("R2_ACCOUNT_ID (or R2_ENDPOINT) is required in production when Cloudflare R2 is configured")
 			}
+		}
+
+		// Enforce dedicated private bucket for report exports in production
+		if c.R2ReportsBucketName != "" && c.R2BucketName != "" && c.R2ReportsBucketName == c.R2BucketName {
+			return errors.New("R2_REPORTS_BUCKET_NAME must not share the public media bucket (R2_BUCKET_NAME); report exports require an isolated private bucket")
 		}
 
 		// Safeguarding: in production, if enabled, require encryption key and verify length >= 32

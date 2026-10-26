@@ -23,11 +23,20 @@ type CSVReportData struct {
 }
 
 // SanitizeCSVValue prevents spreadsheet formula injection (CSV Injection).
-// Prepends a single quote if the first character is an active trigger (=, +, -, @, tab, CR).
+// Prepends a single quote if the first character or first character after leading spaces
+// is an active trigger (=, +, -, @, tab, CR, pipe, percent).
 func SanitizeCSVValue(val string) string {
-	if len(val) > 0 {
-		first := val[0]
-		if first == '=' || first == '+' || first == '-' || first == '@' || first == '\t' || first == '\r' {
+	if len(val) == 0 {
+		return val
+	}
+	first := val[0]
+	if first == '=' || first == '+' || first == '-' || first == '@' || first == '\t' || first == '\r' || first == '|' || first == '%' {
+		return "'" + val
+	}
+	trimmed := strings.TrimLeft(val, " ")
+	if len(trimmed) > 0 {
+		tFirst := trimmed[0]
+		if tFirst == '=' || tFirst == '+' || tFirst == '-' || tFirst == '@' || tFirst == '\t' || tFirst == '\r' || tFirst == '|' || tFirst == '%' {
 			return "'" + val
 		}
 	}

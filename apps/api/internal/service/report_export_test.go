@@ -227,6 +227,11 @@ func TestReportExport_FormulaInjectionProtection(t *testing.T) {
 		"@SUM(1+1)",
 		"\t=1+1",
 		"\r=1+1",
+		"   =1+1",
+		"   +cmd",
+		"   @SUM",
+		"|calc.exe",
+		"%SYSTEMROOT%",
 	}
 
 	for _, input := range dangerousInputs {

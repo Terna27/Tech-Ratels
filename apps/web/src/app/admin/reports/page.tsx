@@ -436,6 +436,7 @@ export default function AdminReportsDashboardPage() {
       let body: any = {};
 
       if (governanceAction === "submit") {
+        endpoint = `/admin/reports/${selectedSnapshot.snapshot_id}/submit-review`;
         body = { notes: governanceReason || "Submitted for administrative review" };
       } else if (governanceAction === "approve") {
         body = { notes: governanceReason || "Approved after review" };
