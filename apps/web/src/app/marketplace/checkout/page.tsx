@@ -23,7 +23,7 @@ import { Alert } from "@/components/ui/Alert";
 export default function CheckoutPage() {
   const router = useRouter();
   const { items, subtotalKobo, clearCart } = useCart();
-  const { user } = useAuth();
+  const { user, isLoading: authLoading } = useAuth();
 
   const [buyerName, setBuyerName] = useState("");
   const [buyerEmail, setBuyerEmail] = useState("");
@@ -42,6 +42,13 @@ export default function CheckoutPage() {
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [checkoutStatus, setCheckoutStatus] = useState<{ available: boolean; message: string; provider?: string } | null>(null);
+
+  // Require authentication for checkout
+  useEffect(() => {
+    if (!authLoading && !user) {
+      router.replace(`/login?redirect=${encodeURIComponent("/marketplace/checkout")}`);
+    }
+  }, [user, authLoading, router]);
 
   // Fetch checkout and payment processing status
   useEffect(() => {
@@ -108,6 +115,12 @@ export default function CheckoutPage() {
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setError(null);
+
+    if (!user) {
+      setError("You must be signed in to place an order.");
+      router.replace(`/login?redirect=${encodeURIComponent("/marketplace/checkout")}`);
+      return;
+    }
 
     if (checkoutStatus && !checkoutStatus.available) {
       setError(checkoutStatus.message || "Payment processing is currently undergoing scheduled maintenance.");
@@ -177,6 +190,38 @@ export default function CheckoutPage() {
       setSubmitting(false);
     }
   };
+
+  if (authLoading) {
+    return (
+      <div className="min-h-screen bg-gray-50 py-16 flex items-center justify-center">
+        <Spinner text="Verifying member credentials..." />
+      </div>
+    );
+  }
+
+  if (!user) {
+    return (
+      <div className="min-h-screen bg-gray-50 py-16">
+        <div className="max-w-md mx-auto px-4 text-center space-y-4">
+          <div className="w-16 h-16 rounded-full bg-emerald-50 text-emerald-800 flex items-center justify-center mx-auto">
+            <ShoppingBag className="w-8 h-8" />
+          </div>
+          <h2 className="text-xl font-bold text-gray-900">Authentication Required</h2>
+          <p className="text-xs text-gray-500 leading-relaxed">
+            You must be signed in to your Ratels account to proceed through checkout and place orders.
+          </p>
+          <div className="pt-2">
+            <Link
+              href="/login?redirect=/marketplace/checkout"
+              className="inline-flex items-center gap-2 px-5 py-2.5 rounded-xl text-xs font-bold bg-emerald-900 hover:bg-emerald-950 text-white transition shadow-sm"
+            >
+              Sign In to Proceed
+            </Link>
+          </div>
+        </div>
+      </div>
+    );
+  }
 
   if (items.length === 0 && !submitting) {
     return (

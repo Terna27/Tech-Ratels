@@ -19,6 +19,7 @@ import {
 import { apiRequest } from "@/lib/api";
 import { MarketplaceProduct, parseProductImages } from "@/lib/types";
 import { useCart } from "@/lib/cart-context";
+import { useAuth } from "@/lib/auth-context";
 import { Spinner } from "@/components/ui/Spinner";
 import { Alert } from "@/components/ui/Alert";
 import { Badge } from "@/components/ui/Badge";
@@ -26,6 +27,7 @@ import { Badge } from "@/components/ui/Badge";
 export default function ProductDetailPage({ params }: { params: Promise<{ id: string }> }) {
   const router = useRouter();
   const { id } = use(params);
+  const { user } = useAuth();
   const { addToCart } = useCart();
 
   const [product, setProduct] = useState<MarketplaceProduct | null>(null);
@@ -78,6 +80,11 @@ export default function ProductDetailPage({ params }: { params: Promise<{ id: st
   };
 
   const handleAddToCart = () => {
+    if (!user) {
+      router.push(`/login?redirect=${encodeURIComponent(`/marketplace/products/${id}`)}`);
+      return;
+    }
+
     addToCart({
       productId: product.id,
       title: product.title,
@@ -92,6 +99,11 @@ export default function ProductDetailPage({ params }: { params: Promise<{ id: st
   };
 
   const handleBuyNow = () => {
+    if (!user) {
+      router.push(`/login?redirect=${encodeURIComponent(`/marketplace/products/${id}`)}`);
+      return;
+    }
+
     handleAddToCart();
     router.push("/marketplace/checkout");
   };
