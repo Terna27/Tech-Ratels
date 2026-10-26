@@ -570,7 +570,11 @@ func NewRouter(p RouterParams) http.Handler {
 				adm.Route("/reports", func(admRep chi.Router) {
 					admRep.Use(RequireRole("national_admin", "super_admin", "zonal_coordinator", "state_coordinator", "lga_representative"))
 					admRep.Get("/", p.ReportHandler.ListSnapshotsAdmin)
+					admRep.Get("/dashboard/stats", p.ReportHandler.GetDashboardStats)
 					admRep.Post("/generate", p.ReportHandler.GenerateSnapshotAdmin)
+					admRep.Get("/scheduler/runs", p.ReportHandler.ListSchedulerRuns)
+					admRep.Get("/scheduler/runs/{id}", p.ReportHandler.GetSchedulerRun)
+					admRep.Get("/exports", p.ReportHandler.ListExportsAdmin)
 					admRep.Get("/audit", p.ReportHandler.ListAuditsAdmin)
 					admRep.Get("/settings", p.ReportHandler.GetSettingsAdmin)
 					admRep.Get("/{id}", p.ReportHandler.GetSnapshotDetailAdmin)
@@ -580,6 +584,8 @@ func NewRouter(p RouterParams) http.Handler {
 					admRep.With(RequireRole("super_admin")).Post("/{id}/publish", p.ReportHandler.PublishSnapshotAdmin)
 					admRep.With(RequireRole("super_admin")).Post("/{id}/withdraw", p.ReportHandler.WithdrawSnapshotAdmin)
 					admRep.Post("/{id}/revise", p.ReportHandler.ReviseSnapshotAdmin)
+					admRep.With(RequireRole("super_admin", "national_admin")).Post("/{id}/exports/{format}/regenerate", p.ReportHandler.RegenerateExportAdmin)
+					admRep.Get("/{id}/exports/{format}/download", p.ReportHandler.DownloadExportAdmin)
 					admRep.With(RequireRole("super_admin", "national_admin")).Post("/scheduler/run", p.ReportHandler.RunSchedulerAdmin)
 				})
 			}

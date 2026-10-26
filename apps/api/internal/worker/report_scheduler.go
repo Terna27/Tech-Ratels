@@ -23,6 +23,8 @@ var (
 	ErrSchedulerAlreadyRunning = errors.New("report scheduler cycle is already running on another node or process")
 	// ErrNoAdminUserFound indicates no active administrator user exists to attribute the automated draft.
 	ErrNoAdminUserFound = errors.New("no active administrator user found for automated report attribution")
+	// ErrFutureReportingPeriod indicates the requested period has not concluded yet.
+	ErrFutureReportingPeriod = errors.New("reporting period is incomplete or in the future; reports can only be generated for concluded historical periods")
 )
 
 // DefaultSchedulerLockKey is the 64-bit integer advisory lock key for ratels report scheduler (ASCII "RATELS_R").
@@ -58,6 +60,11 @@ type PeriodRunSummary struct {
 
 // SchedulerRunResult provides structured metrics and audit data from a scheduler execution cycle.
 type SchedulerRunResult struct {
+	RunID               string                      `json:"run_id,omitempty"`
+	RunIdentifier       string                      `json:"run_identifier,omitempty"`
+	Status              string                      `json:"status,omitempty"`
+	StartedAt           string                      `json:"started_at,omitempty"`
+	CompletedAt         string                      `json:"completed_at,omitempty"`
 	PeriodLabel         string                      `json:"period_label"`
 	PeriodStart         string                      `json:"period_start"`
 	PeriodEnd           string                      `json:"period_end"`
@@ -66,6 +73,7 @@ type SchedulerRunResult struct {
 	ReportsEvaluated    int                         `json:"reports_evaluated"`
 	ReportsGenerated    int                         `json:"reports_generated"`
 	ReportsSkipped      int                         `json:"reports_skipped"`
+	ReportsFailed       int                         `json:"reports_failed"`
 	GeneratedReferences []string                    `json:"generated_references"`
 	SkippedReasons      map[string]string           `json:"skipped_reasons"`
 	Errors              []string                    `json:"errors"`
@@ -74,16 +82,17 @@ type SchedulerRunResult struct {
 
 // RunSchedulerParams encapsulates execution parameters for automated or manually-triggered report cycles.
 type RunSchedulerParams struct {
-	TargetPeriod  *string    `json:"target_period,omitempty"`  // e.g. "2026-09" or "2026-Q3"
-	TargetMonth   *time.Time `json:"target_month,omitempty"`   // convenient time.Time parameter
-	PeriodType    string     `json:"period_type,omitempty"`    // "monthly", "quarterly", or "both"
-	TriggerSource string     `json:"trigger_source,omitempty"` // "scheduled", "external_cron", "admin_manual"
-	ActorUser     *db.User   `json:"actor_user,omitempty"`     // nil for system attribution
-	ReportType    string     `json:"report_type,omitempty"`    // optional single category filter
-	ScopeType     string     `json:"scope_type,omitempty"`     // optional: "national", "zone", "state", "lga" (defaults to "national")
-	ZoneID        *string    `json:"zone_id,omitempty"`
-	StateID       *string    `json:"state_id,omitempty"`
-	LgaID         *string    `json:"lga_id,omitempty"`
+	TargetPeriod     *string    `json:"target_period,omitempty"`  // e.g. "2026-09" or "2026-Q3"
+	TargetMonth      *time.Time `json:"target_month,omitempty"`   // convenient time.Time parameter
+	PeriodType       string     `json:"period_type,omitempty"`    // "monthly", "quarterly", or "both"
+	TriggerSource    string     `json:"trigger_source,omitempty"` // "scheduled", "external_cron", "admin_manual"
+	ActorUser        *db.User   `json:"actor_user,omitempty"`     // nil for system attribution
+	ReportType       string     `json:"report_type,omitempty"`    // optional single category filter
+	ScopeType        string     `json:"scope_type,omitempty"`     // optional: "national", "zone", "state", "lga" (defaults to "national")
+	ZoneID           *string    `json:"zone_id,omitempty"`
+	StateID          *string    `json:"state_id,omitempty"`
+	LgaID            *string    `json:"lga_id,omitempty"`
+	StrictHistorical bool       `json:"strict_historical,omitempty"` // Enforce historical completed period validation
 }
 
 // ScheduledReportSpec defines a target periodic report for automated draft generation.
@@ -328,6 +337,16 @@ func (s *ReportScheduler) RunScheduledCycle(
 		}
 	}
 
+	// Historical period validation for admin manual trigger or strict mode
+	if params.StrictHistorical {
+		nowUTC := time.Now().UTC()
+		for _, w := range windows {
+			if w.pEnd.After(nowUTC) {
+				return nil, fmt.Errorf("%w: reporting period %q has not concluded yet (ends %s)", ErrFutureReportingPeriod, w.periodLabel, w.pEnd.Format("2006-01-02"))
+			}
+		}
+	}
+
 	result := &SchedulerRunResult{
 		PeriodsEvaluated:    make([]string, 0, len(windows)),
 		PeriodSummaries:     make(map[string]PeriodRunSummary),
@@ -364,6 +383,52 @@ func (s *ReportScheduler) RunScheduledCycle(
 			GeneratedReferences: make([]string, 0),
 		}
 	}
+
+	// Persist initial durable run record in public_report_scheduler_runs
+	startedAt := time.Now().UTC()
+	runID := security.GenerateUUID()
+	runIdentifier := fmt.Sprintf("SCHED-%s-%s", startedAt.Format("20060102150405"), strings.ToUpper(security.GenerateUUID()[:6]))
+
+	var actorUserPg pgtype.Text
+	var actorNamePg pgtype.Text
+	if params.ActorUser != nil {
+		actorUserPg = pgtype.Text{String: params.ActorUser.ID, Valid: true}
+		actorNamePg = pgtype.Text{String: params.ActorUser.DisplayName, Valid: true}
+	} else {
+		actorNamePg = pgtype.Text{String: "Automated System", Valid: true}
+	}
+
+	pStartPg := pgtype.Date{Time: windows[0].pStart, Valid: true}
+	pEndPg := pgtype.Date{Time: windows[len(windows)-1].pEnd, Valid: true}
+
+	_, createRunErr := s.repo.Queries().CreateSchedulerRun(ctx, db.CreateSchedulerRunParams{
+		ID:                  runID,
+		RunIdentifier:       runIdentifier,
+		TriggerSource:       triggerSource,
+		ReportingPeriod:     result.PeriodLabel,
+		PeriodStart:         pStartPg,
+		PeriodEnd:           pEndPg,
+		StartedAt:           pgtype.Timestamptz{Time: startedAt, Valid: true},
+		Status:              "running",
+		ReportsEvaluated:    0,
+		ReportsGenerated:    0,
+		ReportsSkipped:      0,
+		ReportsFailed:       0,
+		GeneratedReferences: []byte("[]"),
+		SkippedReasons:      []byte("{}"),
+		ErrorDetails:        []byte("[]"),
+		ActorType:           actorType,
+		ActorUserID:         actorUserPg,
+		ActorName:           actorNamePg,
+	})
+	if createRunErr != nil {
+		log.Printf("[REPORT_SCHEDULER] Warning: failed to persist scheduler run history: %v", createRunErr)
+	}
+
+	result.RunID = runID
+	result.RunIdentifier = runIdentifier
+	result.StartedAt = startedAt.Format(time.RFC3339)
+	result.Status = "running"
 
 	// 4. Determine Geographic Scope and Specifications
 	scopeType := strings.TrimSpace(params.ScopeType)
@@ -547,6 +612,41 @@ func (s *ReportScheduler) RunScheduledCycle(
 		}
 
 		result.PeriodSummaries[w.periodLabel] = pSummary
+	}
+
+	// Finalize and persist durable run record in public_report_scheduler_runs
+	completedAt := time.Now().UTC()
+	finalStatus := "completed"
+	reportsFailed := len(result.Errors)
+	if reportsFailed > 0 {
+		if result.ReportsGenerated > 0 {
+			finalStatus = "partial_failure"
+		} else {
+			finalStatus = "failed"
+		}
+	}
+	result.Status = finalStatus
+	result.CompletedAt = completedAt.Format(time.RFC3339)
+	result.ReportsFailed = reportsFailed
+
+	genRefsJSON, _ := json.Marshal(result.GeneratedReferences)
+	skippedJSON, _ := json.Marshal(result.SkippedReasons)
+	errorsJSON, _ := json.Marshal(result.Errors)
+
+	_, updateRunErr := s.repo.Queries().UpdateSchedulerRun(ctx, db.UpdateSchedulerRunParams{
+		ID:                  runID,
+		CompletedAt:         pgtype.Timestamptz{Time: completedAt, Valid: true},
+		Status:              finalStatus,
+		ReportsEvaluated:    int32(result.ReportsEvaluated),
+		ReportsGenerated:    int32(result.ReportsGenerated),
+		ReportsSkipped:      int32(result.ReportsSkipped),
+		ReportsFailed:       int32(reportsFailed),
+		GeneratedReferences: genRefsJSON,
+		SkippedReasons:      skippedJSON,
+		ErrorDetails:        errorsJSON,
+	})
+	if updateRunErr != nil {
+		log.Printf("[REPORT_SCHEDULER] Warning: failed updating scheduler run history: %v", updateRunErr)
 	}
 
 	// Commit advisory lock transaction (releasing the advisory lock cleanly)

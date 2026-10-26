@@ -474,3 +474,137 @@ WHERE rp.status = 'published'
   AND rs.lga_id IS NOT DISTINCT FROM sqlc.narg('lga_id')::varchar
 ORDER BY rp.published_at DESC, rp.id DESC
 LIMIT 1;
+
+-- Scheduler Runs
+-- name: CreateSchedulerRun :one
+INSERT INTO public_report_scheduler_runs (
+    id, run_identifier, trigger_source, reporting_period, period_start, period_end,
+    started_at, status, reports_evaluated, reports_generated, reports_skipped, reports_failed,
+    generated_references, skipped_reasons, error_details, actor_type, actor_user_id, actor_name,
+    created_at, updated_at
+) VALUES (
+    $1, $2, $3, $4, $5, $6,
+    $7, $8, $9, $10, $11, $12,
+    $13, $14, $15, $16, $17, $18,
+    CURRENT_TIMESTAMP, CURRENT_TIMESTAMP
+)
+RETURNING *;
+
+-- name: UpdateSchedulerRun :one
+UPDATE public_report_scheduler_runs
+SET completed_at = $2,
+    status = $3,
+    reports_evaluated = $4,
+    reports_generated = $5,
+    reports_skipped = $6,
+    reports_failed = $7,
+    generated_references = $8,
+    skipped_reasons = $9,
+    error_details = $10,
+    updated_at = CURRENT_TIMESTAMP
+WHERE id = $1
+RETURNING *;
+
+-- name: GetSchedulerRunByID :one
+SELECT * FROM public_report_scheduler_runs
+WHERE id = $1 LIMIT 1;
+
+-- name: GetSchedulerRunByIdentifier :one
+SELECT * FROM public_report_scheduler_runs
+WHERE run_identifier = $1 LIMIT 1;
+
+-- name: GetLatestSchedulerRun :one
+SELECT * FROM public_report_scheduler_runs
+ORDER BY started_at DESC
+LIMIT 1;
+
+-- name: ListSchedulerRuns :many
+SELECT * FROM public_report_scheduler_runs
+WHERE (sqlc.narg('status')::varchar IS NULL OR status = sqlc.narg('status'))
+  AND (sqlc.narg('reporting_period')::varchar IS NULL OR reporting_period = sqlc.narg('reporting_period'))
+  AND (sqlc.narg('trigger_source')::varchar IS NULL OR trigger_source = sqlc.narg('trigger_source'))
+  AND (sqlc.narg('from_date')::timestamptz IS NULL OR started_at >= sqlc.narg('from_date'))
+  AND (sqlc.narg('to_date')::timestamptz IS NULL OR started_at <= sqlc.narg('to_date'))
+ORDER BY started_at DESC
+LIMIT sqlc.arg('limit_count') OFFSET sqlc.arg('offset_count');
+
+-- name: CountSchedulerRuns :one
+SELECT COUNT(*)::bigint
+FROM public_report_scheduler_runs
+WHERE (sqlc.narg('status')::varchar IS NULL OR status = sqlc.narg('status'))
+  AND (sqlc.narg('reporting_period')::varchar IS NULL OR reporting_period = sqlc.narg('reporting_period'))
+  AND (sqlc.narg('trigger_source')::varchar IS NULL OR trigger_source = sqlc.narg('trigger_source'))
+  AND (sqlc.narg('from_date')::timestamptz IS NULL OR started_at >= sqlc.narg('from_date'))
+  AND (sqlc.narg('to_date')::timestamptz IS NULL OR started_at <= sqlc.narg('to_date'));
+
+-- Dashboard Statistics Real Counts
+-- name: GetReportSnapshotCountsByStatus :one
+SELECT
+    COUNT(*)::bigint AS total_snapshots,
+    COUNT(*) FILTER (WHERE status = 'draft')::bigint AS draft_count,
+    COUNT(*) FILTER (WHERE status = 'pending_review')::bigint AS pending_review_count,
+    COUNT(*) FILTER (WHERE status = 'approved')::bigint AS approved_count,
+    COUNT(*) FILTER (WHERE status = 'published')::bigint AS published_count,
+    COUNT(*) FILTER (WHERE status = 'withdrawn')::bigint AS withdrawn_count
+FROM public_report_snapshots;
+
+-- name: GetReportExportCountsByFormat :one
+SELECT
+    COUNT(*) FILTER (WHERE export_format = 'pdf' AND export_status = 'generated')::bigint AS available_pdf_count,
+    COUNT(*) FILTER (WHERE export_format = 'csv' AND export_status = 'generated')::bigint AS available_csv_count
+FROM public_report_exports;
+
+-- name: CountFailedSchedulerRuns :one
+SELECT COUNT(*)::bigint
+FROM public_report_scheduler_runs
+WHERE status IN ('failed', 'partial_failure');
+
+-- name: CountFailedAuditAttempts :one
+SELECT COUNT(*)::bigint
+FROM public_report_audit
+WHERE action = 'generation_failed';
+
+-- Exports Admin Listing
+-- name: ListReportExportsAdmin :many
+SELECT
+    e.*,
+    s.public_reference,
+    s.title AS report_title,
+    s.report_type,
+    s.reporting_period,
+    s.status AS snapshot_status
+FROM public_report_exports e
+JOIN public_report_snapshots s ON s.id = e.snapshot_id
+WHERE (sqlc.narg('export_format')::varchar IS NULL OR e.export_format = sqlc.narg('export_format'))
+  AND (sqlc.narg('export_status')::varchar IS NULL OR e.export_status = sqlc.narg('export_status'))
+  AND (sqlc.narg('snapshot_id')::varchar IS NULL OR e.snapshot_id = sqlc.narg('snapshot_id'))
+ORDER BY e.created_at DESC
+LIMIT sqlc.arg('limit_count') OFFSET sqlc.arg('offset_count');
+
+-- name: CountReportExportsAdmin :one
+SELECT COUNT(*)::bigint
+FROM public_report_exports e
+JOIN public_report_snapshots s ON s.id = e.snapshot_id
+WHERE (sqlc.narg('export_format')::varchar IS NULL OR e.export_format = sqlc.narg('export_format'))
+  AND (sqlc.narg('export_status')::varchar IS NULL OR e.export_status = sqlc.narg('export_status'))
+  AND (sqlc.narg('snapshot_id')::varchar IS NULL OR e.snapshot_id = sqlc.narg('snapshot_id'));
+
+-- Enhanced Audits Listing
+-- name: ListReportAuditsWithFilters :many
+SELECT ra.*, u.display_name AS actor_name, u.email AS actor_email
+FROM public_report_audit ra
+LEFT JOIN users u ON u.id = ra.performed_by_user_id
+WHERE (sqlc.narg('snapshot_id')::varchar IS NULL OR ra.snapshot_id = sqlc.narg('snapshot_id'))
+  AND (sqlc.narg('action')::varchar IS NULL OR ra.action = sqlc.narg('action'))
+  AND (sqlc.narg('from_date')::timestamptz IS NULL OR ra.created_at >= sqlc.narg('from_date'))
+  AND (sqlc.narg('to_date')::timestamptz IS NULL OR ra.created_at <= sqlc.narg('to_date'))
+ORDER BY ra.created_at DESC
+LIMIT sqlc.arg('limit_count') OFFSET sqlc.arg('offset_count');
+
+-- name: CountReportAuditsWithFilters :one
+SELECT COUNT(*)::bigint
+FROM public_report_audit ra
+WHERE (sqlc.narg('snapshot_id')::varchar IS NULL OR ra.snapshot_id = sqlc.narg('snapshot_id'))
+  AND (sqlc.narg('action')::varchar IS NULL OR ra.action = sqlc.narg('action'))
+  AND (sqlc.narg('from_date')::timestamptz IS NULL OR ra.created_at >= sqlc.narg('from_date'))
+  AND (sqlc.narg('to_date')::timestamptz IS NULL OR ra.created_at <= sqlc.narg('to_date'));

@@ -411,6 +411,32 @@ func (q *Queries) CheckReportSnapshotExists(ctx context.Context, arg CheckReport
 	return column_1, err
 }
 
+const countFailedAuditAttempts = `-- name: CountFailedAuditAttempts :one
+SELECT COUNT(*)::bigint
+FROM public_report_audit
+WHERE action = 'generation_failed'
+`
+
+func (q *Queries) CountFailedAuditAttempts(ctx context.Context) (int64, error) {
+	row := q.db.QueryRow(ctx, countFailedAuditAttempts)
+	var column_1 int64
+	err := row.Scan(&column_1)
+	return column_1, err
+}
+
+const countFailedSchedulerRuns = `-- name: CountFailedSchedulerRuns :one
+SELECT COUNT(*)::bigint
+FROM public_report_scheduler_runs
+WHERE status IN ('failed', 'partial_failure')
+`
+
+func (q *Queries) CountFailedSchedulerRuns(ctx context.Context) (int64, error) {
+	row := q.db.QueryRow(ctx, countFailedSchedulerRuns)
+	var column_1 int64
+	err := row.Scan(&column_1)
+	return column_1, err
+}
+
 const countPublicPublications = `-- name: CountPublicPublications :one
 SELECT COUNT(*)
 FROM public_report_publications rp
@@ -441,6 +467,56 @@ func (q *Queries) CountPublicPublications(ctx context.Context, arg CountPublicPu
 	return count, err
 }
 
+const countReportAuditsWithFilters = `-- name: CountReportAuditsWithFilters :one
+SELECT COUNT(*)::bigint
+FROM public_report_audit ra
+WHERE ($1::varchar IS NULL OR ra.snapshot_id = $1)
+  AND ($2::varchar IS NULL OR ra.action = $2)
+  AND ($3::timestamptz IS NULL OR ra.created_at >= $3)
+  AND ($4::timestamptz IS NULL OR ra.created_at <= $4)
+`
+
+type CountReportAuditsWithFiltersParams struct {
+	SnapshotID pgtype.Text        `json:"snapshot_id"`
+	Action     pgtype.Text        `json:"action"`
+	FromDate   pgtype.Timestamptz `json:"from_date"`
+	ToDate     pgtype.Timestamptz `json:"to_date"`
+}
+
+func (q *Queries) CountReportAuditsWithFilters(ctx context.Context, arg CountReportAuditsWithFiltersParams) (int64, error) {
+	row := q.db.QueryRow(ctx, countReportAuditsWithFilters,
+		arg.SnapshotID,
+		arg.Action,
+		arg.FromDate,
+		arg.ToDate,
+	)
+	var column_1 int64
+	err := row.Scan(&column_1)
+	return column_1, err
+}
+
+const countReportExportsAdmin = `-- name: CountReportExportsAdmin :one
+SELECT COUNT(*)::bigint
+FROM public_report_exports e
+JOIN public_report_snapshots s ON s.id = e.snapshot_id
+WHERE ($1::varchar IS NULL OR e.export_format = $1)
+  AND ($2::varchar IS NULL OR e.export_status = $2)
+  AND ($3::varchar IS NULL OR e.snapshot_id = $3)
+`
+
+type CountReportExportsAdminParams struct {
+	ExportFormat pgtype.Text `json:"export_format"`
+	ExportStatus pgtype.Text `json:"export_status"`
+	SnapshotID   pgtype.Text `json:"snapshot_id"`
+}
+
+func (q *Queries) CountReportExportsAdmin(ctx context.Context, arg CountReportExportsAdminParams) (int64, error) {
+	row := q.db.QueryRow(ctx, countReportExportsAdmin, arg.ExportFormat, arg.ExportStatus, arg.SnapshotID)
+	var column_1 int64
+	err := row.Scan(&column_1)
+	return column_1, err
+}
+
 const countReportSnapshotsAdmin = `-- name: CountReportSnapshotsAdmin :one
 SELECT COUNT(*) FROM public_report_snapshots
 WHERE ($1::varchar IS NULL OR status = $1)
@@ -466,6 +542,37 @@ func (q *Queries) CountReportSnapshotsAdmin(ctx context.Context, arg CountReport
 	var count int64
 	err := row.Scan(&count)
 	return count, err
+}
+
+const countSchedulerRuns = `-- name: CountSchedulerRuns :one
+SELECT COUNT(*)::bigint
+FROM public_report_scheduler_runs
+WHERE ($1::varchar IS NULL OR status = $1)
+  AND ($2::varchar IS NULL OR reporting_period = $2)
+  AND ($3::varchar IS NULL OR trigger_source = $3)
+  AND ($4::timestamptz IS NULL OR started_at >= $4)
+  AND ($5::timestamptz IS NULL OR started_at <= $5)
+`
+
+type CountSchedulerRunsParams struct {
+	Status          pgtype.Text        `json:"status"`
+	ReportingPeriod pgtype.Text        `json:"reporting_period"`
+	TriggerSource   pgtype.Text        `json:"trigger_source"`
+	FromDate        pgtype.Timestamptz `json:"from_date"`
+	ToDate          pgtype.Timestamptz `json:"to_date"`
+}
+
+func (q *Queries) CountSchedulerRuns(ctx context.Context, arg CountSchedulerRunsParams) (int64, error) {
+	row := q.db.QueryRow(ctx, countSchedulerRuns,
+		arg.Status,
+		arg.ReportingPeriod,
+		arg.TriggerSource,
+		arg.FromDate,
+		arg.ToDate,
+	)
+	var column_1 int64
+	err := row.Scan(&column_1)
+	return column_1, err
 }
 
 const createReportApproval = `-- name: CreateReportApproval :one
@@ -676,6 +783,91 @@ func (q *Queries) CreateReportSnapshot(ctx context.Context, arg CreateReportSnap
 	return i, err
 }
 
+const createSchedulerRun = `-- name: CreateSchedulerRun :one
+INSERT INTO public_report_scheduler_runs (
+    id, run_identifier, trigger_source, reporting_period, period_start, period_end,
+    started_at, status, reports_evaluated, reports_generated, reports_skipped, reports_failed,
+    generated_references, skipped_reasons, error_details, actor_type, actor_user_id, actor_name,
+    created_at, updated_at
+) VALUES (
+    $1, $2, $3, $4, $5, $6,
+    $7, $8, $9, $10, $11, $12,
+    $13, $14, $15, $16, $17, $18,
+    CURRENT_TIMESTAMP, CURRENT_TIMESTAMP
+)
+RETURNING id, run_identifier, trigger_source, reporting_period, period_start, period_end, started_at, completed_at, status, reports_evaluated, reports_generated, reports_skipped, reports_failed, generated_references, skipped_reasons, error_details, actor_type, actor_user_id, actor_name, created_at, updated_at
+`
+
+type CreateSchedulerRunParams struct {
+	ID                  string             `json:"id"`
+	RunIdentifier       string             `json:"run_identifier"`
+	TriggerSource       string             `json:"trigger_source"`
+	ReportingPeriod     string             `json:"reporting_period"`
+	PeriodStart         pgtype.Date        `json:"period_start"`
+	PeriodEnd           pgtype.Date        `json:"period_end"`
+	StartedAt           pgtype.Timestamptz `json:"started_at"`
+	Status              string             `json:"status"`
+	ReportsEvaluated    int32              `json:"reports_evaluated"`
+	ReportsGenerated    int32              `json:"reports_generated"`
+	ReportsSkipped      int32              `json:"reports_skipped"`
+	ReportsFailed       int32              `json:"reports_failed"`
+	GeneratedReferences json.RawMessage    `json:"generated_references"`
+	SkippedReasons      json.RawMessage    `json:"skipped_reasons"`
+	ErrorDetails        json.RawMessage    `json:"error_details"`
+	ActorType           string             `json:"actor_type"`
+	ActorUserID         pgtype.Text        `json:"actor_user_id"`
+	ActorName           pgtype.Text        `json:"actor_name"`
+}
+
+// Scheduler Runs
+func (q *Queries) CreateSchedulerRun(ctx context.Context, arg CreateSchedulerRunParams) (PublicReportSchedulerRun, error) {
+	row := q.db.QueryRow(ctx, createSchedulerRun,
+		arg.ID,
+		arg.RunIdentifier,
+		arg.TriggerSource,
+		arg.ReportingPeriod,
+		arg.PeriodStart,
+		arg.PeriodEnd,
+		arg.StartedAt,
+		arg.Status,
+		arg.ReportsEvaluated,
+		arg.ReportsGenerated,
+		arg.ReportsSkipped,
+		arg.ReportsFailed,
+		arg.GeneratedReferences,
+		arg.SkippedReasons,
+		arg.ErrorDetails,
+		arg.ActorType,
+		arg.ActorUserID,
+		arg.ActorName,
+	)
+	var i PublicReportSchedulerRun
+	err := row.Scan(
+		&i.ID,
+		&i.RunIdentifier,
+		&i.TriggerSource,
+		&i.ReportingPeriod,
+		&i.PeriodStart,
+		&i.PeriodEnd,
+		&i.StartedAt,
+		&i.CompletedAt,
+		&i.Status,
+		&i.ReportsEvaluated,
+		&i.ReportsGenerated,
+		&i.ReportsSkipped,
+		&i.ReportsFailed,
+		&i.GeneratedReferences,
+		&i.SkippedReasons,
+		&i.ErrorDetails,
+		&i.ActorType,
+		&i.ActorUserID,
+		&i.ActorName,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+	)
+	return i, err
+}
+
 const deleteReportExport = `-- name: DeleteReportExport :exec
 DELETE FROM public_report_exports
 WHERE id = $1
@@ -720,6 +912,41 @@ func (q *Queries) GetFirstActiveAdminUser(ctx context.Context) (User, error) {
 		&i.CreatedAt,
 		&i.UpdatedAt,
 		&i.Version,
+	)
+	return i, err
+}
+
+const getLatestSchedulerRun = `-- name: GetLatestSchedulerRun :one
+SELECT id, run_identifier, trigger_source, reporting_period, period_start, period_end, started_at, completed_at, status, reports_evaluated, reports_generated, reports_skipped, reports_failed, generated_references, skipped_reasons, error_details, actor_type, actor_user_id, actor_name, created_at, updated_at FROM public_report_scheduler_runs
+ORDER BY started_at DESC
+LIMIT 1
+`
+
+func (q *Queries) GetLatestSchedulerRun(ctx context.Context) (PublicReportSchedulerRun, error) {
+	row := q.db.QueryRow(ctx, getLatestSchedulerRun)
+	var i PublicReportSchedulerRun
+	err := row.Scan(
+		&i.ID,
+		&i.RunIdentifier,
+		&i.TriggerSource,
+		&i.ReportingPeriod,
+		&i.PeriodStart,
+		&i.PeriodEnd,
+		&i.StartedAt,
+		&i.CompletedAt,
+		&i.Status,
+		&i.ReportsEvaluated,
+		&i.ReportsGenerated,
+		&i.ReportsSkipped,
+		&i.ReportsFailed,
+		&i.GeneratedReferences,
+		&i.SkippedReasons,
+		&i.ErrorDetails,
+		&i.ActorType,
+		&i.ActorUserID,
+		&i.ActorName,
+		&i.CreatedAt,
+		&i.UpdatedAt,
 	)
 	return i, err
 }
@@ -938,6 +1165,25 @@ func (q *Queries) GetReportExportBySnapshotAndFormat(ctx context.Context, arg Ge
 	return i, err
 }
 
+const getReportExportCountsByFormat = `-- name: GetReportExportCountsByFormat :one
+SELECT
+    COUNT(*) FILTER (WHERE export_format = 'pdf' AND export_status = 'generated')::bigint AS available_pdf_count,
+    COUNT(*) FILTER (WHERE export_format = 'csv' AND export_status = 'generated')::bigint AS available_csv_count
+FROM public_report_exports
+`
+
+type GetReportExportCountsByFormatRow struct {
+	AvailablePdfCount int64 `json:"available_pdf_count"`
+	AvailableCsvCount int64 `json:"available_csv_count"`
+}
+
+func (q *Queries) GetReportExportCountsByFormat(ctx context.Context) (GetReportExportCountsByFormatRow, error) {
+	row := q.db.QueryRow(ctx, getReportExportCountsByFormat)
+	var i GetReportExportCountsByFormatRow
+	err := row.Scan(&i.AvailablePdfCount, &i.AvailableCsvCount)
+	return i, err
+}
+
 const getReportSnapshotByID = `-- name: GetReportSnapshotByID :one
 SELECT rs.id, rs.public_reference, rs.definition_id, rs.report_type, rs.title, rs.reporting_period, rs.period_start, rs.period_end, rs.scope_type, rs.zone_id, rs.state_id, rs.lga_id, rs.status, rs.aggregated_data, rs.data_hash, rs.publication_version, rs.correction_notes, rs.created_by_user_id, rs.created_at, rs.updated_at, rs.created_by_type,
        COALESCE(u.display_name, CASE WHEN rs.created_by_type = 'system' THEN 'System' ELSE 'Administrator' END)::varchar AS creator_name,
@@ -1086,6 +1332,109 @@ func (q *Queries) GetReportSnapshotByRef(ctx context.Context, publicReference st
 		&i.ZoneName,
 		&i.StateName,
 		&i.LgaName,
+	)
+	return i, err
+}
+
+const getReportSnapshotCountsByStatus = `-- name: GetReportSnapshotCountsByStatus :one
+SELECT
+    COUNT(*)::bigint AS total_snapshots,
+    COUNT(*) FILTER (WHERE status = 'draft')::bigint AS draft_count,
+    COUNT(*) FILTER (WHERE status = 'pending_review')::bigint AS pending_review_count,
+    COUNT(*) FILTER (WHERE status = 'approved')::bigint AS approved_count,
+    COUNT(*) FILTER (WHERE status = 'published')::bigint AS published_count,
+    COUNT(*) FILTER (WHERE status = 'withdrawn')::bigint AS withdrawn_count
+FROM public_report_snapshots
+`
+
+type GetReportSnapshotCountsByStatusRow struct {
+	TotalSnapshots     int64 `json:"total_snapshots"`
+	DraftCount         int64 `json:"draft_count"`
+	PendingReviewCount int64 `json:"pending_review_count"`
+	ApprovedCount      int64 `json:"approved_count"`
+	PublishedCount     int64 `json:"published_count"`
+	WithdrawnCount     int64 `json:"withdrawn_count"`
+}
+
+// Dashboard Statistics Real Counts
+func (q *Queries) GetReportSnapshotCountsByStatus(ctx context.Context) (GetReportSnapshotCountsByStatusRow, error) {
+	row := q.db.QueryRow(ctx, getReportSnapshotCountsByStatus)
+	var i GetReportSnapshotCountsByStatusRow
+	err := row.Scan(
+		&i.TotalSnapshots,
+		&i.DraftCount,
+		&i.PendingReviewCount,
+		&i.ApprovedCount,
+		&i.PublishedCount,
+		&i.WithdrawnCount,
+	)
+	return i, err
+}
+
+const getSchedulerRunByID = `-- name: GetSchedulerRunByID :one
+SELECT id, run_identifier, trigger_source, reporting_period, period_start, period_end, started_at, completed_at, status, reports_evaluated, reports_generated, reports_skipped, reports_failed, generated_references, skipped_reasons, error_details, actor_type, actor_user_id, actor_name, created_at, updated_at FROM public_report_scheduler_runs
+WHERE id = $1 LIMIT 1
+`
+
+func (q *Queries) GetSchedulerRunByID(ctx context.Context, id string) (PublicReportSchedulerRun, error) {
+	row := q.db.QueryRow(ctx, getSchedulerRunByID, id)
+	var i PublicReportSchedulerRun
+	err := row.Scan(
+		&i.ID,
+		&i.RunIdentifier,
+		&i.TriggerSource,
+		&i.ReportingPeriod,
+		&i.PeriodStart,
+		&i.PeriodEnd,
+		&i.StartedAt,
+		&i.CompletedAt,
+		&i.Status,
+		&i.ReportsEvaluated,
+		&i.ReportsGenerated,
+		&i.ReportsSkipped,
+		&i.ReportsFailed,
+		&i.GeneratedReferences,
+		&i.SkippedReasons,
+		&i.ErrorDetails,
+		&i.ActorType,
+		&i.ActorUserID,
+		&i.ActorName,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+	)
+	return i, err
+}
+
+const getSchedulerRunByIdentifier = `-- name: GetSchedulerRunByIdentifier :one
+SELECT id, run_identifier, trigger_source, reporting_period, period_start, period_end, started_at, completed_at, status, reports_evaluated, reports_generated, reports_skipped, reports_failed, generated_references, skipped_reasons, error_details, actor_type, actor_user_id, actor_name, created_at, updated_at FROM public_report_scheduler_runs
+WHERE run_identifier = $1 LIMIT 1
+`
+
+func (q *Queries) GetSchedulerRunByIdentifier(ctx context.Context, runIdentifier string) (PublicReportSchedulerRun, error) {
+	row := q.db.QueryRow(ctx, getSchedulerRunByIdentifier, runIdentifier)
+	var i PublicReportSchedulerRun
+	err := row.Scan(
+		&i.ID,
+		&i.RunIdentifier,
+		&i.TriggerSource,
+		&i.ReportingPeriod,
+		&i.PeriodStart,
+		&i.PeriodEnd,
+		&i.StartedAt,
+		&i.CompletedAt,
+		&i.Status,
+		&i.ReportsEvaluated,
+		&i.ReportsGenerated,
+		&i.ReportsSkipped,
+		&i.ReportsFailed,
+		&i.GeneratedReferences,
+		&i.SkippedReasons,
+		&i.ErrorDetails,
+		&i.ActorType,
+		&i.ActorUserID,
+		&i.ActorName,
+		&i.CreatedAt,
+		&i.UpdatedAt,
 	)
 	return i, err
 }
@@ -1496,6 +1845,77 @@ func (q *Queries) ListReportAudits(ctx context.Context, arg ListReportAuditsPara
 	return items, nil
 }
 
+const listReportAuditsWithFilters = `-- name: ListReportAuditsWithFilters :many
+SELECT ra.id, ra.snapshot_id, ra.action, ra.performed_by_user_id, ra.details, ra.ip_address, ra.created_at, u.display_name AS actor_name, u.email AS actor_email
+FROM public_report_audit ra
+LEFT JOIN users u ON u.id = ra.performed_by_user_id
+WHERE ($1::varchar IS NULL OR ra.snapshot_id = $1)
+  AND ($2::varchar IS NULL OR ra.action = $2)
+  AND ($3::timestamptz IS NULL OR ra.created_at >= $3)
+  AND ($4::timestamptz IS NULL OR ra.created_at <= $4)
+ORDER BY ra.created_at DESC
+LIMIT $6 OFFSET $5
+`
+
+type ListReportAuditsWithFiltersParams struct {
+	SnapshotID  pgtype.Text        `json:"snapshot_id"`
+	Action      pgtype.Text        `json:"action"`
+	FromDate    pgtype.Timestamptz `json:"from_date"`
+	ToDate      pgtype.Timestamptz `json:"to_date"`
+	OffsetCount int32              `json:"offset_count"`
+	LimitCount  int32              `json:"limit_count"`
+}
+
+type ListReportAuditsWithFiltersRow struct {
+	ID                string             `json:"id"`
+	SnapshotID        pgtype.Text        `json:"snapshot_id"`
+	Action            string             `json:"action"`
+	PerformedByUserID pgtype.Text        `json:"performed_by_user_id"`
+	Details           json.RawMessage    `json:"details"`
+	IpAddress         pgtype.Text        `json:"ip_address"`
+	CreatedAt         pgtype.Timestamptz `json:"created_at"`
+	ActorName         pgtype.Text        `json:"actor_name"`
+	ActorEmail        pgtype.Text        `json:"actor_email"`
+}
+
+// Enhanced Audits Listing
+func (q *Queries) ListReportAuditsWithFilters(ctx context.Context, arg ListReportAuditsWithFiltersParams) ([]ListReportAuditsWithFiltersRow, error) {
+	rows, err := q.db.Query(ctx, listReportAuditsWithFilters,
+		arg.SnapshotID,
+		arg.Action,
+		arg.FromDate,
+		arg.ToDate,
+		arg.OffsetCount,
+		arg.LimitCount,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []ListReportAuditsWithFiltersRow
+	for rows.Next() {
+		var i ListReportAuditsWithFiltersRow
+		if err := rows.Scan(
+			&i.ID,
+			&i.SnapshotID,
+			&i.Action,
+			&i.PerformedByUserID,
+			&i.Details,
+			&i.IpAddress,
+			&i.CreatedAt,
+			&i.ActorName,
+			&i.ActorEmail,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listReportDefinitions = `-- name: ListReportDefinitions :many
 SELECT id, report_type, name, description, reporting_scope, aggregation_rules, visibility_config, is_active, created_at, updated_at FROM public_report_definitions
 WHERE is_active = TRUE
@@ -1523,6 +1943,96 @@ func (q *Queries) ListReportDefinitions(ctx context.Context) ([]PublicReportDefi
 			&i.IsActive,
 			&i.CreatedAt,
 			&i.UpdatedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listReportExportsAdmin = `-- name: ListReportExportsAdmin :many
+SELECT
+    e.id, e.snapshot_id, e.export_format, e.file_name, e.content_hash, e.storage_reference, e.export_status, e.created_at, e.file_size_bytes, e.mime_type, e.checksum_algorithm, e.updated_at,
+    s.public_reference,
+    s.title AS report_title,
+    s.report_type,
+    s.reporting_period,
+    s.status AS snapshot_status
+FROM public_report_exports e
+JOIN public_report_snapshots s ON s.id = e.snapshot_id
+WHERE ($1::varchar IS NULL OR e.export_format = $1)
+  AND ($2::varchar IS NULL OR e.export_status = $2)
+  AND ($3::varchar IS NULL OR e.snapshot_id = $3)
+ORDER BY e.created_at DESC
+LIMIT $5 OFFSET $4
+`
+
+type ListReportExportsAdminParams struct {
+	ExportFormat pgtype.Text `json:"export_format"`
+	ExportStatus pgtype.Text `json:"export_status"`
+	SnapshotID   pgtype.Text `json:"snapshot_id"`
+	OffsetCount  int32       `json:"offset_count"`
+	LimitCount   int32       `json:"limit_count"`
+}
+
+type ListReportExportsAdminRow struct {
+	ID                string             `json:"id"`
+	SnapshotID        string             `json:"snapshot_id"`
+	ExportFormat      string             `json:"export_format"`
+	FileName          string             `json:"file_name"`
+	ContentHash       string             `json:"content_hash"`
+	StorageReference  pgtype.Text        `json:"storage_reference"`
+	ExportStatus      string             `json:"export_status"`
+	CreatedAt         pgtype.Timestamptz `json:"created_at"`
+	FileSizeBytes     int64              `json:"file_size_bytes"`
+	MimeType          string             `json:"mime_type"`
+	ChecksumAlgorithm string             `json:"checksum_algorithm"`
+	UpdatedAt         pgtype.Timestamptz `json:"updated_at"`
+	PublicReference   string             `json:"public_reference"`
+	ReportTitle       string             `json:"report_title"`
+	ReportType        string             `json:"report_type"`
+	ReportingPeriod   string             `json:"reporting_period"`
+	SnapshotStatus    string             `json:"snapshot_status"`
+}
+
+// Exports Admin Listing
+func (q *Queries) ListReportExportsAdmin(ctx context.Context, arg ListReportExportsAdminParams) ([]ListReportExportsAdminRow, error) {
+	rows, err := q.db.Query(ctx, listReportExportsAdmin,
+		arg.ExportFormat,
+		arg.ExportStatus,
+		arg.SnapshotID,
+		arg.OffsetCount,
+		arg.LimitCount,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []ListReportExportsAdminRow
+	for rows.Next() {
+		var i ListReportExportsAdminRow
+		if err := rows.Scan(
+			&i.ID,
+			&i.SnapshotID,
+			&i.ExportFormat,
+			&i.FileName,
+			&i.ContentHash,
+			&i.StorageReference,
+			&i.ExportStatus,
+			&i.CreatedAt,
+			&i.FileSizeBytes,
+			&i.MimeType,
+			&i.ChecksumAlgorithm,
+			&i.UpdatedAt,
+			&i.PublicReference,
+			&i.ReportTitle,
+			&i.ReportType,
+			&i.ReportingPeriod,
+			&i.SnapshotStatus,
 		); err != nil {
 			return nil, err
 		}
@@ -1682,6 +2192,77 @@ func (q *Queries) ListReportSnapshotsAdmin(ctx context.Context, arg ListReportSn
 	return items, nil
 }
 
+const listSchedulerRuns = `-- name: ListSchedulerRuns :many
+SELECT id, run_identifier, trigger_source, reporting_period, period_start, period_end, started_at, completed_at, status, reports_evaluated, reports_generated, reports_skipped, reports_failed, generated_references, skipped_reasons, error_details, actor_type, actor_user_id, actor_name, created_at, updated_at FROM public_report_scheduler_runs
+WHERE ($1::varchar IS NULL OR status = $1)
+  AND ($2::varchar IS NULL OR reporting_period = $2)
+  AND ($3::varchar IS NULL OR trigger_source = $3)
+  AND ($4::timestamptz IS NULL OR started_at >= $4)
+  AND ($5::timestamptz IS NULL OR started_at <= $5)
+ORDER BY started_at DESC
+LIMIT $7 OFFSET $6
+`
+
+type ListSchedulerRunsParams struct {
+	Status          pgtype.Text        `json:"status"`
+	ReportingPeriod pgtype.Text        `json:"reporting_period"`
+	TriggerSource   pgtype.Text        `json:"trigger_source"`
+	FromDate        pgtype.Timestamptz `json:"from_date"`
+	ToDate          pgtype.Timestamptz `json:"to_date"`
+	OffsetCount     int32              `json:"offset_count"`
+	LimitCount      int32              `json:"limit_count"`
+}
+
+func (q *Queries) ListSchedulerRuns(ctx context.Context, arg ListSchedulerRunsParams) ([]PublicReportSchedulerRun, error) {
+	rows, err := q.db.Query(ctx, listSchedulerRuns,
+		arg.Status,
+		arg.ReportingPeriod,
+		arg.TriggerSource,
+		arg.FromDate,
+		arg.ToDate,
+		arg.OffsetCount,
+		arg.LimitCount,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []PublicReportSchedulerRun
+	for rows.Next() {
+		var i PublicReportSchedulerRun
+		if err := rows.Scan(
+			&i.ID,
+			&i.RunIdentifier,
+			&i.TriggerSource,
+			&i.ReportingPeriod,
+			&i.PeriodStart,
+			&i.PeriodEnd,
+			&i.StartedAt,
+			&i.CompletedAt,
+			&i.Status,
+			&i.ReportsEvaluated,
+			&i.ReportsGenerated,
+			&i.ReportsSkipped,
+			&i.ReportsFailed,
+			&i.GeneratedReferences,
+			&i.SkippedReasons,
+			&i.ErrorDetails,
+			&i.ActorType,
+			&i.ActorUserID,
+			&i.ActorName,
+			&i.CreatedAt,
+			&i.UpdatedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const updateReportExportStatus = `-- name: UpdateReportExportStatus :one
 UPDATE public_report_exports
 SET export_status = $2,
@@ -1804,6 +2385,75 @@ func (q *Queries) UpdateReportSnapshotStatus(ctx context.Context, arg UpdateRepo
 		&i.CreatedAt,
 		&i.UpdatedAt,
 		&i.CreatedByType,
+	)
+	return i, err
+}
+
+const updateSchedulerRun = `-- name: UpdateSchedulerRun :one
+UPDATE public_report_scheduler_runs
+SET completed_at = $2,
+    status = $3,
+    reports_evaluated = $4,
+    reports_generated = $5,
+    reports_skipped = $6,
+    reports_failed = $7,
+    generated_references = $8,
+    skipped_reasons = $9,
+    error_details = $10,
+    updated_at = CURRENT_TIMESTAMP
+WHERE id = $1
+RETURNING id, run_identifier, trigger_source, reporting_period, period_start, period_end, started_at, completed_at, status, reports_evaluated, reports_generated, reports_skipped, reports_failed, generated_references, skipped_reasons, error_details, actor_type, actor_user_id, actor_name, created_at, updated_at
+`
+
+type UpdateSchedulerRunParams struct {
+	ID                  string             `json:"id"`
+	CompletedAt         pgtype.Timestamptz `json:"completed_at"`
+	Status              string             `json:"status"`
+	ReportsEvaluated    int32              `json:"reports_evaluated"`
+	ReportsGenerated    int32              `json:"reports_generated"`
+	ReportsSkipped      int32              `json:"reports_skipped"`
+	ReportsFailed       int32              `json:"reports_failed"`
+	GeneratedReferences json.RawMessage    `json:"generated_references"`
+	SkippedReasons      json.RawMessage    `json:"skipped_reasons"`
+	ErrorDetails        json.RawMessage    `json:"error_details"`
+}
+
+func (q *Queries) UpdateSchedulerRun(ctx context.Context, arg UpdateSchedulerRunParams) (PublicReportSchedulerRun, error) {
+	row := q.db.QueryRow(ctx, updateSchedulerRun,
+		arg.ID,
+		arg.CompletedAt,
+		arg.Status,
+		arg.ReportsEvaluated,
+		arg.ReportsGenerated,
+		arg.ReportsSkipped,
+		arg.ReportsFailed,
+		arg.GeneratedReferences,
+		arg.SkippedReasons,
+		arg.ErrorDetails,
+	)
+	var i PublicReportSchedulerRun
+	err := row.Scan(
+		&i.ID,
+		&i.RunIdentifier,
+		&i.TriggerSource,
+		&i.ReportingPeriod,
+		&i.PeriodStart,
+		&i.PeriodEnd,
+		&i.StartedAt,
+		&i.CompletedAt,
+		&i.Status,
+		&i.ReportsEvaluated,
+		&i.ReportsGenerated,
+		&i.ReportsSkipped,
+		&i.ReportsFailed,
+		&i.GeneratedReferences,
+		&i.SkippedReasons,
+		&i.ErrorDetails,
+		&i.ActorType,
+		&i.ActorUserID,
+		&i.ActorName,
+		&i.CreatedAt,
+		&i.UpdatedAt,
 	)
 	return i, err
 }

@@ -1254,6 +1254,30 @@ type PublicReportPublication struct {
 	CreatedAt              pgtype.Timestamptz `json:"created_at"`
 }
 
+type PublicReportSchedulerRun struct {
+	ID                  string             `json:"id"`
+	RunIdentifier       string             `json:"run_identifier"`
+	TriggerSource       string             `json:"trigger_source"`
+	ReportingPeriod     string             `json:"reporting_period"`
+	PeriodStart         pgtype.Date        `json:"period_start"`
+	PeriodEnd           pgtype.Date        `json:"period_end"`
+	StartedAt           pgtype.Timestamptz `json:"started_at"`
+	CompletedAt         pgtype.Timestamptz `json:"completed_at"`
+	Status              string             `json:"status"`
+	ReportsEvaluated    int32              `json:"reports_evaluated"`
+	ReportsGenerated    int32              `json:"reports_generated"`
+	ReportsSkipped      int32              `json:"reports_skipped"`
+	ReportsFailed       int32              `json:"reports_failed"`
+	GeneratedReferences json.RawMessage    `json:"generated_references"`
+	SkippedReasons      json.RawMessage    `json:"skipped_reasons"`
+	ErrorDetails        json.RawMessage    `json:"error_details"`
+	ActorType           string             `json:"actor_type"`
+	ActorUserID         pgtype.Text        `json:"actor_user_id"`
+	ActorName           pgtype.Text        `json:"actor_name"`
+	CreatedAt           pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt           pgtype.Timestamptz `json:"updated_at"`
+}
+
 type PublicReportSnapshot struct {
 	ID                 string             `json:"id"`
 	PublicReference    string             `json:"public_reference"`

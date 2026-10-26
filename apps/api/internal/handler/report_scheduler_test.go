@@ -21,7 +21,7 @@ func TestReportScheduler_AdminTriggerAuthorization(t *testing.T) {
 	_, memberToken := createHandlerTestUser(t, h, "member", fmt.Sprintf("sched_member_%d@test.com", uid))
 	_, adminToken := createHandlerTestUser(t, h, "national_admin", fmt.Sprintf("sched_admin_%d@test.com", uid))
 
-	targetPeriod := fmt.Sprintf("204%d-%02d", uid%4, (uid%12)+1)
+	targetPeriod := fmt.Sprintf("202%d-%02d", uid%3, (uid%12)+1)
 	defer func() {
 		_, _ = h.Pool.Exec(context.Background(), "DELETE FROM public_report_snapshots WHERE reporting_period = $1", targetPeriod)
 	}()

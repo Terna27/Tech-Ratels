@@ -71,10 +71,35 @@ func TestGetClientIP(t *testing.T) {
 			remoteAddr: "invalid-remote",
 			expectedIP: "unknown",
 		},
+		{
+			name: "Spoofed CF-Connecting-IP rejected from untrusted direct remote address",
+			headers: map[string]string{
+				"CF-Connecting-IP": "102.89.44.12",
+			},
+			remoteAddr: "203.0.113.195:54321",
+			expectedIP: "203.0.113.195",
+		},
+		{
+			name: "Spoofed X-Forwarded-For rejected from untrusted direct remote address",
+			headers: map[string]string{
+				"X-Forwarded-For": "1.1.1.1, 2.2.2.2",
+			},
+			remoteAddr: "198.51.100.42:12345",
+			expectedIP: "198.51.100.42",
+		},
+		{
+			name: "Spoofed True-Client-IP rejected from untrusted direct remote address",
+			headers: map[string]string{
+				"True-Client-IP": "8.8.8.8",
+			},
+			remoteAddr: "198.51.100.99:9999",
+			expectedIP: "198.51.100.99",
+		},
 	}
 
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
+			ResetDefaultTrustedProxies()
 			req := httptest.NewRequest("GET", "/test", nil)
 			for k, v := range tc.headers {
 				req.Header.Set(k, v)
@@ -86,6 +111,26 @@ func TestGetClientIP(t *testing.T) {
 				t.Errorf("GetClientIP() = %q; want %q", got, tc.expectedIP)
 			}
 		})
+	}
+}
+
+func TestTrustedProxiesConfiguration(t *testing.T) {
+	defer ResetDefaultTrustedProxies()
+
+	req := httptest.NewRequest("GET", "/test", nil)
+	req.Header.Set("CF-Connecting-IP", "102.89.44.12")
+	req.RemoteAddr = "10.0.1.50:45678"
+
+	// Before configuring 10.0.0.0/8, 10.0.1.50 is untrusted
+	ResetDefaultTrustedProxies()
+	if got := GetClientIP(req); got != "10.0.1.50" {
+		t.Fatalf("expected untrusted direct address 10.0.1.50, got %s", got)
+	}
+
+	// After adding 10.0.0.0/8 to trusted proxies, header is honored
+	SetTrustedProxies([]string{"127.0.0.1", "10.0.0.0/8"})
+	if got := GetClientIP(req); got != "102.89.44.12" {
+		t.Fatalf("expected trusted forwarded address 102.89.44.12, got %s", got)
 	}
 }
 

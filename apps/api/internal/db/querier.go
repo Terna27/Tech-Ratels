@@ -40,7 +40,9 @@ type Querier interface {
 	CountAuditEvents(ctx context.Context) (int64, error)
 	CountDeliveriesAdmin(ctx context.Context, arg CountDeliveriesAdminParams) (int64, error)
 	CountDraftEvents(ctx context.Context) (int64, error)
+	CountFailedAuditAttempts(ctx context.Context) (int64, error)
 	CountFailedOutboxAdmin(ctx context.Context) (int64, error)
+	CountFailedSchedulerRuns(ctx context.Context) (int64, error)
 	CountLGAs(ctx context.Context) (int64, error)
 	CountMediaReports(ctx context.Context, status pgtype.Text) (int64, error)
 	CountMediaTakedownRequests(ctx context.Context, status pgtype.Text) (int64, error)
@@ -55,9 +57,12 @@ type Querier interface {
 	CountPublicGalleryMedia(ctx context.Context, arg CountPublicGalleryMediaParams) (int64, error)
 	CountPublicPublications(ctx context.Context, arg CountPublicPublicationsParams) (int64, error)
 	CountPublishedEvents(ctx context.Context) (int64, error)
+	CountReportAuditsWithFilters(ctx context.Context, arg CountReportAuditsWithFiltersParams) (int64, error)
+	CountReportExportsAdmin(ctx context.Context, arg CountReportExportsAdminParams) (int64, error)
 	CountReportSnapshotsAdmin(ctx context.Context, arg CountReportSnapshotsAdminParams) (int64, error)
 	CountSafeguardingAccessLogs(ctx context.Context) (int64, error)
 	CountSafeguardingCases(ctx context.Context, arg CountSafeguardingCasesParams) (int64, error)
+	CountSchedulerRuns(ctx context.Context, arg CountSchedulerRunsParams) (int64, error)
 	CountStates(ctx context.Context) (int64, error)
 	CountStockLedgerEntries(ctx context.Context, arg CountStockLedgerEntriesParams) (int64, error)
 	CountTotalRegistrations(ctx context.Context) (int64, error)
@@ -210,6 +215,8 @@ type Querier interface {
 	CreateSafeguardingReporter(ctx context.Context, arg CreateSafeguardingReporterParams) (SafeguardingReporter, error)
 	// Safeguarding Retention Records
 	CreateSafeguardingRetentionRecord(ctx context.Context, arg CreateSafeguardingRetentionRecordParams) (SafeguardingRetentionRecord, error)
+	// Scheduler Runs
+	CreateSchedulerRun(ctx context.Context, arg CreateSchedulerRunParams) (PublicReportSchedulerRun, error)
 	CreateState(ctx context.Context, arg CreateStateParams) (State, error)
 	CreateStatementItem(ctx context.Context, arg CreateStatementItemParams) (FinancialStatementItem, error)
 	CreateStockLedgerEntry(ctx context.Context, arg CreateStockLedgerEntryParams) (StockLedgerEntry, error)
@@ -307,6 +314,7 @@ type Querier interface {
 	GetLGAByID(ctx context.Context, id string) (Lga, error)
 	GetLGAByStateAndName(ctx context.Context, arg GetLGAByStateAndNameParams) (Lga, error)
 	GetLatestPublishedHeroMedia(ctx context.Context) (HomepageHeroMedium, error)
+	GetLatestSchedulerRun(ctx context.Context) (PublicReportSchedulerRun, error)
 	GetLatestStockLedgerEntry(ctx context.Context, arg GetLatestStockLedgerEntryParams) (StockLedgerEntry, error)
 	// -------------------------------------------------------------
 	// Marketplace Overview Analytics
@@ -350,8 +358,11 @@ type Querier interface {
 	GetReportDefinitionByType(ctx context.Context, reportType string) (PublicReportDefinition, error)
 	GetReportExportByID(ctx context.Context, id string) (PublicReportExport, error)
 	GetReportExportBySnapshotAndFormat(ctx context.Context, arg GetReportExportBySnapshotAndFormatParams) (PublicReportExport, error)
+	GetReportExportCountsByFormat(ctx context.Context) (GetReportExportCountsByFormatRow, error)
 	GetReportSnapshotByID(ctx context.Context, id string) (GetReportSnapshotByIDRow, error)
 	GetReportSnapshotByRef(ctx context.Context, publicReference string) (GetReportSnapshotByRefRow, error)
+	// Dashboard Statistics Real Counts
+	GetReportSnapshotCountsByStatus(ctx context.Context) (GetReportSnapshotCountsByStatusRow, error)
 	GetSafeguardingCaseByID(ctx context.Context, id string) (GetSafeguardingCaseByIDRow, error)
 	GetSafeguardingCaseByPublicRef(ctx context.Context, publicReference string) (GetSafeguardingCaseByPublicRefRow, error)
 	GetSafeguardingConflict(ctx context.Context, arg GetSafeguardingConflictParams) (SafeguardingConflict, error)
@@ -362,6 +373,8 @@ type Querier interface {
 	GetSafeguardingRetentionRecordByCaseID(ctx context.Context, caseID string) (SafeguardingRetentionRecord, error)
 	// Safeguarding Settings
 	GetSafeguardingSetting(ctx context.Context, key string) (SafeguardingSetting, error)
+	GetSchedulerRunByID(ctx context.Context, id string) (PublicReportSchedulerRun, error)
+	GetSchedulerRunByIdentifier(ctx context.Context, runIdentifier string) (PublicReportSchedulerRun, error)
 	GetStateByCode(ctx context.Context, code string) (State, error)
 	GetStateByID(ctx context.Context, id string) (State, error)
 	GetStockBalance(ctx context.Context, arg GetStockBalanceParams) (StockBalance, error)
@@ -474,8 +487,12 @@ type Querier interface {
 	ListRegistrationsByUser(ctx context.Context, userID string) ([]ListRegistrationsByUserRow, error)
 	ListReportApprovalsBySnapshot(ctx context.Context, snapshotID string) ([]ListReportApprovalsBySnapshotRow, error)
 	ListReportAudits(ctx context.Context, arg ListReportAuditsParams) ([]ListReportAuditsRow, error)
+	// Enhanced Audits Listing
+	ListReportAuditsWithFilters(ctx context.Context, arg ListReportAuditsWithFiltersParams) ([]ListReportAuditsWithFiltersRow, error)
 	// Public Report Definitions
 	ListReportDefinitions(ctx context.Context) ([]PublicReportDefinition, error)
+	// Exports Admin Listing
+	ListReportExportsAdmin(ctx context.Context, arg ListReportExportsAdminParams) ([]ListReportExportsAdminRow, error)
 	ListReportExportsBySnapshot(ctx context.Context, snapshotID string) ([]PublicReportExport, error)
 	ListReportSnapshotsAdmin(ctx context.Context, arg ListReportSnapshotsAdminParams) ([]ListReportSnapshotsAdminRow, error)
 	ListReporterVisibleMessagesByCaseID(ctx context.Context, caseID string) ([]ListReporterVisibleMessagesByCaseIDRow, error)
@@ -485,6 +502,7 @@ type Querier interface {
 	ListSafeguardingConflictsByCaseID(ctx context.Context, caseID string) ([]ListSafeguardingConflictsByCaseIDRow, error)
 	ListSafeguardingEvidenceByCaseID(ctx context.Context, caseID string) ([]SafeguardingEvidence, error)
 	ListSafeguardingSettings(ctx context.Context) ([]SafeguardingSetting, error)
+	ListSchedulerRuns(ctx context.Context, arg ListSchedulerRunsParams) ([]PublicReportSchedulerRun, error)
 	ListStatementItemsByPeriod(ctx context.Context, arg ListStatementItemsByPeriodParams) ([]ListStatementItemsByPeriodRow, error)
 	ListStates(ctx context.Context) ([]State, error)
 	ListStatesByZone(ctx context.Context, zoneID string) ([]State, error)
@@ -582,6 +600,7 @@ type Querier interface {
 	UpdateSafeguardingCaseStatus(ctx context.Context, arg UpdateSafeguardingCaseStatusParams) (SafeguardingCase, error)
 	UpdateSafeguardingCaseTriage(ctx context.Context, arg UpdateSafeguardingCaseTriageParams) (SafeguardingCase, error)
 	UpdateSafeguardingLegalHold(ctx context.Context, arg UpdateSafeguardingLegalHoldParams) (SafeguardingRetentionRecord, error)
+	UpdateSchedulerRun(ctx context.Context, arg UpdateSchedulerRunParams) (PublicReportSchedulerRun, error)
 	UpdateState(ctx context.Context, arg UpdateStateParams) (State, error)
 	UpdateStatementItemMatch(ctx context.Context, arg UpdateStatementItemMatchParams) (FinancialStatementItem, error)
 	UpdateStockReservationStatus(ctx context.Context, arg UpdateStockReservationStatusParams) (StockReservation, error)

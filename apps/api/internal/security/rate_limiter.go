@@ -3,6 +3,7 @@ package security
 import (
 	"net"
 	"net/http"
+	"os"
 	"path/filepath"
 	"regexp"
 	"strings"
@@ -23,13 +24,133 @@ func SanitizeFilename(name string) string {
 	return cleaned
 }
 
-// GetClientIP securely extracts and validates the client's real IP address,
-// prioritizing headers from trusted edge proxies (Cloudflare, Render) while
-// validating each IP string against net.ParseIP.
+// Trusted proxy configuration
+var (
+	trustedMu     sync.RWMutex
+	trustedIPs    []net.IP
+	trustedNets   []*net.IPNet
+	trustedInitOnce sync.Once
+)
+
+// initDefaultTrustedProxies initializes loopback and environment-configured proxies.
+func initDefaultTrustedProxies() {
+	trustedIPs = []net.IP{
+		net.ParseIP("127.0.0.1"),
+		net.ParseIP("::1"),
+	}
+	_, loopback4, _ := net.ParseCIDR("127.0.0.0/8")
+	_, loopback6, _ := net.ParseCIDR("::1/128")
+	trustedNets = []*net.IPNet{loopback4, loopback6}
+
+	if envProxies := os.Getenv("TRUSTED_PROXIES"); envProxies != "" {
+		for _, raw := range strings.Split(envProxies, ",") {
+			item := strings.TrimSpace(raw)
+			if item == "" {
+				continue
+			}
+			if strings.Contains(item, "/") {
+				if _, ipNet, err := net.ParseCIDR(item); err == nil && ipNet != nil {
+					trustedNets = append(trustedNets, ipNet)
+				}
+			} else {
+				if ip := net.ParseIP(item); ip != nil {
+					trustedIPs = append(trustedIPs, ip)
+				}
+			}
+		}
+	}
+}
+
+// SetTrustedProxies allows programmatic configuration of trusted reverse proxy IPs and CIDRs.
+func SetTrustedProxies(proxies []string) {
+	trustedMu.Lock()
+	defer trustedMu.Unlock()
+
+	trustedIPs = nil
+	trustedNets = nil
+
+	for _, raw := range proxies {
+		item := strings.TrimSpace(raw)
+		if item == "" {
+			continue
+		}
+		if strings.Contains(item, "/") {
+			if _, ipNet, err := net.ParseCIDR(item); err == nil && ipNet != nil {
+				trustedNets = append(trustedNets, ipNet)
+			}
+		} else {
+			if ip := net.ParseIP(item); ip != nil {
+				trustedIPs = append(trustedIPs, ip)
+			}
+		}
+	}
+}
+
+// ResetDefaultTrustedProxies restores the default loopback and TRUSTED_PROXIES configuration.
+func ResetDefaultTrustedProxies() {
+	trustedMu.Lock()
+	defer trustedMu.Unlock()
+	initDefaultTrustedProxies()
+}
+
+// IsTrustedProxy checks whether the given remote IP address matches a trusted reverse proxy.
+func IsTrustedProxy(remoteIP string) bool {
+	trustedInitOnce.Do(initDefaultTrustedProxies)
+
+	ip := net.ParseIP(strings.TrimSpace(remoteIP))
+	if ip == nil {
+		return false
+	}
+
+	trustedMu.RLock()
+	defer trustedMu.RUnlock()
+
+	for _, tip := range trustedIPs {
+		if tip.Equal(ip) {
+			return true
+		}
+	}
+	for _, tnet := range trustedNets {
+		if tnet.Contains(ip) {
+			return true
+		}
+	}
+	return false
+}
+
+// GetClientIP securely extracts and validates the client's real IP address.
+// Forwarding headers (CF-Connecting-IP, True-Client-IP, X-Forwarded-For) are trusted
+// ONLY if the direct connection originates from a verified reverse proxy (e.g. Cloudflare,
+// local loopback proxy, or addresses defined in TRUSTED_PROXIES).
+// Direct connections from untrusted hosts strictly fall back to the remote TCP socket address.
 func GetClientIP(r *http.Request) string {
 	if r == nil {
 		return "unknown"
 	}
+
+	trustedInitOnce.Do(initDefaultTrustedProxies)
+
+	// Determine direct remote IP
+	var directIP net.IP
+	if r.RemoteAddr != "" {
+		host, _, err := net.SplitHostPort(r.RemoteAddr)
+		if err == nil {
+			directIP = net.ParseIP(host)
+		} else {
+			directIP = net.ParseIP(r.RemoteAddr)
+		}
+	}
+
+	// If RemoteAddr was present, evaluate trusted proxy status
+	if directIP != nil {
+		if !IsTrustedProxy(directIP.String()) {
+			// Untrusted direct connection: strictly refuse client-provided forwarding headers!
+			return directIP.String()
+		}
+	}
+
+	// Connection originates from trusted proxy (or in-memory test request where RemoteAddr is empty):
+	// Inspect edge forwarding headers in prioritized order.
 
 	// 1. CF-Connecting-IP: Set by Cloudflare Edge proxy
 	if cfIP := strings.TrimSpace(r.Header.Get("CF-Connecting-IP")); cfIP != "" {
@@ -57,18 +178,9 @@ func GetClientIP(r *http.Request) string {
 		}
 	}
 
-	// 4. RemoteAddr: Fallback to direct TCP connection address
-	if r.RemoteAddr != "" {
-		host, _, err := net.SplitHostPort(r.RemoteAddr)
-		if err == nil {
-			if ip := net.ParseIP(host); ip != nil {
-				return ip.String()
-			}
-		} else {
-			if ip := net.ParseIP(r.RemoteAddr); ip != nil {
-				return ip.String()
-			}
-		}
+	// 4. Fallback to direct TCP connection address
+	if directIP != nil {
+		return directIP.String()
 	}
 
 	return "unknown"

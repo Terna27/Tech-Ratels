@@ -2178,6 +2178,136 @@ export interface PaginatedSnapshotsResponse {
   page_size: number;
 }
 
+export interface NextExpectedPeriod {
+  period_label: string;
+  period_type: "monthly" | "quarterly";
+  expected_date: string;
+  description: string;
+}
+
+export interface LastSchedulerRun {
+  run_identifier: string;
+  status: "running" | "completed" | "partial_failure" | "failed";
+  trigger_source: "scheduled" | "admin_manual" | "external_cron";
+  reporting_period: string;
+  started_at: string;
+  completed_at?: string;
+  reports_evaluated: number;
+  reports_generated: number;
+  reports_skipped: number;
+  reports_failed: number;
+  actor_type: string;
+  actor_name: string;
+}
+
+export interface AdminDashboardStats {
+  total_snapshots: number;
+  draft_reports: number;
+  pending_review_reports: number;
+  approved_reports: number;
+  published_reports: number;
+  withdrawn_reports: number;
+  failed_generation_attempts: number;
+  available_pdf_exports: number;
+  available_csv_exports: number;
+  last_scheduler_run?: LastSchedulerRun;
+  next_expected_period: NextExpectedPeriod;
+}
+
+export interface SchedulerRunItem {
+  id: string;
+  run_identifier: string;
+  trigger_source: "scheduled" | "admin_manual" | "external_cron";
+  reporting_period: string;
+  period_start: string;
+  period_end: string;
+  started_at: string;
+  completed_at?: string;
+  status: "running" | "completed" | "partial_failure" | "failed";
+  reports_evaluated: number;
+  reports_generated: number;
+  reports_skipped: number;
+  reports_failed: number;
+  generated_references: string[];
+  skipped_reasons: Record<string, string>;
+  error_details: string[];
+  actor_type: string;
+  actor_user_id?: string;
+  actor_name: string;
+  created_at: string;
+}
+
+export interface PaginatedSchedulerRunsResponse {
+  runs: SchedulerRunItem[];
+  total_count: number;
+  page: number;
+  page_size: number;
+}
+
+export interface AdminExportItem {
+  id: string;
+  snapshot_id: string;
+  public_reference: string;
+  report_title: string;
+  report_type: string;
+  reporting_period: string;
+  snapshot_status: string;
+  export_format: "pdf" | "csv";
+  file_name: string;
+  file_size_bytes: number;
+  mime_type: string;
+  checksum_algorithm: string;
+  content_hash: string;
+  export_status: "generated" | "withdrawn" | "revoked";
+  storage_verified: boolean;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface PaginatedAdminExportsResponse {
+  exports: AdminExportItem[];
+  total_count: number;
+  page: number;
+  page_size: number;
+}
+
+export interface PaginatedAuditsResponse {
+  audits: ReportAuditItem[];
+  total_count: number;
+  page: number;
+  page_size: number;
+}
+
+export interface RunSchedulerPayload {
+  target_period?: string;
+  period_type?: "monthly" | "quarterly" | "both";
+  report_type?: string;
+  scope_type?: string;
+  zone_id?: string;
+  state_id?: string;
+  lga_id?: string;
+}
+
+export interface SchedulerRunResult {
+  run_id?: string;
+  run_identifier?: string;
+  status?: string;
+  started_at?: string;
+  completed_at?: string;
+  period_label: string;
+  period_start: string;
+  period_end: string;
+  periods_evaluated?: string[];
+  reports_evaluated: number;
+  reports_generated: number;
+  reports_skipped: number;
+  reports_failed: number;
+  generated_references: string[];
+  skipped_reasons: Record<string, string>;
+  errors: string[];
+  lock_acquired: boolean;
+}
+
 
 
 

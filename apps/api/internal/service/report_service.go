@@ -288,6 +288,106 @@ type PaginatedPublicationsResponse struct {
 	PageSize     int32                  `json:"page_size"`
 }
 
+type NextExpectedPeriodDTO struct {
+	PeriodLabel  string    `json:"period_label"`
+	PeriodType   string    `json:"period_type"` // "monthly", "quarterly"
+	ExpectedDate time.Time `json:"expected_date"`
+	Description  string    `json:"description"`
+}
+
+type LastSchedulerRunDTO struct {
+	RunIdentifier    string     `json:"run_identifier"`
+	Status           string     `json:"status"`
+	TriggerSource    string     `json:"trigger_source"`
+	ReportingPeriod  string     `json:"reporting_period"`
+	StartedAt        time.Time  `json:"started_at"`
+	CompletedAt      *time.Time `json:"completed_at,omitempty"`
+	ReportsEvaluated int        `json:"reports_evaluated"`
+	ReportsGenerated int        `json:"reports_generated"`
+	ReportsSkipped   int        `json:"reports_skipped"`
+	ReportsFailed    int        `json:"reports_failed"`
+	ActorType        string     `json:"actor_type"`
+	ActorName        string     `json:"actor_name"`
+}
+
+type AdminDashboardStatsDTO struct {
+	TotalSnapshots           int64                 `json:"total_snapshots"`
+	DraftReports             int64                 `json:"draft_reports"`
+	PendingReviewReports     int64                 `json:"pending_review_reports"`
+	ApprovedReports          int64                 `json:"approved_reports"`
+	PublishedReports         int64                 `json:"published_reports"`
+	WithdrawnReports         int64                 `json:"withdrawn_reports"`
+	FailedGenerationAttempts int64                 `json:"failed_generation_attempts"`
+	AvailablePdfExports      int64                 `json:"available_pdf_exports"`
+	AvailableCsvExports      int64                 `json:"available_csv_exports"`
+	LastSchedulerRun         *LastSchedulerRunDTO  `json:"last_scheduler_run,omitempty"`
+	NextExpectedPeriod       NextExpectedPeriodDTO `json:"next_expected_period"`
+}
+
+type SchedulerRunDTO struct {
+	ID                  string          `json:"id"`
+	RunIdentifier       string          `json:"run_identifier"`
+	TriggerSource       string          `json:"trigger_source"`
+	ReportingPeriod     string          `json:"reporting_period"`
+	PeriodStart         string          `json:"period_start"`
+	PeriodEnd           string          `json:"period_end"`
+	StartedAt           time.Time       `json:"started_at"`
+	CompletedAt         *time.Time      `json:"completed_at,omitempty"`
+	Status              string          `json:"status"`
+	ReportsEvaluated    int             `json:"reports_evaluated"`
+	ReportsGenerated    int             `json:"reports_generated"`
+	ReportsSkipped      int             `json:"reports_skipped"`
+	ReportsFailed       int             `json:"reports_failed"`
+	GeneratedReferences []string        `json:"generated_references"`
+	SkippedReasons      json.RawMessage `json:"skipped_reasons"`
+	ErrorDetails        json.RawMessage `json:"error_details"`
+	ActorType           string          `json:"actor_type"`
+	ActorUserID         *string         `json:"actor_user_id,omitempty"`
+	ActorName           string          `json:"actor_name"`
+	CreatedAt           time.Time       `json:"created_at"`
+}
+
+type PaginatedSchedulerRunsResponse struct {
+	Runs       []SchedulerRunDTO `json:"runs"`
+	TotalCount int64             `json:"total_count"`
+	Page       int32             `json:"page"`
+	PageSize   int32             `json:"page_size"`
+}
+
+type AdminExportListItemDTO struct {
+	ID                string    `json:"id"`
+	SnapshotID        string    `json:"snapshot_id"`
+	PublicReference   string    `json:"public_reference"`
+	ReportTitle       string    `json:"report_title"`
+	ReportType        string    `json:"report_type"`
+	ReportingPeriod   string    `json:"reporting_period"`
+	SnapshotStatus    string    `json:"snapshot_status"`
+	ExportFormat      string    `json:"export_format"` // "pdf" or "csv"
+	FileName          string    `json:"file_name"`
+	FileSizeBytes     int64     `json:"file_size_bytes"`
+	MimeType          string    `json:"mime_type"`
+	ChecksumAlgorithm string    `json:"checksum_algorithm"`
+	ContentHash       string    `json:"content_hash"`
+	ExportStatus      string    `json:"export_status"`
+	StorageVerified   bool      `json:"storage_verified"`
+	CreatedAt         time.Time `json:"created_at"`
+	UpdatedAt         time.Time `json:"updated_at"`
+}
+
+type PaginatedAdminExportsResponse struct {
+	Exports    []AdminExportListItemDTO `json:"exports"`
+	TotalCount int64                    `json:"total_count"`
+	Page       int32                    `json:"page"`
+	PageSize   int32                    `json:"page_size"`
+}
+
+type PaginatedAuditsResponse struct {
+	Audits     []ReportAuditItem `json:"audits"`
+	TotalCount int64             `json:"total_count"`
+	Page       int32             `json:"page"`
+	PageSize   int32             `json:"page_size"`
+}
+
 // Service definition
 type ReportService struct {
 	repo          *repository.Repository
@@ -2602,4 +2702,567 @@ func (s *ReportService) GetPublicCommunityProjects(ctx context.Context, stateID,
 
 func (s *ReportService) GetSettingsDefinitions(ctx context.Context) ([]db.PublicReportDefinition, error) {
 	return s.repo.Queries().ListReportDefinitions(ctx)
+}
+
+// -----------------------------------------------------------------------
+// Task E: Dashboard Statistics, Scheduler Run History, Export Management, and Audit
+// -----------------------------------------------------------------------
+
+func (s *ReportService) GetAdminDashboardStats(ctx context.Context) (*AdminDashboardStatsDTO, error) {
+	snapCounts, err := s.repo.Queries().GetReportSnapshotCountsByStatus(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("failed retrieving snapshot counts: %w", err)
+	}
+
+	expCounts, err := s.repo.Queries().GetReportExportCountsByFormat(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("failed retrieving export counts: %w", err)
+	}
+
+	failedRuns, _ := s.repo.Queries().CountFailedSchedulerRuns(ctx)
+	failedAudits, _ := s.repo.Queries().CountFailedAuditAttempts(ctx)
+	totalFailed := failedRuns
+	if failedAudits > totalFailed {
+		totalFailed = failedAudits
+	}
+
+	var lastRunDTO *LastSchedulerRunDTO
+	latestRun, err := s.repo.Queries().GetLatestSchedulerRun(ctx)
+	if err == nil {
+		var compAt *time.Time
+		if latestRun.CompletedAt.Valid {
+			t := latestRun.CompletedAt.Time
+			compAt = &t
+		}
+		actorName := "System"
+		if latestRun.ActorName.Valid && latestRun.ActorName.String != "" {
+			actorName = latestRun.ActorName.String
+		}
+		lastRunDTO = &LastSchedulerRunDTO{
+			RunIdentifier:    latestRun.RunIdentifier,
+			Status:           latestRun.Status,
+			TriggerSource:    latestRun.TriggerSource,
+			ReportingPeriod:  latestRun.ReportingPeriod,
+			StartedAt:        latestRun.StartedAt.Time,
+			CompletedAt:      compAt,
+			ReportsEvaluated: int(latestRun.ReportsEvaluated),
+			ReportsGenerated: int(latestRun.ReportsGenerated),
+			ReportsSkipped:   int(latestRun.ReportsSkipped),
+			ReportsFailed:    int(latestRun.ReportsFailed),
+			ActorType:        latestRun.ActorType,
+			ActorName:        actorName,
+		}
+	}
+
+	// Calculate next expected reporting period
+	now := time.Now().UTC()
+	nextExpectedLabel := now.Format("2006-01")
+	firstOfNextMonth := time.Date(now.Year(), now.Month()+1, 1, 0, 0, 0, 0, time.UTC)
+	nextExpectedPeriod := NextExpectedPeriodDTO{
+		PeriodLabel:  nextExpectedLabel,
+		PeriodType:   "monthly",
+		ExpectedDate: firstOfNextMonth,
+		Description:  fmt.Sprintf("Next scheduled automated cycle for monthly reporting period %s (closes %s)", nextExpectedLabel, firstOfNextMonth.Add(-time.Second).Format("2006-01-02")),
+	}
+
+	return &AdminDashboardStatsDTO{
+		TotalSnapshots:           snapCounts.TotalSnapshots,
+		DraftReports:             snapCounts.DraftCount,
+		PendingReviewReports:     snapCounts.PendingReviewCount,
+		ApprovedReports:          snapCounts.ApprovedCount,
+		PublishedReports:         snapCounts.PublishedCount,
+		WithdrawnReports:         snapCounts.WithdrawnCount,
+		FailedGenerationAttempts: totalFailed,
+		AvailablePdfExports:      expCounts.AvailablePdfCount,
+		AvailableCsvExports:      expCounts.AvailableCsvCount,
+		LastSchedulerRun:         lastRunDTO,
+		NextExpectedPeriod:       nextExpectedPeriod,
+	}, nil
+}
+
+func (s *ReportService) ListSchedulerRuns(
+	ctx context.Context,
+	status, reportingPeriod, triggerSource *string,
+	fromDate, toDate *time.Time,
+	page, pageSize int32,
+) (*PaginatedSchedulerRunsResponse, error) {
+	if page < 1 {
+		page = 1
+	}
+	if pageSize < 1 || pageSize > 100 {
+		pageSize = 20
+	}
+	offset := (page - 1) * pageSize
+
+	var stPg, repPg, trgPg pgtype.Text
+	if status != nil && strings.TrimSpace(*status) != "" && *status != "all" {
+		stPg = pgtype.Text{String: strings.TrimSpace(*status), Valid: true}
+	}
+	if reportingPeriod != nil && strings.TrimSpace(*reportingPeriod) != "" && *reportingPeriod != "all" {
+		repPg = pgtype.Text{String: strings.TrimSpace(*reportingPeriod), Valid: true}
+	}
+	if triggerSource != nil && strings.TrimSpace(*triggerSource) != "" && *triggerSource != "all" {
+		trgPg = pgtype.Text{String: strings.TrimSpace(*triggerSource), Valid: true}
+	}
+
+	var fromPg, toPg pgtype.Timestamptz
+	if fromDate != nil {
+		fromPg = pgtype.Timestamptz{Time: *fromDate, Valid: true}
+	}
+	if toDate != nil {
+		toPg = pgtype.Timestamptz{Time: *toDate, Valid: true}
+	}
+
+	rows, err := s.repo.Queries().ListSchedulerRuns(ctx, db.ListSchedulerRunsParams{
+		Status:          stPg,
+		ReportingPeriod: repPg,
+		TriggerSource:   trgPg,
+		FromDate:        fromPg,
+		ToDate:          toPg,
+		LimitCount:      pageSize,
+		OffsetCount:     offset,
+	})
+	if err != nil {
+		return nil, fmt.Errorf("failed listing scheduler runs: %w", err)
+	}
+
+	totalCount, err := s.repo.Queries().CountSchedulerRuns(ctx, db.CountSchedulerRunsParams{
+		Status:          stPg,
+		ReportingPeriod: repPg,
+		TriggerSource:   trgPg,
+		FromDate:        fromPg,
+		ToDate:          toPg,
+	})
+	if err != nil {
+		return nil, fmt.Errorf("failed counting scheduler runs: %w", err)
+	}
+
+	dtos := make([]SchedulerRunDTO, len(rows))
+	for i, r := range rows {
+		var compAt *time.Time
+		if r.CompletedAt.Valid {
+			t := r.CompletedAt.Time
+			compAt = &t
+		}
+		var actorID *string
+		if r.ActorUserID.Valid && r.ActorUserID.String != "" {
+			id := r.ActorUserID.String
+			actorID = &id
+		}
+		actorName := "System"
+		if r.ActorName.Valid && r.ActorName.String != "" {
+			actorName = r.ActorName.String
+		}
+
+		var genRefs []string
+		_ = json.Unmarshal(r.GeneratedReferences, &genRefs)
+		if genRefs == nil {
+			genRefs = []string{}
+		}
+
+		dtos[i] = SchedulerRunDTO{
+			ID:                  r.ID,
+			RunIdentifier:       r.RunIdentifier,
+			TriggerSource:       r.TriggerSource,
+			ReportingPeriod:     r.ReportingPeriod,
+			PeriodStart:         r.PeriodStart.Time.Format("2006-01-02"),
+			PeriodEnd:           r.PeriodEnd.Time.Format("2006-01-02"),
+			StartedAt:           r.StartedAt.Time,
+			CompletedAt:         compAt,
+			Status:              r.Status,
+			ReportsEvaluated:    int(r.ReportsEvaluated),
+			ReportsGenerated:    int(r.ReportsGenerated),
+			ReportsSkipped:      int(r.ReportsSkipped),
+			ReportsFailed:       int(r.ReportsFailed),
+			GeneratedReferences: genRefs,
+			SkippedReasons:      r.SkippedReasons,
+			ErrorDetails:        r.ErrorDetails,
+			ActorType:           r.ActorType,
+			ActorUserID:         actorID,
+			ActorName:           actorName,
+			CreatedAt:           r.CreatedAt.Time,
+		}
+	}
+
+	return &PaginatedSchedulerRunsResponse{
+		Runs:       dtos,
+		TotalCount: totalCount,
+		Page:       page,
+		PageSize:   pageSize,
+	}, nil
+}
+
+func (s *ReportService) GetSchedulerRunDetail(ctx context.Context, idOrIdentifier string) (*SchedulerRunDTO, error) {
+	cleanID := strings.TrimSpace(idOrIdentifier)
+	var r db.PublicReportSchedulerRun
+	var err error
+
+	if strings.HasPrefix(cleanID, "SCHED-") {
+		r, err = s.repo.Queries().GetSchedulerRunByIdentifier(ctx, cleanID)
+	} else {
+		r, err = s.repo.Queries().GetSchedulerRunByID(ctx, cleanID)
+		if err != nil && strings.Contains(cleanID, "-") {
+			r, err = s.repo.Queries().GetSchedulerRunByIdentifier(ctx, cleanID)
+		}
+	}
+	if err != nil {
+		return nil, fmt.Errorf("scheduler run not found: %w", err)
+	}
+
+	var compAt *time.Time
+	if r.CompletedAt.Valid {
+		t := r.CompletedAt.Time
+		compAt = &t
+	}
+	var actorID *string
+	if r.ActorUserID.Valid && r.ActorUserID.String != "" {
+		id := r.ActorUserID.String
+		actorID = &id
+	}
+	actorName := "System"
+	if r.ActorName.Valid && r.ActorName.String != "" {
+		actorName = r.ActorName.String
+	}
+
+	var genRefs []string
+	_ = json.Unmarshal(r.GeneratedReferences, &genRefs)
+	if genRefs == nil {
+		genRefs = []string{}
+	}
+
+	return &SchedulerRunDTO{
+		ID:                  r.ID,
+		RunIdentifier:       r.RunIdentifier,
+		TriggerSource:       r.TriggerSource,
+		ReportingPeriod:     r.ReportingPeriod,
+		PeriodStart:         r.PeriodStart.Time.Format("2006-01-02"),
+		PeriodEnd:           r.PeriodEnd.Time.Format("2006-01-02"),
+		StartedAt:           r.StartedAt.Time,
+		CompletedAt:         compAt,
+		Status:              r.Status,
+		ReportsEvaluated:    int(r.ReportsEvaluated),
+		ReportsGenerated:    int(r.ReportsGenerated),
+		ReportsSkipped:      int(r.ReportsSkipped),
+		ReportsFailed:       int(r.ReportsFailed),
+		GeneratedReferences: genRefs,
+		SkippedReasons:      r.SkippedReasons,
+		ErrorDetails:        r.ErrorDetails,
+		ActorType:           r.ActorType,
+		ActorUserID:         actorID,
+		ActorName:           actorName,
+		CreatedAt:           r.CreatedAt.Time,
+	}, nil
+}
+
+func (s *ReportService) ListReportExportsAdmin(
+	ctx context.Context,
+	exportFormat, exportStatus, snapshotID *string,
+	page, pageSize int32,
+) (*PaginatedAdminExportsResponse, error) {
+	if page < 1 {
+		page = 1
+	}
+	if pageSize < 1 || pageSize > 100 {
+		pageSize = 20
+	}
+	offset := (page - 1) * pageSize
+
+	var fmtPg, stPg, snapPg pgtype.Text
+	if exportFormat != nil && strings.TrimSpace(*exportFormat) != "" && *exportFormat != "all" {
+		fmtPg = pgtype.Text{String: strings.ToLower(strings.TrimSpace(*exportFormat)), Valid: true}
+	}
+	if exportStatus != nil && strings.TrimSpace(*exportStatus) != "" && *exportStatus != "all" {
+		stPg = pgtype.Text{String: strings.ToLower(strings.TrimSpace(*exportStatus)), Valid: true}
+	}
+	if snapshotID != nil && strings.TrimSpace(*snapshotID) != "" {
+		snapPg = pgtype.Text{String: strings.TrimSpace(*snapshotID), Valid: true}
+	}
+
+	rows, err := s.repo.Queries().ListReportExportsAdmin(ctx, db.ListReportExportsAdminParams{
+		ExportFormat: fmtPg,
+		ExportStatus: stPg,
+		SnapshotID:   snapPg,
+		LimitCount:   pageSize,
+		OffsetCount:  offset,
+	})
+	if err != nil {
+		return nil, fmt.Errorf("failed listing report exports: %w", err)
+	}
+
+	totalCount, err := s.repo.Queries().CountReportExportsAdmin(ctx, db.CountReportExportsAdminParams{
+		ExportFormat: fmtPg,
+		ExportStatus: stPg,
+		SnapshotID:   snapPg,
+	})
+	if err != nil {
+		return nil, fmt.Errorf("failed counting report exports: %w", err)
+	}
+
+	dtos := make([]AdminExportListItemDTO, len(rows))
+	for i, r := range rows {
+		storageVerified := false
+		if r.ExportStatus == "generated" && r.StorageReference.Valid && r.StorageReference.String != "" {
+			// Verify file exists in private storage without leaking raw storage key
+			if _, checkErr := s.exportStorage.ReadExport(ctx, r.StorageReference.String); checkErr == nil {
+				storageVerified = true
+			}
+		}
+
+		dtos[i] = AdminExportListItemDTO{
+			ID:                r.ID,
+			SnapshotID:        r.SnapshotID,
+			PublicReference:   r.PublicReference,
+			ReportTitle:       r.ReportTitle,
+			ReportType:        r.ReportType,
+			ReportingPeriod:   r.ReportingPeriod,
+			SnapshotStatus:    r.SnapshotStatus,
+			ExportFormat:      r.ExportFormat,
+			FileName:          r.FileName,
+			FileSizeBytes:     r.FileSizeBytes,
+			MimeType:          r.MimeType,
+			ChecksumAlgorithm: r.ChecksumAlgorithm,
+			ContentHash:       r.ContentHash,
+			ExportStatus:      r.ExportStatus,
+			StorageVerified:   storageVerified,
+			CreatedAt:         r.CreatedAt.Time,
+			UpdatedAt:         r.UpdatedAt.Time,
+		}
+	}
+
+	return &PaginatedAdminExportsResponse{
+		Exports:    dtos,
+		TotalCount: totalCount,
+		Page:       page,
+		PageSize:   pageSize,
+	}, nil
+}
+
+func (s *ReportService) RegenerateReportExport(
+	ctx context.Context,
+	actor *db.User,
+	snapshotID string,
+	format string,
+	ipAddress *string,
+) (*AdminExportListItemDTO, error) {
+	if actor == nil {
+		return nil, errors.New("unauthorized: actor required for export regeneration")
+	}
+	if actor.PrimaryRole != "super_admin" && actor.PrimaryRole != "national_admin" {
+		return nil, errors.New("forbidden: only national administrators and super admins may regenerate exports")
+	}
+
+	cleanFormat := strings.ToLower(strings.TrimSpace(format))
+	if cleanFormat != "pdf" && cleanFormat != "csv" {
+		return nil, ErrUnsupportedExportFormat
+	}
+
+	snap, err := s.repo.Queries().GetReportSnapshotByID(ctx, snapshotID)
+	if err != nil {
+		return nil, ErrReportSnapshotNotFound
+	}
+
+	if snap.Status == "withdrawn" {
+		return nil, ErrReportWithdrawn
+	}
+	if snap.Status == "rejected" {
+		return nil, ErrReportRejected
+	}
+
+	// Generate export bytes fresh
+	var exportBytes []byte
+	var mimeType string
+	var fileName string
+
+	if cleanFormat == "pdf" {
+		pdfData, err := s.buildPDFDataFromSnapshot(&snap)
+		if err != nil {
+			return nil, fmt.Errorf("failed building PDF data: %w", err)
+		}
+		exportBytes, err = GeneratePDF(pdfData)
+		if err != nil {
+			return nil, fmt.Errorf("failed generating PDF: %w", err)
+		}
+		mimeType = "application/pdf"
+		fileName = fmt.Sprintf("Ratels-Report-%s-%s.pdf", snap.ReportType, snap.PublicReference)
+	} else {
+		csvData, err := s.buildCSVDataFromSnapshot(&snap)
+		if err != nil {
+			return nil, fmt.Errorf("failed building CSV data: %w", err)
+		}
+		exportBytes, err = GenerateCSV(csvData)
+		if err != nil {
+			return nil, fmt.Errorf("failed generating CSV: %w", err)
+		}
+		mimeType = "text/csv; charset=utf-8"
+		fileName = fmt.Sprintf("Ratels-Report-%s-%s.csv", snap.ReportType, snap.PublicReference)
+	}
+
+	// Store in private storage
+	storageKey, uploadedHash, actualSize, err := s.exportStorage.StoreExport(ctx, snapshotID, cleanFormat, fileName, mimeType, exportBytes)
+	if err != nil {
+		return nil, fmt.Errorf("failed storing regenerated export: %w", err)
+	}
+
+	// Verify storage integrity
+	verifyBytes, err := s.exportStorage.ReadExport(ctx, storageKey)
+	if err != nil || int64(len(verifyBytes)) != actualSize {
+		_ = s.exportStorage.DeleteExport(ctx, storageKey)
+		return nil, fmt.Errorf("integrity verification failed after regeneration")
+	}
+
+	exportID := security.GenerateUUID()
+	upserted, err := s.repo.Queries().UpsertReportExport(ctx, db.UpsertReportExportParams{
+		ID:                exportID,
+		SnapshotID:        snapshotID,
+		ExportFormat:      cleanFormat,
+		FileName:          fileName,
+		FileSizeBytes:     actualSize,
+		MimeType:          mimeType,
+		ChecksumAlgorithm: "sha256",
+		ContentHash:       uploadedHash,
+		StorageReference:  pgtype.Text{String: storageKey, Valid: true},
+		ExportStatus:      "generated",
+	})
+	if err != nil {
+		_ = s.exportStorage.DeleteExport(ctx, storageKey)
+		return nil, fmt.Errorf("failed persisting regenerated export metadata: %w", err)
+	}
+
+	// Audit trail record
+	detailsJSON, _ := json.Marshal(map[string]interface{}{
+		"export_format": cleanFormat,
+		"file_name":     fileName,
+		"file_size":     actualSize,
+		"content_hash":  uploadedHash,
+		"regenerated":   true,
+	})
+	var ipPg pgtype.Text
+	if ipAddress != nil {
+		ipPg = pgtype.Text{String: *ipAddress, Valid: true}
+	}
+	_, _ = s.repo.Queries().CreateReportAudit(ctx, db.CreateReportAuditParams{
+		ID:                security.GenerateUUID(),
+		SnapshotID:        pgtype.Text{String: snapshotID, Valid: true},
+		Action:            "export_regenerated",
+		PerformedByUserID: pgtype.Text{String: actor.ID, Valid: true},
+		Details:           detailsJSON,
+		IpAddress:         ipPg,
+	})
+
+	return &AdminExportListItemDTO{
+		ID:                upserted.ID,
+		SnapshotID:        upserted.SnapshotID,
+		PublicReference:   snap.PublicReference,
+		ReportTitle:       snap.Title,
+		ReportType:        snap.ReportType,
+		ReportingPeriod:   snap.ReportingPeriod,
+		SnapshotStatus:    snap.Status,
+		ExportFormat:      upserted.ExportFormat,
+		FileName:          upserted.FileName,
+		FileSizeBytes:     upserted.FileSizeBytes,
+		MimeType:          upserted.MimeType,
+		ChecksumAlgorithm: upserted.ChecksumAlgorithm,
+		ContentHash:       upserted.ContentHash,
+		ExportStatus:      upserted.ExportStatus,
+		StorageVerified:   true,
+		CreatedAt:         upserted.CreatedAt.Time,
+		UpdatedAt:         upserted.UpdatedAt.Time,
+	}, nil
+}
+
+func (s *ReportService) ListReportAuditsEnhanced(
+	ctx context.Context,
+	snapshotID, action *string,
+	fromDate, toDate *time.Time,
+	page, pageSize int32,
+) (*PaginatedAuditsResponse, error) {
+	if page < 1 {
+		page = 1
+	}
+	if pageSize < 1 || pageSize > 100 {
+		pageSize = 20
+	}
+	offset := (page - 1) * pageSize
+
+	var snapPg, actPg pgtype.Text
+	if snapshotID != nil && strings.TrimSpace(*snapshotID) != "" {
+		snapPg = pgtype.Text{String: strings.TrimSpace(*snapshotID), Valid: true}
+	}
+	if action != nil && strings.TrimSpace(*action) != "" && *action != "all" {
+		actPg = pgtype.Text{String: strings.TrimSpace(*action), Valid: true}
+	}
+
+	var fromPg, toPg pgtype.Timestamptz
+	if fromDate != nil {
+		fromPg = pgtype.Timestamptz{Time: *fromDate, Valid: true}
+	}
+	if toDate != nil {
+		toPg = pgtype.Timestamptz{Time: *toDate, Valid: true}
+	}
+
+	rows, err := s.repo.Queries().ListReportAuditsWithFilters(ctx, db.ListReportAuditsWithFiltersParams{
+		SnapshotID:  snapPg,
+		Action:      actPg,
+		FromDate:    fromPg,
+		ToDate:      toPg,
+		LimitCount:  pageSize,
+		OffsetCount: offset,
+	})
+	if err != nil {
+		return nil, fmt.Errorf("failed listing report audits: %w", err)
+	}
+
+	totalCount, err := s.repo.Queries().CountReportAuditsWithFilters(ctx, db.CountReportAuditsWithFiltersParams{
+		SnapshotID: snapPg,
+		Action:     actPg,
+		FromDate:   fromPg,
+		ToDate:     toPg,
+	})
+	if err != nil {
+		return nil, fmt.Errorf("failed counting report audits: %w", err)
+	}
+
+	dtos := make([]ReportAuditItem, len(rows))
+	for i, r := range rows {
+		var snapID, pByID, aName, aEmail, ipAddr *string
+		if r.SnapshotID.Valid {
+			v := r.SnapshotID.String
+			snapID = &v
+		}
+		if r.PerformedByUserID.Valid {
+			v := r.PerformedByUserID.String
+			pByID = &v
+		}
+		if r.ActorName.Valid {
+			v := r.ActorName.String
+			aName = &v
+		}
+		if r.ActorEmail.Valid {
+			v := r.ActorEmail.String
+			aEmail = &v
+		}
+		if r.IpAddress.Valid {
+			v := r.IpAddress.String
+			ipAddr = &v
+		}
+
+		dtos[i] = ReportAuditItem{
+			ID:            r.ID,
+			SnapshotID:    snapID,
+			Action:        r.Action,
+			PerformedByID: pByID,
+			ActorName:     aName,
+			ActorEmail:    aEmail,
+			Details:       r.Details,
+			IPAddress:     ipAddr,
+			CreatedAt:     r.CreatedAt.Time,
+		}
+	}
+
+	return &PaginatedAuditsResponse{
+		Audits:     dtos,
+		TotalCount: totalCount,
+		Page:       page,
+		PageSize:   pageSize,
+	}, nil
 }

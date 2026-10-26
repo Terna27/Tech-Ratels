@@ -27,6 +27,7 @@ import {
   FileText,
   Boxes,
   Lock,
+  Settings,
 } from "lucide-react";
 
 interface SidebarProps {
@@ -144,13 +145,15 @@ export function Sidebar({
       title: "Administration",
       requiresCoordinator: true,
       items: [
-        { href: "/admin", label: "Admin Overview", icon: LayoutDashboard, exact: true },
-        { href: "/admin/activities", label: "Cleanups & Squads", icon: Calendar },
-        { href: "/admin/finance", label: "Finances & Ledger", icon: FileText },
+        { href: "/admin", label: "Overview", icon: LayoutDashboard, exact: true },
+        { href: "/admin/reviews", label: "Members", icon: Users },
+        { href: "/admin/leadership", label: "Leadership", icon: Shield },
+        { href: "/admin/activities", label: "Activities", icon: Calendar },
+        { href: "/admin/finance", label: "Finance", icon: FileText },
+        { href: "/admin/reports", label: "Reports & Transparency", icon: BarChart3 },
         { href: "/admin/inventory", label: "Supply Chain & Warehouses", icon: Boxes },
-        { href: "/admin/leadership", label: "Appointments & Roles", icon: Shield },
         { href: "/admin/safeguarding", label: "Safeguarding Cases", icon: ShieldAlert, badge: "Restricted" },
-        { href: "/admin/reports", label: "Transparency Reports", icon: BarChart3 },
+        { href: "/admin/audit", label: "System Settings", icon: Settings },
       ],
     },
   ];

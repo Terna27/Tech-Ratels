@@ -793,11 +793,29 @@ func (h *ReportHandler) ReviseSnapshotAdmin(w http.ResponseWriter, r *http.Reque
 
 func (h *ReportHandler) ListAuditsAdmin(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
-	snapshotID := r.URL.Query().Get("snapshot_id")
-
-	var snapPtr *string
-	if snapshotID != "" {
+	var snapPtr, actPtr *string
+	if snapshotID := r.URL.Query().Get("snapshot_id"); snapshotID != "" {
 		snapPtr = &snapshotID
+	}
+	if action := r.URL.Query().Get("action"); action != "" {
+		actPtr = &action
+	}
+
+	var fromDate, toDate *time.Time
+	if fd := r.URL.Query().Get("from_date"); fd != "" {
+		if t, err := time.Parse(time.RFC3339, fd); err == nil {
+			fromDate = &t
+		} else if t, err := time.Parse("2006-01-02", fd); err == nil {
+			fromDate = &t
+		}
+	}
+	if td := r.URL.Query().Get("to_date"); td != "" {
+		if t, err := time.Parse(time.RFC3339, td); err == nil {
+			toDate = &t
+		} else if t, err := time.Parse("2006-01-02", td); err == nil {
+			t = t.Add(24*time.Hour - time.Nanosecond)
+			toDate = &t
+		}
 	}
 
 	page := int32(1)
@@ -807,14 +825,208 @@ func (h *ReportHandler) ListAuditsAdmin(w http.ResponseWriter, r *http.Request) 
 			page = int32(pVal)
 		}
 	}
+	if psStr := r.URL.Query().Get("page_size"); psStr != "" {
+		if psVal, err := strconv.Atoi(psStr); err == nil && psVal > 0 {
+			pageSize = int32(psVal)
+		}
+	}
 
-	res, err := h.reportService.ListReportAudits(ctx, snapPtr, page, pageSize)
+	res, err := h.reportService.ListReportAuditsEnhanced(ctx, snapPtr, actPtr, fromDate, toDate, page, pageSize)
 	if err != nil {
 		ErrorJSON(w, http.StatusInternalServerError, "INTERNAL_ERROR", "Failed listing report audit history", err.Error())
 		return
 	}
 
 	JSON(w, http.StatusOK, res)
+}
+
+func (h *ReportHandler) GetDashboardStats(w http.ResponseWriter, r *http.Request) {
+	ctx := r.Context()
+	stats, err := h.reportService.GetAdminDashboardStats(ctx)
+	if err != nil {
+		ErrorJSON(w, http.StatusInternalServerError, "INTERNAL_ERROR", "Failed retrieving admin dashboard statistics", err.Error())
+		return
+	}
+	JSON(w, http.StatusOK, stats)
+}
+
+func (h *ReportHandler) ListSchedulerRuns(w http.ResponseWriter, r *http.Request) {
+	ctx := r.Context()
+	var stPtr, repPtr, trgPtr *string
+	if st := r.URL.Query().Get("status"); st != "" {
+		stPtr = &st
+	}
+	if rep := r.URL.Query().Get("reporting_period"); rep != "" {
+		repPtr = &rep
+	}
+	if trg := r.URL.Query().Get("trigger_source"); trg != "" {
+		trgPtr = &trg
+	}
+
+	var fromDate, toDate *time.Time
+	if fd := r.URL.Query().Get("from_date"); fd != "" {
+		if t, err := time.Parse(time.RFC3339, fd); err == nil {
+			fromDate = &t
+		} else if t, err := time.Parse("2006-01-02", fd); err == nil {
+			fromDate = &t
+		}
+	}
+	if td := r.URL.Query().Get("to_date"); td != "" {
+		if t, err := time.Parse(time.RFC3339, td); err == nil {
+			toDate = &t
+		} else if t, err := time.Parse("2006-01-02", td); err == nil {
+			t = t.Add(24*time.Hour - time.Nanosecond)
+			toDate = &t
+		}
+	}
+
+	page := int32(1)
+	pageSize := int32(20)
+	if pStr := r.URL.Query().Get("page"); pStr != "" {
+		if pVal, err := strconv.Atoi(pStr); err == nil && pVal > 0 {
+			page = int32(pVal)
+		}
+	}
+	if psStr := r.URL.Query().Get("page_size"); psStr != "" {
+		if psVal, err := strconv.Atoi(psStr); err == nil && psVal > 0 {
+			pageSize = int32(psVal)
+		}
+	}
+
+	res, err := h.reportService.ListSchedulerRuns(ctx, stPtr, repPtr, trgPtr, fromDate, toDate, page, pageSize)
+	if err != nil {
+		ErrorJSON(w, http.StatusInternalServerError, "INTERNAL_ERROR", "Failed listing scheduler runs", err.Error())
+		return
+	}
+	JSON(w, http.StatusOK, res)
+}
+
+func (h *ReportHandler) GetSchedulerRun(w http.ResponseWriter, r *http.Request) {
+	ctx := r.Context()
+	id := chi.URLParam(r, "id")
+	if id == "" {
+		ErrorJSON(w, http.StatusBadRequest, "INVALID_INPUT", "run ID is required", nil)
+		return
+	}
+
+	run, err := h.reportService.GetSchedulerRunDetail(ctx, id)
+	if err != nil {
+		ErrorJSON(w, http.StatusNotFound, "NOT_FOUND", "Scheduler run not found", err.Error())
+		return
+	}
+	JSON(w, http.StatusOK, run)
+}
+
+func (h *ReportHandler) ListExportsAdmin(w http.ResponseWriter, r *http.Request) {
+	ctx := r.Context()
+	var fmtPtr, stPtr, snapPtr *string
+	if f := r.URL.Query().Get("format"); f != "" {
+		fmtPtr = &f
+	}
+	if st := r.URL.Query().Get("status"); st != "" {
+		stPtr = &st
+	}
+	if snap := r.URL.Query().Get("snapshot_id"); snap != "" {
+		snapPtr = &snap
+	}
+
+	page := int32(1)
+	pageSize := int32(20)
+	if pStr := r.URL.Query().Get("page"); pStr != "" {
+		if pVal, err := strconv.Atoi(pStr); err == nil && pVal > 0 {
+			page = int32(pVal)
+		}
+	}
+	if psStr := r.URL.Query().Get("page_size"); psStr != "" {
+		if psVal, err := strconv.Atoi(psStr); err == nil && psVal > 0 {
+			pageSize = int32(psVal)
+		}
+	}
+
+	res, err := h.reportService.ListReportExportsAdmin(ctx, fmtPtr, stPtr, snapPtr, page, pageSize)
+	if err != nil {
+		ErrorJSON(w, http.StatusInternalServerError, "INTERNAL_ERROR", "Failed listing report exports", err.Error())
+		return
+	}
+	JSON(w, http.StatusOK, res)
+}
+
+func (h *ReportHandler) RegenerateExportAdmin(w http.ResponseWriter, r *http.Request) {
+	ctx := r.Context()
+	user := GetCurrentUser(ctx)
+	if user == nil {
+		ErrorJSON(w, http.StatusUnauthorized, "UNAUTHORIZED", "Authentication required", nil)
+		return
+	}
+	if user.PrimaryRole != "super_admin" && user.PrimaryRole != "national_admin" {
+		ErrorJSON(w, http.StatusForbidden, "FORBIDDEN", "Only national administrators and super admins may regenerate exports", nil)
+		return
+	}
+
+	snapshotID := chi.URLParam(r, "id")
+	format := chi.URLParam(r, "format")
+	if snapshotID == "" || format == "" {
+		ErrorJSON(w, http.StatusBadRequest, "INVALID_INPUT", "snapshot ID and format are required", nil)
+		return
+	}
+
+	ip := security.GetClientIP(r)
+	dto, err := h.reportService.RegenerateReportExport(ctx, user, snapshotID, format, &ip)
+	if err != nil {
+		if errors.Is(err, service.ErrReportSnapshotNotFound) {
+			ErrorJSON(w, http.StatusNotFound, "NOT_FOUND", "Report snapshot not found", nil)
+			return
+		}
+		if errors.Is(err, service.ErrReportWithdrawn) || errors.Is(err, service.ErrReportRejected) {
+			ErrorJSON(w, http.StatusBadRequest, "INVALID_STATE", "Cannot regenerate export for withdrawn or rejected report", nil)
+			return
+		}
+		ErrorJSON(w, http.StatusInternalServerError, "INTERNAL_ERROR", "Failed regenerating report export", err.Error())
+		return
+	}
+
+	JSON(w, http.StatusOK, dto)
+}
+
+func (h *ReportHandler) DownloadExportAdmin(w http.ResponseWriter, r *http.Request) {
+	ctx := r.Context()
+	user := GetCurrentUser(ctx)
+	if user == nil {
+		ErrorJSON(w, http.StatusUnauthorized, "UNAUTHORIZED", "Authentication required", nil)
+		return
+	}
+
+	snapshotID := chi.URLParam(r, "id")
+	format := chi.URLParam(r, "format")
+	if snapshotID == "" || format == "" {
+		ErrorJSON(w, http.StatusBadRequest, "INVALID_INPUT", "snapshot ID and format are required", nil)
+		return
+	}
+
+	exportBytes, fileName, mimeType, err := h.reportService.GetExportPrivateStream(ctx, user, snapshotID, format)
+	if err != nil {
+		if errors.Is(err, service.ErrReportSnapshotNotFound) {
+			ErrorJSON(w, http.StatusNotFound, "NOT_FOUND", "Report snapshot not found", nil)
+			return
+		}
+		if errors.Is(err, service.ErrReportWithdrawn) || errors.Is(err, service.ErrExportRevoked) {
+			ErrorJSON(w, http.StatusGone, "EXPORT_WITHDRAWN", "Export has been withdrawn or revoked", nil)
+			return
+		}
+		if errors.Is(err, service.ErrUnauthorizedExportAccess) {
+			ErrorJSON(w, http.StatusForbidden, "FORBIDDEN", err.Error(), nil)
+			return
+		}
+		ErrorJSON(w, http.StatusInternalServerError, "INTERNAL_ERROR", "Failed retrieving export payload", err.Error())
+		return
+	}
+
+	safeName := security.SanitizeFilename(fileName)
+	w.Header().Set("Content-Type", mimeType)
+	w.Header().Set("Content-Disposition", fmt.Sprintf(`attachment; filename="%s"`, safeName))
+	w.Header().Set("Content-Length", strconv.Itoa(len(exportBytes)))
+	w.WriteHeader(http.StatusOK)
+	_, _ = w.Write(exportBytes)
 }
 
 func (h *ReportHandler) GetSettingsAdmin(w http.ResponseWriter, r *http.Request) {
@@ -864,29 +1076,39 @@ func (h *ReportHandler) RunSchedulerAdmin(w http.ResponseWriter, r *http.Request
 	var targetPeriodPtr *string
 	if strings.TrimSpace(req.TargetPeriod) != "" {
 		cleaned := strings.TrimSpace(req.TargetPeriod)
-		if _, _, _, _, err := worker.ParsePeriodUTC(cleaned); err != nil {
+		_, pEnd, _, _, err := worker.ParsePeriodUTC(cleaned)
+		if err != nil {
 			ErrorJSON(w, http.StatusBadRequest, "INVALID_INPUT", "target_period must be in YYYY-MM or YYYY-Q[1-4] format", err.Error())
+			return
+		}
+		if pEnd.After(time.Now().UTC()) {
+			ErrorJSON(w, http.StatusBadRequest, "FUTURE_PERIOD_REJECTED", "Reporting period is incomplete or in the future; reports can only be generated for concluded historical periods", nil)
 			return
 		}
 		targetPeriodPtr = &cleaned
 	}
 
 	params := worker.RunSchedulerParams{
-		TargetPeriod:  targetPeriodPtr,
-		PeriodType:    req.PeriodType,
-		TriggerSource: "admin_manual",
-		ActorUser:     user,
-		ReportType:    req.ReportType,
-		ScopeType:     req.ScopeType,
-		ZoneID:        req.ZoneID,
-		StateID:       req.StateID,
-		LgaID:         req.LgaID,
+		TargetPeriod:     targetPeriodPtr,
+		PeriodType:       req.PeriodType,
+		TriggerSource:    "admin_manual",
+		ActorUser:        user,
+		StrictHistorical: true,
+		ReportType:       req.ReportType,
+		ScopeType:        req.ScopeType,
+		ZoneID:           req.ZoneID,
+		StateID:          req.StateID,
+		LgaID:            req.LgaID,
 	}
 
 	res, err := h.scheduler.RunScheduledCycle(ctx, params)
 	if err != nil {
 		if errors.Is(err, worker.ErrSchedulerAlreadyRunning) {
 			ErrorJSON(w, http.StatusConflict, "LOCK_CONFLICT", "Scheduler cycle already running on another node", nil)
+			return
+		}
+		if errors.Is(err, worker.ErrFutureReportingPeriod) {
+			ErrorJSON(w, http.StatusBadRequest, "FUTURE_PERIOD_REJECTED", err.Error(), nil)
 			return
 		}
 		ErrorJSON(w, http.StatusInternalServerError, "INTERNAL_ERROR", "Failed executing scheduled reports cycle", err.Error())
