@@ -208,31 +208,31 @@ type PublicPublicationDTO struct {
 }
 
 type AdminSnapshotDetailDTO struct {
-	SnapshotID         string               `json:"snapshot_id"`
-	PublicReference    string               `json:"public_reference"`
-	DefinitionID       *string              `json:"definition_id,omitempty"`
-	ReportType         string               `json:"report_type"`
-	Title              string               `json:"title"`
-	ReportingPeriod    string               `json:"reporting_period"`
-	PeriodStart        string               `json:"period_start"`
-	PeriodEnd          string               `json:"period_end"`
-	ScopeType          string               `json:"scope_type"`
-	ZoneID             *string              `json:"zone_id,omitempty"`
-	ZoneName           *string              `json:"zone_name,omitempty"`
-	StateID            *string              `json:"state_id,omitempty"`
-	StateName          *string              `json:"state_name,omitempty"`
-	LGAID              *string              `json:"lga_id,omitempty"`
-	LGAName            *string              `json:"lga_name,omitempty"`
-	Status             string               `json:"status"`
-	PublicationVersion int                  `json:"publication_version"`
-	DataHash           string               `json:"data_hash"`
-	CreatedByUserID    *string              `json:"created_by_user_id,omitempty"`
-	CreatedByType      string               `json:"created_by_type"`
-	CreatorName        string               `json:"creator_name"`
-	CorrectionNotes    *string              `json:"correction_notes,omitempty"`
-	AggregatedData     json.RawMessage      `json:"aggregated_data"`
-	CreatedAt          time.Time            `json:"created_at"`
-	UpdatedAt          time.Time            `json:"updated_at"`
+	SnapshotID         string                 `json:"snapshot_id"`
+	PublicReference    string                 `json:"public_reference"`
+	DefinitionID       *string                `json:"definition_id,omitempty"`
+	ReportType         string                 `json:"report_type"`
+	Title              string                 `json:"title"`
+	ReportingPeriod    string                 `json:"reporting_period"`
+	PeriodStart        string                 `json:"period_start"`
+	PeriodEnd          string                 `json:"period_end"`
+	ScopeType          string                 `json:"scope_type"`
+	ZoneID             *string                `json:"zone_id,omitempty"`
+	ZoneName           *string                `json:"zone_name,omitempty"`
+	StateID            *string                `json:"state_id,omitempty"`
+	StateName          *string                `json:"state_name,omitempty"`
+	LGAID              *string                `json:"lga_id,omitempty"`
+	LGAName            *string                `json:"lga_name,omitempty"`
+	Status             string                 `json:"status"`
+	PublicationVersion int                    `json:"publication_version"`
+	DataHash           string                 `json:"data_hash"`
+	CreatedByUserID    *string                `json:"created_by_user_id,omitempty"`
+	CreatedByType      string                 `json:"created_by_type"`
+	CreatorName        string                 `json:"creator_name"`
+	CorrectionNotes    *string                `json:"correction_notes,omitempty"`
+	AggregatedData     json.RawMessage        `json:"aggregated_data"`
+	CreatedAt          time.Time              `json:"created_at"`
+	UpdatedAt          time.Time              `json:"updated_at"`
 	Approvals          []ReportApprovalItem   `json:"approvals"`
 	AuditLogs          []ReportAuditItem      `json:"audit_logs"`
 	Exports            []AdminReportExportDTO `json:"exports,omitempty"`
@@ -608,7 +608,7 @@ func (s *ReportService) AggregateSourceData(ctx context.Context, reportType, sco
 				CategoryLabel:   catLabel,
 				ExpenseCount:    cat.ExpenseCount,
 				TotalKobo:       cat.TotalKobo,
-				AmountFormatted: "₦" + FormatKoboToNaira(cat.TotalKobo),
+				AmountFormatted: FormatKoboToNaira(cat.TotalKobo),
 			})
 		}
 
@@ -617,15 +617,15 @@ func (s *ReportService) AggregateSourceData(ctx context.Context, reportType, sco
 
 		data := PublicFinanceData{
 			ApprovedIncomeKobo:           fMetrics.VerifiedIncomeKobo,
-			ApprovedIncomeFormatted:      "₦" + FormatKoboToNaira(fMetrics.VerifiedIncomeKobo),
+			ApprovedIncomeFormatted:      FormatKoboToNaira(fMetrics.VerifiedIncomeKobo),
 			ApprovedExpenditureKobo:      fMetrics.VerifiedExpenseKobo,
-			ApprovedExpenditureFormatted: "₦" + FormatKoboToNaira(fMetrics.VerifiedExpenseKobo),
+			ApprovedExpenditureFormatted: FormatKoboToNaira(fMetrics.VerifiedExpenseKobo),
 			NetSurplusDeficitKobo:        netSurplusKobo,
-			NetSurplusDeficitFormatted:   "₦" + FormatKoboToNaira(netSurplusKobo),
+			NetSurplusDeficitFormatted:   FormatKoboToNaira(netSurplusKobo),
 			TotalApprovedBudgetKobo:      bMetrics.TotalApprovedBudgetKobo,
-			TotalApprovedBudgetFormatted: "₦" + FormatKoboToNaira(bMetrics.TotalApprovedBudgetKobo),
+			TotalApprovedBudgetFormatted: FormatKoboToNaira(bMetrics.TotalApprovedBudgetKobo),
 			BudgetVarianceKobo:           varianceKobo,
-			BudgetVarianceFormatted:      "₦" + FormatKoboToNaira(varianceKobo),
+			BudgetVarianceFormatted:      FormatKoboToNaira(varianceKobo),
 			SpendingCategories:           catList,
 			ReportingPeriod:              periodLabel,
 		}
@@ -648,7 +648,7 @@ func (s *ReportService) AggregateSourceData(ctx context.Context, reportType, sco
 		data := PublicFoundationData{
 			VerifiedDonationsCount:     fdMetrics.VerifiedDonationsCount,
 			TotalDonationsKobo:         fdMetrics.TotalDonationsKobo,
-			TotalDonationsFormatted:    "₦" + FormatKoboToNaira(fdMetrics.TotalDonationsKobo),
+			TotalDonationsFormatted:    FormatKoboToNaira(fdMetrics.TotalDonationsKobo),
 			ProvisionalEntityNotice:    "Martinsvincent Ortse Foundation registration is provisional pending final CAC review. Dedicated charitable accounts operate with dual-signatory verification.",
 			StrictSegregationNotice:    "Foundation humanitarian funds are strictly separated from Ratels Worldwide operational funds in double-entry ledgers.",
 			PaymentSafetySwitchEnabled: true,
@@ -692,9 +692,9 @@ func (s *ReportService) AggregateSourceData(ctx context.Context, reportType, sco
 				ExecutionStatus:              p.ExecutionStatus,
 				ProgressPercentage:           p.ProgressPercentage,
 				ApprovedBudgetKobo:           p.ApprovedBudget,
-				ApprovedBudgetFormatted:      "₦" + FormatKoboToNaira(p.ApprovedBudget),
+				ApprovedBudgetFormatted:      FormatKoboToNaira(p.ApprovedBudget),
 				RecordedExpenditureKobo:      p.RecordedExpenditure,
-				RecordedExpenditureFormatted: "₦" + FormatKoboToNaira(p.RecordedExpenditure),
+				RecordedExpenditureFormatted: FormatKoboToNaira(p.RecordedExpenditure),
 			})
 		}
 
@@ -704,9 +704,9 @@ func (s *ReportService) AggregateSourceData(ctx context.Context, reportType, sco
 			InProgressProjectsCount:           cpMetrics.InProgressProjects,
 			PlannedProjectsCount:              cpMetrics.PlannedProjects,
 			TotalApprovedBudgetKobo:           cpMetrics.TotalApprovedBudgetKobo,
-			TotalApprovedBudgetFormatted:      "₦" + FormatKoboToNaira(cpMetrics.TotalApprovedBudgetKobo),
+			TotalApprovedBudgetFormatted:      FormatKoboToNaira(cpMetrics.TotalApprovedBudgetKobo),
 			TotalRecordedExpenditureKobo:      cpMetrics.TotalRecordedExpenditureKobo,
-			TotalRecordedExpenditureFormatted: "₦" + FormatKoboToNaira(cpMetrics.TotalRecordedExpenditureKobo),
+			TotalRecordedExpenditureFormatted: FormatKoboToNaira(cpMetrics.TotalRecordedExpenditureKobo),
 			Projects:                          items,
 			ReportingPeriod:                   periodLabel,
 		}
@@ -780,11 +780,11 @@ func (s *ReportService) AggregateSourceData(ctx context.Context, reportType, sco
 			ApprovedProjectsCount:        cpMetrics.TotalProjects,
 			CompletedProjectsCount:       cpMetrics.CompletedProjects,
 			ApprovedIncomeKobo:           fMetrics.VerifiedIncomeKobo,
-			ApprovedIncomeFormatted:      "₦" + FormatKoboToNaira(fMetrics.VerifiedIncomeKobo),
+			ApprovedIncomeFormatted:      FormatKoboToNaira(fMetrics.VerifiedIncomeKobo),
 			ApprovedExpenditureKobo:      fMetrics.VerifiedExpenseKobo,
-			ApprovedExpenditureFormatted: "₦" + FormatKoboToNaira(fMetrics.VerifiedExpenseKobo),
+			ApprovedExpenditureFormatted: FormatKoboToNaira(fMetrics.VerifiedExpenseKobo),
 			FoundationDonationsKobo:      fdDonationsKobo,
-			FoundationDonationsFormatted: "₦" + FormatKoboToNaira(fdDonationsKobo),
+			FoundationDonationsFormatted: FormatKoboToNaira(fdDonationsKobo),
 			TotalWasteCollectedKg:        cMetrics.TotalWasteKg,
 			ReportingPeriod:              periodLabel,
 			Scope:                        scopeDesc,
