@@ -302,6 +302,11 @@ WHERE o.order_number = $1;
 SELECT * FROM marketplace_orders
 WHERE idempotency_key = $1;
 
+-- name: GetMarketplaceOrderForUpdate :one
+SELECT * FROM marketplace_orders
+WHERE id = $1
+FOR UPDATE;
+
 -- name: ListMarketplaceOrdersByBuyer :many
 SELECT o.*,
        COUNT(oi.id) as item_count
@@ -400,11 +405,23 @@ INSERT INTO marketplace_payments (
 SELECT * FROM marketplace_payments
 WHERE reference = $1;
 
+-- name: GetMarketplacePaymentByReferenceForUpdate :one
+SELECT * FROM marketplace_payments
+WHERE reference = $1
+FOR UPDATE;
+
 -- name: GetMarketplacePaymentByOrder :one
 SELECT * FROM marketplace_payments
 WHERE order_id = $1
 ORDER BY created_at DESC
 LIMIT 1;
+
+-- name: GetMarketplacePaymentByOrderForUpdate :one
+SELECT * FROM marketplace_payments
+WHERE order_id = $1
+ORDER BY created_at DESC
+LIMIT 1
+FOR UPDATE;
 
 -- name: UpdateMarketplacePaymentTransactionStatus :one
 UPDATE marketplace_payments

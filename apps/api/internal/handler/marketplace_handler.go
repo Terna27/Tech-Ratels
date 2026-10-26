@@ -208,7 +208,7 @@ func (h *MarketplaceHandler) VerifyPayment(w http.ResponseWriter, r *http.Reques
 			ErrorJSON(w, http.StatusServiceUnavailable, "PAYMENT_PROCESSING_UNAVAILABLE", "Payment processing is currently unavailable.", nil)
 			return
 		}
-		if errors.Is(err, payment.ErrAmountMismatch) || errors.Is(err, payment.ErrCurrencyMismatch) {
+		if errors.Is(err, payment.ErrAmountMismatch) || errors.Is(err, payment.ErrCurrencyMismatch) || errors.Is(err, payment.ErrReferenceMismatch) || errors.Is(err, payment.ErrProviderMismatch) {
 			ErrorJSON(w, http.StatusPaymentRequired, "PAYMENT_MISMATCH", err.Error(), nil)
 			return
 		}

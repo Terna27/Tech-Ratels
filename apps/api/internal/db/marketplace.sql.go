@@ -1168,6 +1168,43 @@ func (q *Queries) GetMarketplaceOrderByOrderNumber(ctx context.Context, orderNum
 	return i, err
 }
 
+const getMarketplaceOrderForUpdate = `-- name: GetMarketplaceOrderForUpdate :one
+SELECT id, order_number, buyer_user_id, buyer_name, buyer_email, buyer_phone, delivery_type, shipping_address, shipping_state_id, shipping_lga_id, pickup_branch_id, subtotal_kobo, delivery_fee_kobo, total_kobo, currency, order_status, payment_status, fulfilment_status, idempotency_key, notes, created_at, updated_at, version FROM marketplace_orders
+WHERE id = $1
+FOR UPDATE
+`
+
+func (q *Queries) GetMarketplaceOrderForUpdate(ctx context.Context, id string) (MarketplaceOrder, error) {
+	row := q.db.QueryRow(ctx, getMarketplaceOrderForUpdate, id)
+	var i MarketplaceOrder
+	err := row.Scan(
+		&i.ID,
+		&i.OrderNumber,
+		&i.BuyerUserID,
+		&i.BuyerName,
+		&i.BuyerEmail,
+		&i.BuyerPhone,
+		&i.DeliveryType,
+		&i.ShippingAddress,
+		&i.ShippingStateID,
+		&i.ShippingLgaID,
+		&i.PickupBranchID,
+		&i.SubtotalKobo,
+		&i.DeliveryFeeKobo,
+		&i.TotalKobo,
+		&i.Currency,
+		&i.OrderStatus,
+		&i.PaymentStatus,
+		&i.FulfilmentStatus,
+		&i.IdempotencyKey,
+		&i.Notes,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+		&i.Version,
+	)
+	return i, err
+}
+
 const getMarketplacePaymentByOrder = `-- name: GetMarketplacePaymentByOrder :one
 SELECT id, order_id, reference, provider, provider_reference, channel, amount_kobo, currency, status, paid_at, raw_webhook_payload, error_message, created_at, updated_at FROM marketplace_payments
 WHERE order_id = $1
@@ -1197,6 +1234,36 @@ func (q *Queries) GetMarketplacePaymentByOrder(ctx context.Context, orderID stri
 	return i, err
 }
 
+const getMarketplacePaymentByOrderForUpdate = `-- name: GetMarketplacePaymentByOrderForUpdate :one
+SELECT id, order_id, reference, provider, provider_reference, channel, amount_kobo, currency, status, paid_at, raw_webhook_payload, error_message, created_at, updated_at FROM marketplace_payments
+WHERE order_id = $1
+ORDER BY created_at DESC
+LIMIT 1
+FOR UPDATE
+`
+
+func (q *Queries) GetMarketplacePaymentByOrderForUpdate(ctx context.Context, orderID string) (MarketplacePayment, error) {
+	row := q.db.QueryRow(ctx, getMarketplacePaymentByOrderForUpdate, orderID)
+	var i MarketplacePayment
+	err := row.Scan(
+		&i.ID,
+		&i.OrderID,
+		&i.Reference,
+		&i.Provider,
+		&i.ProviderReference,
+		&i.Channel,
+		&i.AmountKobo,
+		&i.Currency,
+		&i.Status,
+		&i.PaidAt,
+		&i.RawWebhookPayload,
+		&i.ErrorMessage,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+	)
+	return i, err
+}
+
 const getMarketplacePaymentByReference = `-- name: GetMarketplacePaymentByReference :one
 SELECT id, order_id, reference, provider, provider_reference, channel, amount_kobo, currency, status, paid_at, raw_webhook_payload, error_message, created_at, updated_at FROM marketplace_payments
 WHERE reference = $1
@@ -1204,6 +1271,34 @@ WHERE reference = $1
 
 func (q *Queries) GetMarketplacePaymentByReference(ctx context.Context, reference string) (MarketplacePayment, error) {
 	row := q.db.QueryRow(ctx, getMarketplacePaymentByReference, reference)
+	var i MarketplacePayment
+	err := row.Scan(
+		&i.ID,
+		&i.OrderID,
+		&i.Reference,
+		&i.Provider,
+		&i.ProviderReference,
+		&i.Channel,
+		&i.AmountKobo,
+		&i.Currency,
+		&i.Status,
+		&i.PaidAt,
+		&i.RawWebhookPayload,
+		&i.ErrorMessage,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+	)
+	return i, err
+}
+
+const getMarketplacePaymentByReferenceForUpdate = `-- name: GetMarketplacePaymentByReferenceForUpdate :one
+SELECT id, order_id, reference, provider, provider_reference, channel, amount_kobo, currency, status, paid_at, raw_webhook_payload, error_message, created_at, updated_at FROM marketplace_payments
+WHERE reference = $1
+FOR UPDATE
+`
+
+func (q *Queries) GetMarketplacePaymentByReferenceForUpdate(ctx context.Context, reference string) (MarketplacePayment, error) {
+	row := q.db.QueryRow(ctx, getMarketplacePaymentByReferenceForUpdate, reference)
 	var i MarketplacePayment
 	err := row.Scan(
 		&i.ID,

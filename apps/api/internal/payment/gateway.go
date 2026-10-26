@@ -7,12 +7,16 @@ import (
 )
 
 var (
-	ErrPaymentFailed          = errors.New("payment processing failed")
-	ErrInvalidSignature       = errors.New("invalid webhook signature")
-	ErrPaymentNotFound       = errors.New("payment transaction not found")
-	ErrUnconfiguredProvider   = errors.New("payment provider is not configured")
-	ErrAmountMismatch         = errors.New("payment amount does not match order total")
-	ErrCurrencyMismatch       = errors.New("payment currency mismatch")
+	ErrPaymentFailed        = errors.New("payment processing failed")
+	ErrInvalidSignature     = errors.New("invalid webhook signature")
+	ErrPaymentNotFound      = errors.New("payment transaction not found")
+	ErrUnconfiguredProvider = errors.New("payment provider is not configured")
+	ErrAmountMismatch       = errors.New("payment amount does not match order total")
+	ErrCurrencyMismatch     = errors.New("payment currency mismatch")
+	ErrReferenceMismatch    = errors.New("payment reference does not match expected reference")
+	ErrProviderMismatch     = errors.New("payment provider mismatch")
+	ErrMalformedResponse    = errors.New("malformed or incomplete provider response")
+	ErrOrderAlreadyPaid     = errors.New("order is already paid")
 )
 
 type InitializePaymentInput struct {

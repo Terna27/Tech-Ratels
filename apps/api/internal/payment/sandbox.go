@@ -27,6 +27,10 @@ func (s *SandboxGateway) ProviderName() string {
 	return "dev_sandbox"
 }
 
+func (s *SandboxGateway) SetAmount(reference string, amountKobo int64) {
+	s.amounts.Store(reference, amountKobo)
+}
+
 func (s *SandboxGateway) InitializePayment(ctx context.Context, input InitializePaymentInput) (*InitializePaymentOutput, error) {
 	log.Printf("[SANDBOX_PAYMENT] Initializing sandbox checkout for Order %s: ₦%.2f (%d kobo) for %s\n",
 		input.OrderReference, float64(input.AmountKobo)/100.0, input.AmountKobo, input.CustomerEmail)

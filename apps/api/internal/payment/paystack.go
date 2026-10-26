@@ -7,9 +7,11 @@ import (
 	"crypto/sha512"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
+	"strings"
 	"time"
 )
 
@@ -31,6 +33,18 @@ func NewPaystackGateway(secretKey, publicKey string) *PaystackGateway {
 
 func (p *PaystackGateway) ProviderName() string {
 	return "paystack"
+}
+
+// SetBaseURL overrides the API base URL (useful for testing against httptest.Server).
+func (p *PaystackGateway) SetBaseURL(baseURL string) {
+	p.baseURL = strings.TrimRight(baseURL, "/")
+}
+
+// SetHTTPClient overrides the internal http.Client (useful for testing bounded timeouts).
+func (p *PaystackGateway) SetHTTPClient(client *http.Client) {
+	if client != nil {
+		p.httpClient = client
+	}
 }
 
 func (p *PaystackGateway) InitializePayment(ctx context.Context, input InitializePaymentInput) (*InitializePaymentOutput, error) {
@@ -73,6 +87,10 @@ func (p *PaystackGateway) InitializePayment(ctx context.Context, input Initializ
 		return nil, fmt.Errorf("failed to read paystack response: %w", err)
 	}
 
+	if resp.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("paystack initialize returned unexpected HTTP status %d: %s", resp.StatusCode, string(bodyBytes))
+	}
+
 	var psResp struct {
 		Status  bool   `json:"status"`
 		Message string `json:"message"`
@@ -103,6 +121,9 @@ func (p *PaystackGateway) VerifyPayment(ctx context.Context, reference string) (
 	if p.secretKey == "" {
 		return nil, ErrUnconfiguredProvider
 	}
+	if strings.TrimSpace(reference) == "" {
+		return nil, errors.New("payment reference is required")
+	}
 
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, fmt.Sprintf("%s/transaction/verify/%s", p.baseURL, reference), nil)
 	if err != nil {
@@ -122,29 +143,48 @@ func (p *PaystackGateway) VerifyPayment(ctx context.Context, reference string) (
 		return nil, fmt.Errorf("failed to read verify response: %w", err)
 	}
 
+	// Reject unexpected HTTP response status codes
+	if resp.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("paystack verify returned unexpected HTTP status %d: %s", resp.StatusCode, string(bodyBytes))
+	}
+
 	var psResp struct {
 		Status  bool   `json:"status"`
 		Message string `json:"message"`
 		Data    struct {
-			Status        string `json:"status"` // "success", "failed", "abandoned"
-			Reference     string `json:"reference"`
-			Amount        int64  `json:"amount"`
-			Currency      string `json:"currency"`
-			PaidAt        string `json:"paid_at"`
-			Channel       string `json:"channel"`
-			GatewayResp   string `json:"gateway_response"`
-			Customer      struct {
+			Status      string `json:"status"` // "success", "failed", "abandoned"
+			Reference   string `json:"reference"`
+			Amount      int64  `json:"amount"`
+			Currency    string `json:"currency"`
+			PaidAt      string `json:"paid_at"`
+			Channel     string `json:"channel"`
+			GatewayResp string `json:"gateway_response"`
+			Customer    struct {
 				Email string `json:"email"`
 			} `json:"customer"`
 		} `json:"data"`
 	}
 
 	if err := json.Unmarshal(bodyBytes, &psResp); err != nil {
-		return nil, fmt.Errorf("failed to parse verify response: %w", err)
+		return nil, fmt.Errorf("%w: failed to parse verify response: %v", ErrMalformedResponse, err)
 	}
 
 	if !psResp.Status {
 		return nil, fmt.Errorf("paystack verification returned false: %s", psResp.Message)
+	}
+
+	// Reject malformed or incomplete provider responses
+	if strings.TrimSpace(psResp.Data.Reference) == "" {
+		return nil, fmt.Errorf("%w: missing payment reference in provider response", ErrMalformedResponse)
+	}
+	if psResp.Data.Amount <= 0 {
+		return nil, fmt.Errorf("%w: non-positive amount (%d) in provider response", ErrMalformedResponse, psResp.Data.Amount)
+	}
+	if strings.TrimSpace(psResp.Data.Currency) == "" {
+		return nil, fmt.Errorf("%w: missing currency in provider response", ErrMalformedResponse)
+	}
+	if strings.TrimSpace(psResp.Data.Status) == "" {
+		return nil, fmt.Errorf("%w: missing payment status in provider response", ErrMalformedResponse)
 	}
 
 	status := "pending"

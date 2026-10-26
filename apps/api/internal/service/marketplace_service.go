@@ -1171,86 +1171,177 @@ func (s *MarketplaceService) ConfirmPayment(ctx context.Context, reference strin
 		return nil, ErrOrderNotFound
 	}
 
-	// Idempotency: if already paid, return early to prevent duplicate processing
-	if payRec.Status == "successful" && order.PaymentStatus == "paid" {
+	// Idempotency: if already paid or refunded, return early
+	if payRec.Status == "successful" && (order.PaymentStatus == "paid" || order.PaymentStatus == "partially_refunded" || order.PaymentStatus == "refunded") {
 		return &order, nil
 	}
 
-	// Verify payment with authoritative provider
+	// Validate expected payment provider
+	if payRec.Provider != s.paymentGateway.ProviderName() {
+		return nil, fmt.Errorf("%w: expected provider '%s', got '%s'",
+			payment.ErrProviderMismatch, payRec.Provider, s.paymentGateway.ProviderName())
+	}
+
+	// Verify payment with authoritative provider (outside any DB transaction)
 	verifyOut, err := s.paymentGateway.VerifyPayment(ctx, reference)
 	if err != nil {
 		return nil, fmt.Errorf("payment verification failed: %w", err)
 	}
 
 	if verifyOut.Status != "successful" {
-		// Out-of-order event safeguard: Never downgrade an already-paid order to failed
-		if order.PaymentStatus != "paid" {
-			_, _ = s.repo.Queries().UpdateMarketplacePaymentTransactionStatus(ctx, db.UpdateMarketplacePaymentTransactionStatusParams{
+		// Out-of-order event safeguard: Row lock and never downgrade an already-paid or refunded order
+		_ = s.repo.WithTx(ctx, func(q *db.Queries) error {
+			lockedPay, err := q.GetMarketplacePaymentByReferenceForUpdate(ctx, reference)
+			if err != nil {
+				return err
+			}
+			lockedOrder, err := q.GetMarketplaceOrderForUpdate(ctx, lockedPay.OrderID)
+			if err != nil {
+				return err
+			}
+
+			// Never overwrite an already-paid, partially refunded, or refunded order or payment
+			if lockedOrder.PaymentStatus == "paid" || lockedOrder.PaymentStatus == "partially_refunded" || lockedOrder.PaymentStatus == "refunded" || lockedPay.Status == "successful" {
+				return nil
+			}
+
+			rawPayload := verifyOut.RawResponse
+			if len(rawPayload) == 0 {
+				rawPayload = []byte("{}")
+			}
+
+			_, err = q.UpdateMarketplacePaymentTransactionStatus(ctx, db.UpdateMarketplacePaymentTransactionStatusParams{
 				Reference:         reference,
 				Status:            "failed",
 				ProviderReference: TextFromString(verifyOut.ProviderReference),
 				Channel:           TextFromString(verifyOut.Channel),
 				PaidAt:            pgtype.Timestamptz{Valid: false},
-				RawWebhookPayload: verifyOut.RawResponse,
+				RawWebhookPayload: rawPayload,
 				ErrorMessage:      TextFromString("Payment status returned: " + verifyOut.Status),
 			})
-			_, _ = s.repo.Queries().UpdateMarketplaceOrderPaymentStatus(ctx, db.UpdateMarketplaceOrderPaymentStatusParams{
-				ID:            order.ID,
-				PaymentStatus: "failed",
-			})
-		}
+			if err != nil {
+				return err
+			}
+
+			if lockedOrder.PaymentStatus == "pending" && lockedOrder.OrderStatus != "cancelled" && lockedOrder.OrderStatus != "refunded" {
+				_, err = q.UpdateMarketplaceOrderPaymentStatus(ctx, db.UpdateMarketplaceOrderPaymentStatusParams{
+					ID:            lockedOrder.ID,
+					PaymentStatus: "failed",
+				})
+				if err != nil {
+					return err
+				}
+			}
+			return nil
+		})
 		return nil, fmt.Errorf("payment was not successful (status: %s)", verifyOut.Status)
 	}
 
-	// Server-side amount validation: Never mark paid without verifying full amount!
-	if verifyOut.AmountKobo < order.TotalKobo {
+	// Strict Paystack verification:
+	// 1. Returned payment reference must match expected reference exactly
+	if verifyOut.PaymentReference != reference {
+		return nil, fmt.Errorf("%w: expected reference %s, got %s", payment.ErrReferenceMismatch, reference, verifyOut.PaymentReference)
+	}
+
+	// 2. Verified amount must equal expected order total exactly (rejects both underpayment and overpayment)
+	if verifyOut.AmountKobo != order.TotalKobo {
 		return nil, fmt.Errorf("%w: expected %d kobo, got %d kobo", payment.ErrAmountMismatch, order.TotalKobo, verifyOut.AmountKobo)
 	}
 
-	// Server-side currency validation: Provider currency must match order currency
-	if verifyOut.Currency != "" && strings.ToUpper(verifyOut.Currency) != strings.ToUpper(order.Currency) {
+	// 3. Reject missing or mismatched currencies
+	if strings.TrimSpace(verifyOut.Currency) == "" {
+		return nil, fmt.Errorf("%w: verified currency is missing", payment.ErrCurrencyMismatch)
+	}
+	if !strings.EqualFold(verifyOut.Currency, order.Currency) {
 		return nil, fmt.Errorf("%w: expected %s, got %s", payment.ErrCurrencyMismatch, order.Currency, verifyOut.Currency)
 	}
 
-	now := time.Now()
-	paidAt := TimestamptzFromTime(now)
-	if verifyOut.PaidAt != nil {
-		paidAt = TimestamptzFromTime(*verifyOut.PaidAt)
-	}
+	// Atomic transaction with row-level locks
+	err = s.repo.WithTx(ctx, func(q *db.Queries) error {
+		lockedPay, err := q.GetMarketplacePaymentByReferenceForUpdate(ctx, reference)
+		if err != nil {
+			return fmt.Errorf("failed to lock payment record: %w", err)
+		}
 
-	// Update payment record
-	_, err = s.repo.Queries().UpdateMarketplacePaymentTransactionStatus(ctx, db.UpdateMarketplacePaymentTransactionStatusParams{
-		Reference:         reference,
-		Status:            "successful",
-		ProviderReference: TextFromString(verifyOut.ProviderReference),
-		Channel:           TextFromString(verifyOut.Channel),
-		PaidAt:            paidAt,
-		RawWebhookPayload: verifyOut.RawResponse,
-		ErrorMessage:      TextFromString(""),
+		lockedOrder, err := q.GetMarketplaceOrderForUpdate(ctx, lockedPay.OrderID)
+		if err != nil {
+			return fmt.Errorf("failed to lock order record: %w", err)
+		}
+
+		// Concurrency protection: if already marked paid / refunded by a concurrent request, no-op
+		if lockedPay.Status == "successful" && (lockedOrder.PaymentStatus == "paid" || lockedOrder.PaymentStatus == "partially_refunded" || lockedOrder.PaymentStatus == "refunded") {
+			return nil
+		}
+
+		// Update order payment status to paid (unless already partially refunded or refunded)
+		if lockedOrder.PaymentStatus != "refunded" && lockedOrder.PaymentStatus != "partially_refunded" {
+			_, err = q.UpdateMarketplaceOrderPaymentStatus(ctx, db.UpdateMarketplaceOrderPaymentStatusParams{
+				ID:            lockedOrder.ID,
+				PaymentStatus: "paid",
+			})
+			if err != nil {
+				return fmt.Errorf("failed to update order payment status: %w", err)
+			}
+		}
+
+		// Order processing status advances ONLY when the transition is valid:
+		// Do not automatically reset cancelled, fulfilled, or disputed orders to processing.
+		if lockedOrder.OrderStatus == "placed" && lockedOrder.FulfilmentStatus == "unfulfilled" {
+			disputes, err := q.ListMarketplaceDisputesByOrder(ctx, lockedOrder.ID)
+			hasOpenDispute := false
+			if err == nil {
+				for _, d := range disputes {
+					if d.Status == "open" {
+						hasOpenDispute = true
+						break
+					}
+				}
+			}
+			if !hasOpenDispute {
+				_, err = q.UpdateMarketplaceOrderStatus(ctx, db.UpdateMarketplaceOrderStatusParams{
+					ID:          lockedOrder.ID,
+					OrderStatus: "processing",
+				})
+				if err != nil {
+					return fmt.Errorf("failed to advance order status: %w", err)
+				}
+			}
+		}
+
+		now := time.Now()
+		paidAt := TimestamptzFromTime(now)
+		if verifyOut.PaidAt != nil {
+			paidAt = TimestamptzFromTime(*verifyOut.PaidAt)
+		}
+		rawPayload := verifyOut.RawResponse
+		if len(rawPayload) == 0 {
+			rawPayload = []byte("{}")
+		}
+
+		_, err = q.UpdateMarketplacePaymentTransactionStatus(ctx, db.UpdateMarketplacePaymentTransactionStatusParams{
+			Reference:         reference,
+			Status:            "successful",
+			ProviderReference: TextFromString(verifyOut.ProviderReference),
+			Channel:           TextFromString(verifyOut.Channel),
+			PaidAt:            paidAt,
+			RawWebhookPayload: rawPayload,
+			ErrorMessage:      TextFromString(""),
+		})
+		if err != nil {
+			return fmt.Errorf("failed to update payment record: %w", err)
+		}
+
+		return nil
 	})
 	if err != nil {
-		return nil, fmt.Errorf("failed to update payment record: %w", err)
-	}
-
-	// Update order payment and processing status
-	_, err = s.repo.Queries().UpdateMarketplaceOrderPaymentStatus(ctx, db.UpdateMarketplaceOrderPaymentStatusParams{
-		ID:            order.ID,
-		PaymentStatus: "paid",
-	})
-	if err != nil {
-		return nil, err
-	}
-
-	_, err = s.repo.Queries().UpdateMarketplaceOrderStatus(ctx, db.UpdateMarketplaceOrderStatusParams{
-		ID:          order.ID,
-		OrderStatus: "processing",
-	})
-	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("failed to atomically confirm payment: %w", err)
 	}
 
 	_ = s.audit.Log(ctx, nil, nil, "confirm_marketplace_payment", "marketplace_payment", reference, nil, nil, nil, nil)
-	refreshedOrder, _ := s.repo.Queries().GetMarketplaceOrderByID(ctx, order.ID)
+	refreshedOrder, err := s.repo.Queries().GetMarketplaceOrderByID(ctx, payRec.OrderID)
+	if err != nil {
+		return nil, fmt.Errorf("failed to reload order: %w", err)
+	}
 	return &refreshedOrder, nil
 }
 
@@ -1282,6 +1373,12 @@ func (s *MarketplaceService) HandleWebhook(ctx context.Context, signatureHeader 
 	if event.Event == "charge.success" || event.Data.Status == "success" || event.Data.Status == "successful" {
 		_, err := s.ConfirmPayment(ctx, ref)
 		return err
+	}
+
+	// For failed payment events, record failure authoritatively without overwriting successful payments
+	if event.Event == "charge.failed" || event.Data.Status == "failed" {
+		_, _ = s.ConfirmPayment(ctx, ref)
+		return nil
 	}
 
 	return nil
@@ -1686,17 +1783,65 @@ func (s *MarketplaceService) InitiateRefund(ctx context.Context, admin *db.User,
 		return nil, fmt.Errorf("cannot refund an order with payment status '%s'", order.PaymentStatus)
 	}
 
-	refundAmount := input.AmountKobo
-	if refundAmount <= 0 {
-		refundAmount = order.TotalKobo
-	}
-	if refundAmount > order.TotalKobo {
-		return nil, fmt.Errorf("refund amount %d kobo exceeds total order amount %d kobo", refundAmount, order.TotalKobo)
-	}
-
-	isFullRefund := refundAmount == order.TotalKobo
-
+	var isFullRefund bool
 	err = s.repo.WithTx(ctx, func(q *db.Queries) error {
+		lockedOrder, err := q.GetMarketplaceOrderForUpdate(ctx, orderID)
+		if err != nil {
+			return fmt.Errorf("failed to lock order for refund: %w", err)
+		}
+
+		if lockedOrder.PaymentStatus != "paid" && lockedOrder.PaymentStatus != "partially_refunded" {
+			return fmt.Errorf("cannot refund an order with payment status '%s'", lockedOrder.PaymentStatus)
+		}
+
+		pay, err := q.GetMarketplacePaymentByOrderForUpdate(ctx, orderID)
+		if err != nil {
+			return fmt.Errorf("failed to locate payment for order: %w", err)
+		}
+
+		// Parse cumulative refunded amount from raw_webhook_payload JSONB
+		var payloadMap map[string]interface{}
+		if len(pay.RawWebhookPayload) > 0 {
+			_ = json.Unmarshal(pay.RawWebhookPayload, &payloadMap)
+		}
+		if payloadMap == nil {
+			payloadMap = make(map[string]interface{})
+		}
+
+		var alreadyRefunded int64
+		if val, ok := payloadMap["refunded_amount_kobo"]; ok {
+			switch v := val.(type) {
+			case float64:
+				alreadyRefunded = int64(v)
+			case int64:
+				alreadyRefunded = v
+			}
+		}
+
+		remainingEligible := lockedOrder.TotalKobo - alreadyRefunded
+		if remainingEligible <= 0 {
+			return errors.New("order is already fully refunded")
+		}
+
+		actualRefund := input.AmountKobo
+		if actualRefund <= 0 || actualRefund == lockedOrder.TotalKobo {
+			actualRefund = remainingEligible
+		}
+
+		if actualRefund > remainingEligible {
+			return fmt.Errorf("refund amount %d kobo exceeds eligible remaining amount %d kobo (total order %d kobo, already refunded %d kobo)",
+				actualRefund, remainingEligible, lockedOrder.TotalKobo, alreadyRefunded)
+		}
+
+		newTotalRefunded := alreadyRefunded + actualRefund
+		isFullRefund = (newTotalRefunded >= lockedOrder.TotalKobo)
+
+		payloadMap["refunded_amount_kobo"] = newTotalRefunded
+		newPayloadBytes, err := json.Marshal(payloadMap)
+		if err != nil {
+			return fmt.Errorf("failed to encode refund metadata: %w", err)
+		}
+
 		if isFullRefund {
 			items, err := q.ListMarketplaceOrderItemsByOrder(ctx, orderID)
 			if err != nil {
@@ -1721,6 +1866,7 @@ func (s *MarketplaceService) InitiateRefund(ctx context.Context, admin *db.User,
 			if err != nil {
 				return err
 			}
+
 			_, err = q.UpdateMarketplaceOrderPaymentStatus(ctx, db.UpdateMarketplaceOrderPaymentStatusParams{
 				ID:            orderID,
 				PaymentStatus: "refunded",
@@ -1738,21 +1884,22 @@ func (s *MarketplaceService) InitiateRefund(ctx context.Context, admin *db.User,
 			}
 		}
 
-		pay, err := q.GetMarketplacePaymentByOrder(ctx, orderID)
-		if err == nil {
-			payStatus := "refunded"
-			if !isFullRefund {
-				payStatus = "partially_refunded"
-			}
-			_, _ = q.UpdateMarketplacePaymentTransactionStatus(ctx, db.UpdateMarketplacePaymentTransactionStatusParams{
-				Reference:         pay.Reference,
-				Status:            payStatus,
-				ProviderReference: pay.ProviderReference,
-				Channel:           pay.Channel,
-				PaidAt:            pay.PaidAt,
-				RawWebhookPayload: pay.RawWebhookPayload,
-				ErrorMessage:      TextFromString(fmt.Sprintf("Refund of %d kobo processed by admin (%s): %s", refundAmount, admin.Email.String, input.Reason)),
-			})
+		payStatus := "partially_refunded"
+		if isFullRefund {
+			payStatus = "refunded"
+		}
+
+		_, err = q.UpdateMarketplacePaymentTransactionStatus(ctx, db.UpdateMarketplacePaymentTransactionStatusParams{
+			Reference:         pay.Reference,
+			Status:            payStatus,
+			ProviderReference: pay.ProviderReference,
+			Channel:           pay.Channel,
+			PaidAt:            pay.PaidAt,
+			RawWebhookPayload: newPayloadBytes,
+			ErrorMessage:      TextFromString(fmt.Sprintf("Refund of %d kobo processed by admin (%s): %s", actualRefund, admin.Email.String, input.Reason)),
+		})
+		if err != nil {
+			return fmt.Errorf("failed to update payment record: %w", err)
 		}
 
 		return nil
