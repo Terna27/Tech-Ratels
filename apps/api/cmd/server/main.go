@@ -213,6 +213,7 @@ func main() {
 	financeH := handler.NewFinanceHandler(financeService)
 	inventoryH := handler.NewInventoryHandler(inventoryService)
 	marketplaceH := handler.NewMarketplaceHandler(marketplaceService)
+	marketplaceH.SetCronSecret(cfg.MarketplaceCronSecret)
 	careersH := handler.NewCareersHandler(careersService)
 	heroMediaH := handler.NewHeroMediaHandler(heroMediaService)
 	communityProjectH := handler.NewCommunityProjectHandler(communityProjectService)

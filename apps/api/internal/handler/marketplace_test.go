@@ -953,3 +953,129 @@ func TestMarketplaceHTTP_FulfilmentSecurityAndJurisdiction(t *testing.T) {
 		t.Fatalf("Expected 200 OK for super admin cancellation, got %d: %s", rr.Code, rr.Body.String())
 	}
 }
+
+func TestMarketplaceHTTP_InventoryLedgerAndExpiryEndpoints(t *testing.T) {
+	h := setupTestHarness(t)
+	defer h.Pool.Close()
+	ctx := context.Background()
+
+	// 1. Cron endpoint authentication
+	// Missing cron secret
+	req, _ := http.NewRequest("POST", "/api/v1/internal/cron/expire-orders", nil)
+	rr := httptest.NewRecorder()
+	h.Router.ServeHTTP(rr, req)
+	if rr.Code != http.StatusUnauthorized {
+		t.Fatalf("Expected 401 for missing cron secret, got %d: %s", rr.Code, rr.Body.String())
+	}
+
+	// Invalid cron secret
+	req, _ = http.NewRequest("POST", "/api/v1/internal/cron/expire-orders", nil)
+	req.Header.Set("X-Cron-Secret", "wrong_secret")
+	rr = httptest.NewRecorder()
+	h.Router.ServeHTTP(rr, req)
+	if rr.Code != http.StatusUnauthorized {
+		t.Fatalf("Expected 401 for wrong cron secret, got %d: %s", rr.Code, rr.Body.String())
+	}
+
+	// Valid cron secret
+	req, _ = http.NewRequest("POST", "/api/v1/internal/cron/expire-orders?batch_size=20", nil)
+	req.Header.Set("X-Cron-Secret", "test_cron_secret_32_chars_long_123")
+	rr = httptest.NewRecorder()
+	h.Router.ServeHTTP(rr, req)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("Expected 200 OK for valid cron secret, got %d: %s", rr.Code, rr.Body.String())
+	}
+
+	// 2. Setup Seller & Product
+	seller1, token1 := createTestUserWithToken(t, h, "mkt_inv_seller1", "Seller 1", "member")
+	seller2, token2 := createTestUserWithToken(t, h, "mkt_inv_seller2", "Seller 2", "member")
+	_ = seller2
+	admin, adminToken := createTestUserWithToken(t, h, "mkt_inv_admin", "Admin", "super_admin")
+
+	biz1, err := h.MarketplaceService.RegisterBusiness(ctx, seller1, service.RegisterBusinessInput{
+		Name:          "Inventory Store 1",
+		Category:      "tools_hardware",
+		OwnershipType: "member_owned",
+		ContactEmail:  "inv_seller1@example.org",
+		ContactPhone:  "+2348000000001",
+	})
+	if err != nil {
+		t.Fatalf("RegisterBusiness failed: %v", err)
+	}
+	_, _ = h.MarketplaceService.ApproveBusiness(ctx, admin, biz1.ID, true, "")
+
+	prod1, err := h.MarketplaceService.CreateProduct(ctx, seller1, service.CreateProductInput{
+		BusinessID:    biz1.ID,
+		Title:         "Inventory Test Product",
+		Category:      "tools_hardware",
+		SKU:           fmt.Sprintf("SKU-INV-%d", time.Now().UnixNano()),
+		PriceKobo:     150000,
+		StockQuantity: 50,
+	})
+	if err != nil {
+		t.Fatalf("CreateProduct failed: %v", err)
+	}
+
+	// 3. Admin manually triggers order expiry via admin route
+	req, _ = http.NewRequest("POST", "/api/v1/marketplace/admin/inventory/expire-stale-orders", nil)
+	req.Header.Set("Authorization", "Bearer "+adminToken)
+	rr = httptest.NewRecorder()
+	h.Router.ServeHTTP(rr, req)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("Expected 200 OK for admin trigger order expiry, got %d: %s", rr.Code, rr.Body.String())
+	}
+
+	// Non-admin attempts to trigger admin order expiry -> 403 Forbidden
+	req, _ = http.NewRequest("POST", "/api/v1/marketplace/admin/inventory/expire-stale-orders", nil)
+	req.Header.Set("Authorization", "Bearer "+token1)
+	rr = httptest.NewRecorder()
+	h.Router.ServeHTTP(rr, req)
+	if rr.Code != http.StatusForbidden {
+		t.Fatalf("Expected 403 Forbidden for non-admin triggering order expiry, got %d: %s", rr.Code, rr.Body.String())
+	}
+
+	// 4. Manual Stock Adjustment
+	adjBody, _ := json.Marshal(map[string]interface{}{
+		"quantity_delta": 15,
+		"reason":         "Restock batch A",
+	})
+
+	// Seller 1 adjusts own product -> 200 OK
+	req, _ = http.NewRequest("POST", fmt.Sprintf("/api/v1/marketplace/seller/products/%s/adjust-stock", prod1.ID), bytes.NewBuffer(adjBody))
+	req.Header.Set("Authorization", "Bearer "+token1)
+	req.Header.Set("Content-Type", "application/json")
+	rr = httptest.NewRecorder()
+	h.Router.ServeHTTP(rr, req)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("Expected 200 OK for seller adjusting own stock, got %d: %s", rr.Code, rr.Body.String())
+	}
+
+	// Seller 2 attempts to adjust Seller 1's product -> 403 Forbidden
+	req, _ = http.NewRequest("POST", fmt.Sprintf("/api/v1/marketplace/seller/products/%s/adjust-stock", prod1.ID), bytes.NewBuffer(adjBody))
+	req.Header.Set("Authorization", "Bearer "+token2)
+	req.Header.Set("Content-Type", "application/json")
+	rr = httptest.NewRecorder()
+	h.Router.ServeHTTP(rr, req)
+	if rr.Code != http.StatusForbidden {
+		t.Fatalf("Expected 403 Forbidden for cross-seller adjusting stock, got %d: %s", rr.Code, rr.Body.String())
+	}
+
+	// 5. Fetch Inventory Logs
+	// Product inventory logs
+	req, _ = http.NewRequest("GET", fmt.Sprintf("/api/v1/marketplace/seller/products/%s/inventory-logs", prod1.ID), nil)
+	req.Header.Set("Authorization", "Bearer "+token1)
+	rr = httptest.NewRecorder()
+	h.Router.ServeHTTP(rr, req)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("Expected 200 OK for fetching product inventory logs, got %d: %s", rr.Code, rr.Body.String())
+	}
+
+	// Business inventory logs
+	req, _ = http.NewRequest("GET", "/api/v1/marketplace/seller/inventory-logs", nil)
+	req.Header.Set("Authorization", "Bearer "+token1)
+	rr = httptest.NewRecorder()
+	h.Router.ServeHTTP(rr, req)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("Expected 200 OK for fetching business inventory logs, got %d: %s", rr.Code, rr.Body.String())
+	}
+}

@@ -49,6 +49,7 @@ type Querier interface {
 	CountMyEventMedia(ctx context.Context, uploadedByUserID string) (int64, error)
 	CountNotificationSchedulesAdmin(ctx context.Context, status pgtype.Text) (int64, error)
 	CountNotificationsByRecipient(ctx context.Context, arg CountNotificationsByRecipientParams) (int64, error)
+	CountOrderInventoryReleaseLogs(ctx context.Context, arg CountOrderInventoryReleaseLogsParams) (int64, error)
 	CountOutboxAdmin(ctx context.Context, arg CountOutboxAdminParams) (int64, error)
 	CountPendingAppeals(ctx context.Context) (int64, error)
 	CountPendingClaims(ctx context.Context) (int64, error)
@@ -146,6 +147,7 @@ type Querier interface {
 	// Marketplace Disputes
 	// -------------------------------------------------------------
 	CreateMarketplaceDispute(ctx context.Context, arg CreateMarketplaceDisputeParams) (MarketplaceDispute, error)
+	CreateMarketplaceInventoryLog(ctx context.Context, arg CreateMarketplaceInventoryLogParams) (MarketplaceInventoryLog, error)
 	// -------------------------------------------------------------
 	// Marketplace Orders
 	// -------------------------------------------------------------
@@ -328,6 +330,7 @@ type Querier interface {
 	GetMarketplaceBusinessByOwner(ctx context.Context, ownerUserID string) (MarketplaceBusiness, error)
 	GetMarketplaceBusinessBySlug(ctx context.Context, slug string) (GetMarketplaceBusinessBySlugRow, error)
 	GetMarketplaceDisputeByID(ctx context.Context, id string) (GetMarketplaceDisputeByIDRow, error)
+	GetMarketplaceInventoryLogByIdempotencyKey(ctx context.Context, idempotencyKey pgtype.Text) (MarketplaceInventoryLog, error)
 	GetMarketplaceOrderByID(ctx context.Context, id string) (GetMarketplaceOrderByIDRow, error)
 	GetMarketplaceOrderByIdempotencyKey(ctx context.Context, idempotencyKey pgtype.Text) (MarketplaceOrder, error)
 	GetMarketplaceOrderByOrderNumber(ctx context.Context, orderNumber string) (GetMarketplaceOrderByOrderNumberRow, error)
@@ -337,6 +340,10 @@ type Querier interface {
 	GetMarketplacePaymentByReference(ctx context.Context, reference string) (MarketplacePayment, error)
 	GetMarketplacePaymentByReferenceForUpdate(ctx context.Context, reference string) (MarketplacePayment, error)
 	GetMarketplaceProductByID(ctx context.Context, id string) (GetMarketplaceProductByIDRow, error)
+	// -------------------------------------------------------------
+	// Inventory Ledger & Reservation Expiry Queries
+	// -------------------------------------------------------------
+	GetMarketplaceProductByIDForUpdate(ctx context.Context, id string) (GetMarketplaceProductByIDForUpdateRow, error)
 	GetMarketplaceProductBySlug(ctx context.Context, slug string) (GetMarketplaceProductBySlugRow, error)
 	GetMarketplaceRefundByID(ctx context.Context, id string) (MarketplaceRefund, error)
 	GetMarketplaceRefundByIDForUpdate(ctx context.Context, id string) (MarketplaceRefund, error)
@@ -452,6 +459,7 @@ type Querier interface {
 	ListEventGalleryMedia(ctx context.Context, arg ListEventGalleryMediaParams) ([]ListEventGalleryMediaRow, error)
 	ListEventsByState(ctx context.Context, stateID string) ([]ListEventsByStateRow, error)
 	ListExpensesFiltered(ctx context.Context, arg ListExpensesFilteredParams) ([]ListExpensesFilteredRow, error)
+	ListExpiredPendingMarketplaceOrders(ctx context.Context, arg ListExpiredPendingMarketplaceOrdersParams) ([]MarketplaceOrder, error)
 	ListFailedOutboxAdmin(ctx context.Context, arg ListFailedOutboxAdminParams) ([]NotificationOutbox, error)
 	ListFeaturedGalleryMedia(ctx context.Context, limit int32) ([]ListFeaturedGalleryMediaRow, error)
 	ListFinancialAuthorizations(ctx context.Context) ([]ListFinancialAuthorizationsRow, error)
@@ -466,6 +474,8 @@ type Querier interface {
 	ListLowStockAlerts(ctx context.Context) ([]ListLowStockAlertsRow, error)
 	ListMarketplaceBusinesses(ctx context.Context, arg ListMarketplaceBusinessesParams) ([]ListMarketplaceBusinessesRow, error)
 	ListMarketplaceDisputesByOrder(ctx context.Context, orderID string) ([]MarketplaceDispute, error)
+	ListMarketplaceInventoryLogsByBusiness(ctx context.Context, businessID string) ([]MarketplaceInventoryLog, error)
+	ListMarketplaceInventoryLogsByProduct(ctx context.Context, productID string) ([]MarketplaceInventoryLog, error)
 	ListMarketplaceOrderItemsByOrder(ctx context.Context, orderID string) ([]ListMarketplaceOrderItemsByOrderRow, error)
 	ListMarketplaceOrdersByBusiness(ctx context.Context, arg ListMarketplaceOrdersByBusinessParams) ([]ListMarketplaceOrdersByBusinessRow, error)
 	ListMarketplaceOrdersByBuyer(ctx context.Context, buyerUserID pgtype.Text) ([]ListMarketplaceOrdersByBuyerRow, error)
@@ -533,6 +543,8 @@ type Querier interface {
 	MarkMaterialTransferDispatched(ctx context.Context, arg MarkMaterialTransferDispatchedParams) (MaterialTransfer, error)
 	MarkMaterialTransferReceived(ctx context.Context, arg MarkMaterialTransferReceivedParams) (MaterialTransfer, error)
 	MarkNotificationRead(ctx context.Context, arg MarkNotificationReadParams) (Notification, error)
+	MarkOrderCancelledWithReason(ctx context.Context, arg MarkOrderCancelledWithReasonParams) (MarketplaceOrder, error)
+	MarkOrderRequiresReconciliation(ctx context.Context, arg MarkOrderRequiresReconciliationParams) (MarketplaceOrder, error)
 	MarkOutboxDeadLetter(ctx context.Context, arg MarkOutboxDeadLetterParams) (NotificationOutbox, error)
 	MarkOutboxDelivered(ctx context.Context, id string) (NotificationOutbox, error)
 	MarkOutboxRetry(ctx context.Context, arg MarkOutboxRetryParams) (NotificationOutbox, error)
@@ -559,6 +571,7 @@ type Querier interface {
 	RevokeAllUserSessions(ctx context.Context, userID string) error
 	RevokeFinancialAuthorization(ctx context.Context, id string) (FinancialAuthorization, error)
 	RevokeUserSession(ctx context.Context, tokenJti string) error
+	SetProductStockQuantity(ctx context.Context, arg SetProductStockQuantityParams) (MarketplaceProduct, error)
 	SetStockBalanceQuantities(ctx context.Context, arg SetStockBalanceQuantitiesParams) (StockBalance, error)
 	ToggleHeroMediaPlayback(ctx context.Context, arg ToggleHeroMediaPlaybackParams) (HomepageHeroMedium, error)
 	ToggleHideEventMedia(ctx context.Context, arg ToggleHideEventMediaParams) (EventMedium, error)
@@ -595,6 +608,7 @@ type Querier interface {
 	UpdateMarketplaceBusiness(ctx context.Context, arg UpdateMarketplaceBusinessParams) (MarketplaceBusiness, error)
 	UpdateMarketplaceBusinessStatus(ctx context.Context, arg UpdateMarketplaceBusinessStatusParams) (MarketplaceBusiness, error)
 	UpdateMarketplaceFulfilmentStatus(ctx context.Context, arg UpdateMarketplaceFulfilmentStatusParams) (MarketplaceOrder, error)
+	UpdateMarketplaceOrderExpiryFields(ctx context.Context, arg UpdateMarketplaceOrderExpiryFieldsParams) (MarketplaceOrder, error)
 	UpdateMarketplaceOrderPaymentStatus(ctx context.Context, arg UpdateMarketplaceOrderPaymentStatusParams) (MarketplaceOrder, error)
 	UpdateMarketplaceOrderStatus(ctx context.Context, arg UpdateMarketplaceOrderStatusParams) (MarketplaceOrder, error)
 	UpdateMarketplacePaymentTransactionStatus(ctx context.Context, arg UpdateMarketplacePaymentTransactionStatusParams) (MarketplacePayment, error)

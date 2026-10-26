@@ -850,30 +850,50 @@ type MarketplaceDispute struct {
 	UpdatedAt        pgtype.Timestamptz `json:"updated_at"`
 }
 
+type MarketplaceInventoryLog struct {
+	ID             string             `json:"id"`
+	ProductID      string             `json:"product_id"`
+	BusinessID     string             `json:"business_id"`
+	ActorUserID    pgtype.Text        `json:"actor_user_id"`
+	ActionType     string             `json:"action_type"`
+	QuantityDelta  int32              `json:"quantity_delta"`
+	BalanceAfter   int32              `json:"balance_after"`
+	OrderID        pgtype.Text        `json:"order_id"`
+	ReferenceID    string             `json:"reference_id"`
+	Reason         string             `json:"reason"`
+	IdempotencyKey pgtype.Text        `json:"idempotency_key"`
+	CreatedAt      pgtype.Timestamptz `json:"created_at"`
+}
+
 type MarketplaceOrder struct {
-	ID               string             `json:"id"`
-	OrderNumber      string             `json:"order_number"`
-	BuyerUserID      pgtype.Text        `json:"buyer_user_id"`
-	BuyerName        string             `json:"buyer_name"`
-	BuyerEmail       string             `json:"buyer_email"`
-	BuyerPhone       string             `json:"buyer_phone"`
-	DeliveryType     string             `json:"delivery_type"`
-	ShippingAddress  string             `json:"shipping_address"`
-	ShippingStateID  pgtype.Text        `json:"shipping_state_id"`
-	ShippingLgaID    pgtype.Text        `json:"shipping_lga_id"`
-	PickupBranchID   pgtype.Text        `json:"pickup_branch_id"`
-	SubtotalKobo     int64              `json:"subtotal_kobo"`
-	DeliveryFeeKobo  int64              `json:"delivery_fee_kobo"`
-	TotalKobo        int64              `json:"total_kobo"`
-	Currency         string             `json:"currency"`
-	OrderStatus      string             `json:"order_status"`
-	PaymentStatus    string             `json:"payment_status"`
-	FulfilmentStatus string             `json:"fulfilment_status"`
-	IdempotencyKey   pgtype.Text        `json:"idempotency_key"`
-	Notes            pgtype.Text        `json:"notes"`
-	CreatedAt        pgtype.Timestamptz `json:"created_at"`
-	UpdatedAt        pgtype.Timestamptz `json:"updated_at"`
-	Version          int32              `json:"version"`
+	ID                     string             `json:"id"`
+	OrderNumber            string             `json:"order_number"`
+	BuyerUserID            pgtype.Text        `json:"buyer_user_id"`
+	BuyerName              string             `json:"buyer_name"`
+	BuyerEmail             string             `json:"buyer_email"`
+	BuyerPhone             string             `json:"buyer_phone"`
+	DeliveryType           string             `json:"delivery_type"`
+	ShippingAddress        string             `json:"shipping_address"`
+	ShippingStateID        pgtype.Text        `json:"shipping_state_id"`
+	ShippingLgaID          pgtype.Text        `json:"shipping_lga_id"`
+	PickupBranchID         pgtype.Text        `json:"pickup_branch_id"`
+	SubtotalKobo           int64              `json:"subtotal_kobo"`
+	DeliveryFeeKobo        int64              `json:"delivery_fee_kobo"`
+	TotalKobo              int64              `json:"total_kobo"`
+	Currency               string             `json:"currency"`
+	OrderStatus            string             `json:"order_status"`
+	PaymentStatus          string             `json:"payment_status"`
+	FulfilmentStatus       string             `json:"fulfilment_status"`
+	IdempotencyKey         pgtype.Text        `json:"idempotency_key"`
+	Notes                  pgtype.Text        `json:"notes"`
+	CreatedAt              pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt              pgtype.Timestamptz `json:"updated_at"`
+	Version                int32              `json:"version"`
+	ReservationExpiresAt   pgtype.Timestamptz `json:"reservation_expires_at"`
+	CancellationReason     string             `json:"cancellation_reason"`
+	StockReleased          bool               `json:"stock_released"`
+	ReconciliationRequired bool               `json:"reconciliation_required"`
+	ReconciliationNotes    string             `json:"reconciliation_notes"`
 }
 
 type MarketplaceOrderItem struct {

@@ -1,10 +1,12 @@
 package handler
 
 import (
+	"crypto/subtle"
 	"encoding/json"
 	"errors"
 	"io"
 	"net/http"
+	"strconv"
 	"strings"
 
 	"github.com/go-chi/chi/v5"
@@ -16,10 +18,15 @@ import (
 
 type MarketplaceHandler struct {
 	marketplaceService *service.MarketplaceService
+	cronSecret         string
 }
 
 func NewMarketplaceHandler(marketplaceService *service.MarketplaceService) *MarketplaceHandler {
 	return &MarketplaceHandler{marketplaceService: marketplaceService}
+}
+
+func (h *MarketplaceHandler) SetCronSecret(secret string) {
+	h.cronSecret = secret
 }
 
 // -------------------------------------------------------------
@@ -1083,4 +1090,162 @@ func (h *MarketplaceHandler) AdminManualSettleRefund(w http.ResponseWriter, r *h
 		"refund": refund,
 		"order":  order,
 	})
+}
+
+// -------------------------------------------------------------
+// Inventory Ledger & Reservation Expiry Endpoints
+// -------------------------------------------------------------
+
+func (h *MarketplaceHandler) ExpireStaleOrdersCron(w http.ResponseWriter, r *http.Request) {
+	cronSecret := r.Header.Get("X-Cron-Secret")
+	if cronSecret == "" {
+		cronSecret = r.Header.Get("X-Report-Cron-Secret")
+	}
+	if cronSecret == "" {
+		authHeader := r.Header.Get("Authorization")
+		if strings.HasPrefix(authHeader, "Bearer ") {
+			cronSecret = strings.TrimPrefix(authHeader, "Bearer ")
+		}
+	}
+
+	if h.cronSecret == "" || subtle.ConstantTimeCompare([]byte(cronSecret), []byte(h.cronSecret)) != 1 {
+		ErrorJSON(w, http.StatusUnauthorized, "UNAUTHORIZED", "Invalid or missing cron secret", nil)
+		return
+	}
+
+	batchSize := 50
+	if bs := r.URL.Query().Get("batch_size"); bs != "" {
+		if val, err := strconv.Atoi(bs); err == nil && val > 0 {
+			batchSize = val
+		}
+	}
+
+	result, err := h.marketplaceService.ExpireStaleReservations(r.Context(), batchSize)
+	if err != nil {
+		ErrorJSON(w, http.StatusInternalServerError, "INTERNAL_ERROR", err.Error(), nil)
+		return
+	}
+
+	JSON(w, http.StatusOK, result)
+}
+
+func (h *MarketplaceHandler) AdminTriggerOrderExpiry(w http.ResponseWriter, r *http.Request) {
+	batchSize := 50
+	if bs := r.URL.Query().Get("batch_size"); bs != "" {
+		if val, err := strconv.Atoi(bs); err == nil && val > 0 {
+			batchSize = val
+		}
+	}
+
+	result, err := h.marketplaceService.ExpireStaleReservations(r.Context(), batchSize)
+	if err != nil {
+		ErrorJSON(w, http.StatusInternalServerError, "INTERNAL_ERROR", err.Error(), nil)
+		return
+	}
+
+	JSON(w, http.StatusOK, result)
+}
+
+func (h *MarketplaceHandler) AdjustProductStock(w http.ResponseWriter, r *http.Request) {
+	user := GetCurrentUser(r.Context())
+	if user == nil {
+		ErrorJSON(w, http.StatusUnauthorized, "UNAUTHORIZED", "Authentication required", nil)
+		return
+	}
+
+	productID := chi.URLParam(r, "id")
+	if productID == "" {
+		ErrorJSON(w, http.StatusBadRequest, "INVALID_REQUEST", "Product ID is required", nil)
+		return
+	}
+
+	var input service.AdjustInventoryInput
+	if err := json.NewDecoder(r.Body).Decode(&input); err != nil {
+		ErrorJSON(w, http.StatusBadRequest, "INVALID_REQUEST", "Malformed JSON payload", nil)
+		return
+	}
+
+	prod, invLog, err := h.marketplaceService.AdjustInventory(r.Context(), user, productID, input)
+	if err != nil {
+		if errors.Is(err, service.ErrScopeUnauthorized) || errors.Is(err, service.ErrUnauthorizedSellerAction) {
+			ErrorJSON(w, http.StatusForbidden, "FORBIDDEN", err.Error(), nil)
+			return
+		}
+		if errors.Is(err, service.ErrProductNotFound) {
+			ErrorJSON(w, http.StatusNotFound, "NOT_FOUND", err.Error(), nil)
+			return
+		}
+		ErrorJSON(w, http.StatusBadRequest, "ADJUSTMENT_FAILED", err.Error(), nil)
+		return
+	}
+
+	JSON(w, http.StatusOK, map[string]interface{}{
+		"status":        "stock_adjusted",
+		"product":       prod,
+		"inventory_log": invLog,
+	})
+}
+
+func (h *MarketplaceHandler) ListProductInventoryLogs(w http.ResponseWriter, r *http.Request) {
+	user := GetCurrentUser(r.Context())
+	if user == nil {
+		ErrorJSON(w, http.StatusUnauthorized, "UNAUTHORIZED", "Authentication required", nil)
+		return
+	}
+
+	productID := chi.URLParam(r, "id")
+	if productID == "" {
+		ErrorJSON(w, http.StatusBadRequest, "INVALID_REQUEST", "Product ID is required", nil)
+		return
+	}
+
+	logs, err := h.marketplaceService.ListProductInventoryLogs(r.Context(), user, productID)
+	if err != nil {
+		if errors.Is(err, service.ErrScopeUnauthorized) || errors.Is(err, service.ErrUnauthorizedSellerAction) {
+			ErrorJSON(w, http.StatusForbidden, "FORBIDDEN", err.Error(), nil)
+			return
+		}
+		if errors.Is(err, service.ErrProductNotFound) {
+			ErrorJSON(w, http.StatusNotFound, "NOT_FOUND", err.Error(), nil)
+			return
+		}
+		ErrorJSON(w, http.StatusInternalServerError, "INTERNAL_ERROR", err.Error(), nil)
+		return
+	}
+
+	JSON(w, http.StatusOK, logs)
+}
+
+func (h *MarketplaceHandler) ListBusinessInventoryLogs(w http.ResponseWriter, r *http.Request) {
+	user := GetCurrentUser(r.Context())
+	if user == nil {
+		ErrorJSON(w, http.StatusUnauthorized, "UNAUTHORIZED", "Authentication required", nil)
+		return
+	}
+
+	businessID := r.URL.Query().Get("business_id")
+	if businessID == "" {
+		b, err := h.marketplaceService.GetMyBusiness(r.Context(), user)
+		if err != nil {
+			ErrorJSON(w, http.StatusBadRequest, "INVALID_REQUEST", "business_id parameter is required", nil)
+			return
+		}
+		businessID = b.ID
+	}
+
+	logs, err := h.marketplaceService.ListBusinessInventoryLogs(r.Context(), user, businessID)
+	if err != nil {
+		if errors.Is(err, service.ErrScopeUnauthorized) || errors.Is(err, service.ErrUnauthorizedSellerAction) {
+			ErrorJSON(w, http.StatusForbidden, "FORBIDDEN", err.Error(), nil)
+			return
+		}
+		if errors.Is(err, service.ErrBusinessNotFound) {
+			ErrorJSON(w, http.StatusNotFound, "NOT_FOUND", err.Error(), nil)
+			return
+		}
+		ErrorJSON(w, http.StatusInternalServerError, "INTERNAL_ERROR", err.Error(), nil)
+		return
+	}
+
+	JSON(w, http.StatusOK, logs)
 }

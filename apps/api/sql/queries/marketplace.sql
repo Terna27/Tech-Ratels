@@ -265,13 +265,13 @@ INSERT INTO marketplace_orders (
     delivery_type, shipping_address, shipping_state_id, shipping_lga_id,
     pickup_branch_id, subtotal_kobo, delivery_fee_kobo, total_kobo,
     currency, order_status, payment_status, fulfilment_status,
-    idempotency_key, notes, created_at, updated_at, version
+    idempotency_key, notes, reservation_expires_at, created_at, updated_at, version
 ) VALUES (
     $1, $2, $3, $4, $5, $6,
     $7, $8, $9, $10,
     $11, $12, $13, $14,
     $15, $16, $17, $18,
-    $19, $20, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, 1
+    $19, $20, $21, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, 1
 ) RETURNING *;
 
 -- name: GetMarketplaceOrderByID :one
@@ -616,5 +616,98 @@ SET status = $2,
     settlement_notes = $5,
     metadata = $6,
     updated_at = CURRENT_TIMESTAMP
+WHERE id = $1
+RETURNING *;
+
+-- -------------------------------------------------------------
+-- Inventory Ledger & Reservation Expiry Queries
+-- -------------------------------------------------------------
+
+-- name: GetMarketplaceProductByIDForUpdate :one
+SELECT p.*,
+       b.name as business_name,
+       b.slug as business_slug,
+       b.status as business_status,
+       b.owner_user_id as business_owner_id
+FROM marketplace_products p
+JOIN marketplace_businesses b ON p.business_id = b.id
+WHERE p.id = $1
+FOR UPDATE;
+
+-- name: SetProductStockQuantity :one
+UPDATE marketplace_products
+SET stock_quantity = $2,
+    updated_at = CURRENT_TIMESTAMP,
+    version = version + 1
+WHERE id = $1 AND $2 >= 0
+RETURNING *;
+
+-- name: CreateMarketplaceInventoryLog :one
+INSERT INTO marketplace_inventory_logs (
+    id, product_id, business_id, actor_user_id, action_type,
+    quantity_delta, balance_after, order_id, reference_id, reason, idempotency_key
+) VALUES (
+    $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11
+)
+RETURNING *;
+
+-- name: ListMarketplaceInventoryLogsByProduct :many
+SELECT * FROM marketplace_inventory_logs
+WHERE product_id = $1
+ORDER BY created_at DESC;
+
+-- name: ListMarketplaceInventoryLogsByBusiness :many
+SELECT * FROM marketplace_inventory_logs
+WHERE business_id = $1
+ORDER BY created_at DESC;
+
+-- name: GetMarketplaceInventoryLogByIdempotencyKey :one
+SELECT * FROM marketplace_inventory_logs
+WHERE idempotency_key = $1;
+
+-- name: CountOrderInventoryReleaseLogs :one
+SELECT COUNT(*) FROM marketplace_inventory_logs
+WHERE order_id = $1 AND product_id = $2
+  AND action_type IN ('reservation_release', 'cancellation_restock', 'refund_restock');
+
+-- name: ListExpiredPendingMarketplaceOrders :many
+SELECT * FROM marketplace_orders
+WHERE payment_status = 'pending'
+  AND order_status = 'placed'
+  AND stock_released = FALSE
+  AND reservation_expires_at IS NOT NULL
+  AND reservation_expires_at <= $1
+ORDER BY reservation_expires_at ASC
+LIMIT $2;
+
+-- name: UpdateMarketplaceOrderExpiryFields :one
+UPDATE marketplace_orders
+SET reservation_expires_at = $2,
+    cancellation_reason = $3,
+    stock_released = $4,
+    reconciliation_required = $5,
+    reconciliation_notes = $6,
+    updated_at = CURRENT_TIMESTAMP,
+    version = version + 1
+WHERE id = $1
+RETURNING *;
+
+-- name: MarkOrderCancelledWithReason :one
+UPDATE marketplace_orders
+SET order_status = 'cancelled',
+    cancellation_reason = $2,
+    stock_released = $3,
+    updated_at = CURRENT_TIMESTAMP,
+    version = version + 1
+WHERE id = $1
+RETURNING *;
+
+-- name: MarkOrderRequiresReconciliation :one
+UPDATE marketplace_orders
+SET order_status = 'requires_reconciliation',
+    reconciliation_required = TRUE,
+    reconciliation_notes = $2,
+    updated_at = CURRENT_TIMESTAMP,
+    version = version + 1
 WHERE id = $1
 RETURNING *;

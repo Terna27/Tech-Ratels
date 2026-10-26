@@ -12,6 +12,24 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 )
 
+const countOrderInventoryReleaseLogs = `-- name: CountOrderInventoryReleaseLogs :one
+SELECT COUNT(*) FROM marketplace_inventory_logs
+WHERE order_id = $1 AND product_id = $2
+  AND action_type IN ('reservation_release', 'cancellation_restock', 'refund_restock')
+`
+
+type CountOrderInventoryReleaseLogsParams struct {
+	OrderID   pgtype.Text `json:"order_id"`
+	ProductID string      `json:"product_id"`
+}
+
+func (q *Queries) CountOrderInventoryReleaseLogs(ctx context.Context, arg CountOrderInventoryReleaseLogsParams) (int64, error) {
+	row := q.db.QueryRow(ctx, countOrderInventoryReleaseLogs, arg.OrderID, arg.ProductID)
+	var count int64
+	err := row.Scan(&count)
+	return count, err
+}
+
 const createBusinessBranch = `-- name: CreateBusinessBranch :one
 
 INSERT INTO marketplace_business_branches (
@@ -211,6 +229,62 @@ func (q *Queries) CreateMarketplaceDispute(ctx context.Context, arg CreateMarket
 	return i, err
 }
 
+const createMarketplaceInventoryLog = `-- name: CreateMarketplaceInventoryLog :one
+INSERT INTO marketplace_inventory_logs (
+    id, product_id, business_id, actor_user_id, action_type,
+    quantity_delta, balance_after, order_id, reference_id, reason, idempotency_key
+) VALUES (
+    $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11
+)
+RETURNING id, product_id, business_id, actor_user_id, action_type, quantity_delta, balance_after, order_id, reference_id, reason, idempotency_key, created_at
+`
+
+type CreateMarketplaceInventoryLogParams struct {
+	ID             string      `json:"id"`
+	ProductID      string      `json:"product_id"`
+	BusinessID     string      `json:"business_id"`
+	ActorUserID    pgtype.Text `json:"actor_user_id"`
+	ActionType     string      `json:"action_type"`
+	QuantityDelta  int32       `json:"quantity_delta"`
+	BalanceAfter   int32       `json:"balance_after"`
+	OrderID        pgtype.Text `json:"order_id"`
+	ReferenceID    string      `json:"reference_id"`
+	Reason         string      `json:"reason"`
+	IdempotencyKey pgtype.Text `json:"idempotency_key"`
+}
+
+func (q *Queries) CreateMarketplaceInventoryLog(ctx context.Context, arg CreateMarketplaceInventoryLogParams) (MarketplaceInventoryLog, error) {
+	row := q.db.QueryRow(ctx, createMarketplaceInventoryLog,
+		arg.ID,
+		arg.ProductID,
+		arg.BusinessID,
+		arg.ActorUserID,
+		arg.ActionType,
+		arg.QuantityDelta,
+		arg.BalanceAfter,
+		arg.OrderID,
+		arg.ReferenceID,
+		arg.Reason,
+		arg.IdempotencyKey,
+	)
+	var i MarketplaceInventoryLog
+	err := row.Scan(
+		&i.ID,
+		&i.ProductID,
+		&i.BusinessID,
+		&i.ActorUserID,
+		&i.ActionType,
+		&i.QuantityDelta,
+		&i.BalanceAfter,
+		&i.OrderID,
+		&i.ReferenceID,
+		&i.Reason,
+		&i.IdempotencyKey,
+		&i.CreatedAt,
+	)
+	return i, err
+}
+
 const createMarketplaceOrder = `-- name: CreateMarketplaceOrder :one
 
 INSERT INTO marketplace_orders (
@@ -218,37 +292,38 @@ INSERT INTO marketplace_orders (
     delivery_type, shipping_address, shipping_state_id, shipping_lga_id,
     pickup_branch_id, subtotal_kobo, delivery_fee_kobo, total_kobo,
     currency, order_status, payment_status, fulfilment_status,
-    idempotency_key, notes, created_at, updated_at, version
+    idempotency_key, notes, reservation_expires_at, created_at, updated_at, version
 ) VALUES (
     $1, $2, $3, $4, $5, $6,
     $7, $8, $9, $10,
     $11, $12, $13, $14,
     $15, $16, $17, $18,
-    $19, $20, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, 1
-) RETURNING id, order_number, buyer_user_id, buyer_name, buyer_email, buyer_phone, delivery_type, shipping_address, shipping_state_id, shipping_lga_id, pickup_branch_id, subtotal_kobo, delivery_fee_kobo, total_kobo, currency, order_status, payment_status, fulfilment_status, idempotency_key, notes, created_at, updated_at, version
+    $19, $20, $21, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, 1
+) RETURNING id, order_number, buyer_user_id, buyer_name, buyer_email, buyer_phone, delivery_type, shipping_address, shipping_state_id, shipping_lga_id, pickup_branch_id, subtotal_kobo, delivery_fee_kobo, total_kobo, currency, order_status, payment_status, fulfilment_status, idempotency_key, notes, created_at, updated_at, version, reservation_expires_at, cancellation_reason, stock_released, reconciliation_required, reconciliation_notes
 `
 
 type CreateMarketplaceOrderParams struct {
-	ID               string      `json:"id"`
-	OrderNumber      string      `json:"order_number"`
-	BuyerUserID      pgtype.Text `json:"buyer_user_id"`
-	BuyerName        string      `json:"buyer_name"`
-	BuyerEmail       string      `json:"buyer_email"`
-	BuyerPhone       string      `json:"buyer_phone"`
-	DeliveryType     string      `json:"delivery_type"`
-	ShippingAddress  string      `json:"shipping_address"`
-	ShippingStateID  pgtype.Text `json:"shipping_state_id"`
-	ShippingLgaID    pgtype.Text `json:"shipping_lga_id"`
-	PickupBranchID   pgtype.Text `json:"pickup_branch_id"`
-	SubtotalKobo     int64       `json:"subtotal_kobo"`
-	DeliveryFeeKobo  int64       `json:"delivery_fee_kobo"`
-	TotalKobo        int64       `json:"total_kobo"`
-	Currency         string      `json:"currency"`
-	OrderStatus      string      `json:"order_status"`
-	PaymentStatus    string      `json:"payment_status"`
-	FulfilmentStatus string      `json:"fulfilment_status"`
-	IdempotencyKey   pgtype.Text `json:"idempotency_key"`
-	Notes            pgtype.Text `json:"notes"`
+	ID                   string             `json:"id"`
+	OrderNumber          string             `json:"order_number"`
+	BuyerUserID          pgtype.Text        `json:"buyer_user_id"`
+	BuyerName            string             `json:"buyer_name"`
+	BuyerEmail           string             `json:"buyer_email"`
+	BuyerPhone           string             `json:"buyer_phone"`
+	DeliveryType         string             `json:"delivery_type"`
+	ShippingAddress      string             `json:"shipping_address"`
+	ShippingStateID      pgtype.Text        `json:"shipping_state_id"`
+	ShippingLgaID        pgtype.Text        `json:"shipping_lga_id"`
+	PickupBranchID       pgtype.Text        `json:"pickup_branch_id"`
+	SubtotalKobo         int64              `json:"subtotal_kobo"`
+	DeliveryFeeKobo      int64              `json:"delivery_fee_kobo"`
+	TotalKobo            int64              `json:"total_kobo"`
+	Currency             string             `json:"currency"`
+	OrderStatus          string             `json:"order_status"`
+	PaymentStatus        string             `json:"payment_status"`
+	FulfilmentStatus     string             `json:"fulfilment_status"`
+	IdempotencyKey       pgtype.Text        `json:"idempotency_key"`
+	Notes                pgtype.Text        `json:"notes"`
+	ReservationExpiresAt pgtype.Timestamptz `json:"reservation_expires_at"`
 }
 
 // -------------------------------------------------------------
@@ -276,6 +351,7 @@ func (q *Queries) CreateMarketplaceOrder(ctx context.Context, arg CreateMarketpl
 		arg.FulfilmentStatus,
 		arg.IdempotencyKey,
 		arg.Notes,
+		arg.ReservationExpiresAt,
 	)
 	var i MarketplaceOrder
 	err := row.Scan(
@@ -302,6 +378,11 @@ func (q *Queries) CreateMarketplaceOrder(ctx context.Context, arg CreateMarketpl
 		&i.CreatedAt,
 		&i.UpdatedAt,
 		&i.Version,
+		&i.ReservationExpiresAt,
+		&i.CancellationReason,
+		&i.StockReleased,
+		&i.ReconciliationRequired,
+		&i.ReconciliationNotes,
 	)
 	return i, err
 }
@@ -1044,8 +1125,33 @@ func (q *Queries) GetMarketplaceDisputeByID(ctx context.Context, id string) (Get
 	return i, err
 }
 
+const getMarketplaceInventoryLogByIdempotencyKey = `-- name: GetMarketplaceInventoryLogByIdempotencyKey :one
+SELECT id, product_id, business_id, actor_user_id, action_type, quantity_delta, balance_after, order_id, reference_id, reason, idempotency_key, created_at FROM marketplace_inventory_logs
+WHERE idempotency_key = $1
+`
+
+func (q *Queries) GetMarketplaceInventoryLogByIdempotencyKey(ctx context.Context, idempotencyKey pgtype.Text) (MarketplaceInventoryLog, error) {
+	row := q.db.QueryRow(ctx, getMarketplaceInventoryLogByIdempotencyKey, idempotencyKey)
+	var i MarketplaceInventoryLog
+	err := row.Scan(
+		&i.ID,
+		&i.ProductID,
+		&i.BusinessID,
+		&i.ActorUserID,
+		&i.ActionType,
+		&i.QuantityDelta,
+		&i.BalanceAfter,
+		&i.OrderID,
+		&i.ReferenceID,
+		&i.Reason,
+		&i.IdempotencyKey,
+		&i.CreatedAt,
+	)
+	return i, err
+}
+
 const getMarketplaceOrderByID = `-- name: GetMarketplaceOrderByID :one
-SELECT o.id, o.order_number, o.buyer_user_id, o.buyer_name, o.buyer_email, o.buyer_phone, o.delivery_type, o.shipping_address, o.shipping_state_id, o.shipping_lga_id, o.pickup_branch_id, o.subtotal_kobo, o.delivery_fee_kobo, o.total_kobo, o.currency, o.order_status, o.payment_status, o.fulfilment_status, o.idempotency_key, o.notes, o.created_at, o.updated_at, o.version,
+SELECT o.id, o.order_number, o.buyer_user_id, o.buyer_name, o.buyer_email, o.buyer_phone, o.delivery_type, o.shipping_address, o.shipping_state_id, o.shipping_lga_id, o.pickup_branch_id, o.subtotal_kobo, o.delivery_fee_kobo, o.total_kobo, o.currency, o.order_status, o.payment_status, o.fulfilment_status, o.idempotency_key, o.notes, o.created_at, o.updated_at, o.version, o.reservation_expires_at, o.cancellation_reason, o.stock_released, o.reconciliation_required, o.reconciliation_notes,
        s.name as shipping_state_name,
        l.name as shipping_lga_name,
        br.branch_name as pickup_branch_name,
@@ -1058,33 +1164,38 @@ WHERE o.id = $1
 `
 
 type GetMarketplaceOrderByIDRow struct {
-	ID                  string             `json:"id"`
-	OrderNumber         string             `json:"order_number"`
-	BuyerUserID         pgtype.Text        `json:"buyer_user_id"`
-	BuyerName           string             `json:"buyer_name"`
-	BuyerEmail          string             `json:"buyer_email"`
-	BuyerPhone          string             `json:"buyer_phone"`
-	DeliveryType        string             `json:"delivery_type"`
-	ShippingAddress     string             `json:"shipping_address"`
-	ShippingStateID     pgtype.Text        `json:"shipping_state_id"`
-	ShippingLgaID       pgtype.Text        `json:"shipping_lga_id"`
-	PickupBranchID      pgtype.Text        `json:"pickup_branch_id"`
-	SubtotalKobo        int64              `json:"subtotal_kobo"`
-	DeliveryFeeKobo     int64              `json:"delivery_fee_kobo"`
-	TotalKobo           int64              `json:"total_kobo"`
-	Currency            string             `json:"currency"`
-	OrderStatus         string             `json:"order_status"`
-	PaymentStatus       string             `json:"payment_status"`
-	FulfilmentStatus    string             `json:"fulfilment_status"`
-	IdempotencyKey      pgtype.Text        `json:"idempotency_key"`
-	Notes               pgtype.Text        `json:"notes"`
-	CreatedAt           pgtype.Timestamptz `json:"created_at"`
-	UpdatedAt           pgtype.Timestamptz `json:"updated_at"`
-	Version             int32              `json:"version"`
-	ShippingStateName   pgtype.Text        `json:"shipping_state_name"`
-	ShippingLgaName     pgtype.Text        `json:"shipping_lga_name"`
-	PickupBranchName    pgtype.Text        `json:"pickup_branch_name"`
-	PickupBranchAddress pgtype.Text        `json:"pickup_branch_address"`
+	ID                     string             `json:"id"`
+	OrderNumber            string             `json:"order_number"`
+	BuyerUserID            pgtype.Text        `json:"buyer_user_id"`
+	BuyerName              string             `json:"buyer_name"`
+	BuyerEmail             string             `json:"buyer_email"`
+	BuyerPhone             string             `json:"buyer_phone"`
+	DeliveryType           string             `json:"delivery_type"`
+	ShippingAddress        string             `json:"shipping_address"`
+	ShippingStateID        pgtype.Text        `json:"shipping_state_id"`
+	ShippingLgaID          pgtype.Text        `json:"shipping_lga_id"`
+	PickupBranchID         pgtype.Text        `json:"pickup_branch_id"`
+	SubtotalKobo           int64              `json:"subtotal_kobo"`
+	DeliveryFeeKobo        int64              `json:"delivery_fee_kobo"`
+	TotalKobo              int64              `json:"total_kobo"`
+	Currency               string             `json:"currency"`
+	OrderStatus            string             `json:"order_status"`
+	PaymentStatus          string             `json:"payment_status"`
+	FulfilmentStatus       string             `json:"fulfilment_status"`
+	IdempotencyKey         pgtype.Text        `json:"idempotency_key"`
+	Notes                  pgtype.Text        `json:"notes"`
+	CreatedAt              pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt              pgtype.Timestamptz `json:"updated_at"`
+	Version                int32              `json:"version"`
+	ReservationExpiresAt   pgtype.Timestamptz `json:"reservation_expires_at"`
+	CancellationReason     string             `json:"cancellation_reason"`
+	StockReleased          bool               `json:"stock_released"`
+	ReconciliationRequired bool               `json:"reconciliation_required"`
+	ReconciliationNotes    string             `json:"reconciliation_notes"`
+	ShippingStateName      pgtype.Text        `json:"shipping_state_name"`
+	ShippingLgaName        pgtype.Text        `json:"shipping_lga_name"`
+	PickupBranchName       pgtype.Text        `json:"pickup_branch_name"`
+	PickupBranchAddress    pgtype.Text        `json:"pickup_branch_address"`
 }
 
 func (q *Queries) GetMarketplaceOrderByID(ctx context.Context, id string) (GetMarketplaceOrderByIDRow, error) {
@@ -1114,6 +1225,11 @@ func (q *Queries) GetMarketplaceOrderByID(ctx context.Context, id string) (GetMa
 		&i.CreatedAt,
 		&i.UpdatedAt,
 		&i.Version,
+		&i.ReservationExpiresAt,
+		&i.CancellationReason,
+		&i.StockReleased,
+		&i.ReconciliationRequired,
+		&i.ReconciliationNotes,
 		&i.ShippingStateName,
 		&i.ShippingLgaName,
 		&i.PickupBranchName,
@@ -1123,7 +1239,7 @@ func (q *Queries) GetMarketplaceOrderByID(ctx context.Context, id string) (GetMa
 }
 
 const getMarketplaceOrderByIdempotencyKey = `-- name: GetMarketplaceOrderByIdempotencyKey :one
-SELECT id, order_number, buyer_user_id, buyer_name, buyer_email, buyer_phone, delivery_type, shipping_address, shipping_state_id, shipping_lga_id, pickup_branch_id, subtotal_kobo, delivery_fee_kobo, total_kobo, currency, order_status, payment_status, fulfilment_status, idempotency_key, notes, created_at, updated_at, version FROM marketplace_orders
+SELECT id, order_number, buyer_user_id, buyer_name, buyer_email, buyer_phone, delivery_type, shipping_address, shipping_state_id, shipping_lga_id, pickup_branch_id, subtotal_kobo, delivery_fee_kobo, total_kobo, currency, order_status, payment_status, fulfilment_status, idempotency_key, notes, created_at, updated_at, version, reservation_expires_at, cancellation_reason, stock_released, reconciliation_required, reconciliation_notes FROM marketplace_orders
 WHERE idempotency_key = $1
 `
 
@@ -1154,12 +1270,17 @@ func (q *Queries) GetMarketplaceOrderByIdempotencyKey(ctx context.Context, idemp
 		&i.CreatedAt,
 		&i.UpdatedAt,
 		&i.Version,
+		&i.ReservationExpiresAt,
+		&i.CancellationReason,
+		&i.StockReleased,
+		&i.ReconciliationRequired,
+		&i.ReconciliationNotes,
 	)
 	return i, err
 }
 
 const getMarketplaceOrderByOrderNumber = `-- name: GetMarketplaceOrderByOrderNumber :one
-SELECT o.id, o.order_number, o.buyer_user_id, o.buyer_name, o.buyer_email, o.buyer_phone, o.delivery_type, o.shipping_address, o.shipping_state_id, o.shipping_lga_id, o.pickup_branch_id, o.subtotal_kobo, o.delivery_fee_kobo, o.total_kobo, o.currency, o.order_status, o.payment_status, o.fulfilment_status, o.idempotency_key, o.notes, o.created_at, o.updated_at, o.version,
+SELECT o.id, o.order_number, o.buyer_user_id, o.buyer_name, o.buyer_email, o.buyer_phone, o.delivery_type, o.shipping_address, o.shipping_state_id, o.shipping_lga_id, o.pickup_branch_id, o.subtotal_kobo, o.delivery_fee_kobo, o.total_kobo, o.currency, o.order_status, o.payment_status, o.fulfilment_status, o.idempotency_key, o.notes, o.created_at, o.updated_at, o.version, o.reservation_expires_at, o.cancellation_reason, o.stock_released, o.reconciliation_required, o.reconciliation_notes,
        s.name as shipping_state_name,
        l.name as shipping_lga_name,
        br.branch_name as pickup_branch_name,
@@ -1172,33 +1293,38 @@ WHERE o.order_number = $1
 `
 
 type GetMarketplaceOrderByOrderNumberRow struct {
-	ID                  string             `json:"id"`
-	OrderNumber         string             `json:"order_number"`
-	BuyerUserID         pgtype.Text        `json:"buyer_user_id"`
-	BuyerName           string             `json:"buyer_name"`
-	BuyerEmail          string             `json:"buyer_email"`
-	BuyerPhone          string             `json:"buyer_phone"`
-	DeliveryType        string             `json:"delivery_type"`
-	ShippingAddress     string             `json:"shipping_address"`
-	ShippingStateID     pgtype.Text        `json:"shipping_state_id"`
-	ShippingLgaID       pgtype.Text        `json:"shipping_lga_id"`
-	PickupBranchID      pgtype.Text        `json:"pickup_branch_id"`
-	SubtotalKobo        int64              `json:"subtotal_kobo"`
-	DeliveryFeeKobo     int64              `json:"delivery_fee_kobo"`
-	TotalKobo           int64              `json:"total_kobo"`
-	Currency            string             `json:"currency"`
-	OrderStatus         string             `json:"order_status"`
-	PaymentStatus       string             `json:"payment_status"`
-	FulfilmentStatus    string             `json:"fulfilment_status"`
-	IdempotencyKey      pgtype.Text        `json:"idempotency_key"`
-	Notes               pgtype.Text        `json:"notes"`
-	CreatedAt           pgtype.Timestamptz `json:"created_at"`
-	UpdatedAt           pgtype.Timestamptz `json:"updated_at"`
-	Version             int32              `json:"version"`
-	ShippingStateName   pgtype.Text        `json:"shipping_state_name"`
-	ShippingLgaName     pgtype.Text        `json:"shipping_lga_name"`
-	PickupBranchName    pgtype.Text        `json:"pickup_branch_name"`
-	PickupBranchAddress pgtype.Text        `json:"pickup_branch_address"`
+	ID                     string             `json:"id"`
+	OrderNumber            string             `json:"order_number"`
+	BuyerUserID            pgtype.Text        `json:"buyer_user_id"`
+	BuyerName              string             `json:"buyer_name"`
+	BuyerEmail             string             `json:"buyer_email"`
+	BuyerPhone             string             `json:"buyer_phone"`
+	DeliveryType           string             `json:"delivery_type"`
+	ShippingAddress        string             `json:"shipping_address"`
+	ShippingStateID        pgtype.Text        `json:"shipping_state_id"`
+	ShippingLgaID          pgtype.Text        `json:"shipping_lga_id"`
+	PickupBranchID         pgtype.Text        `json:"pickup_branch_id"`
+	SubtotalKobo           int64              `json:"subtotal_kobo"`
+	DeliveryFeeKobo        int64              `json:"delivery_fee_kobo"`
+	TotalKobo              int64              `json:"total_kobo"`
+	Currency               string             `json:"currency"`
+	OrderStatus            string             `json:"order_status"`
+	PaymentStatus          string             `json:"payment_status"`
+	FulfilmentStatus       string             `json:"fulfilment_status"`
+	IdempotencyKey         pgtype.Text        `json:"idempotency_key"`
+	Notes                  pgtype.Text        `json:"notes"`
+	CreatedAt              pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt              pgtype.Timestamptz `json:"updated_at"`
+	Version                int32              `json:"version"`
+	ReservationExpiresAt   pgtype.Timestamptz `json:"reservation_expires_at"`
+	CancellationReason     string             `json:"cancellation_reason"`
+	StockReleased          bool               `json:"stock_released"`
+	ReconciliationRequired bool               `json:"reconciliation_required"`
+	ReconciliationNotes    string             `json:"reconciliation_notes"`
+	ShippingStateName      pgtype.Text        `json:"shipping_state_name"`
+	ShippingLgaName        pgtype.Text        `json:"shipping_lga_name"`
+	PickupBranchName       pgtype.Text        `json:"pickup_branch_name"`
+	PickupBranchAddress    pgtype.Text        `json:"pickup_branch_address"`
 }
 
 func (q *Queries) GetMarketplaceOrderByOrderNumber(ctx context.Context, orderNumber string) (GetMarketplaceOrderByOrderNumberRow, error) {
@@ -1228,6 +1354,11 @@ func (q *Queries) GetMarketplaceOrderByOrderNumber(ctx context.Context, orderNum
 		&i.CreatedAt,
 		&i.UpdatedAt,
 		&i.Version,
+		&i.ReservationExpiresAt,
+		&i.CancellationReason,
+		&i.StockReleased,
+		&i.ReconciliationRequired,
+		&i.ReconciliationNotes,
 		&i.ShippingStateName,
 		&i.ShippingLgaName,
 		&i.PickupBranchName,
@@ -1237,7 +1368,7 @@ func (q *Queries) GetMarketplaceOrderByOrderNumber(ctx context.Context, orderNum
 }
 
 const getMarketplaceOrderForUpdate = `-- name: GetMarketplaceOrderForUpdate :one
-SELECT id, order_number, buyer_user_id, buyer_name, buyer_email, buyer_phone, delivery_type, shipping_address, shipping_state_id, shipping_lga_id, pickup_branch_id, subtotal_kobo, delivery_fee_kobo, total_kobo, currency, order_status, payment_status, fulfilment_status, idempotency_key, notes, created_at, updated_at, version FROM marketplace_orders
+SELECT id, order_number, buyer_user_id, buyer_name, buyer_email, buyer_phone, delivery_type, shipping_address, shipping_state_id, shipping_lga_id, pickup_branch_id, subtotal_kobo, delivery_fee_kobo, total_kobo, currency, order_status, payment_status, fulfilment_status, idempotency_key, notes, created_at, updated_at, version, reservation_expires_at, cancellation_reason, stock_released, reconciliation_required, reconciliation_notes FROM marketplace_orders
 WHERE id = $1
 FOR UPDATE
 `
@@ -1269,6 +1400,11 @@ func (q *Queries) GetMarketplaceOrderForUpdate(ctx context.Context, id string) (
 		&i.CreatedAt,
 		&i.UpdatedAt,
 		&i.Version,
+		&i.ReservationExpiresAt,
+		&i.CancellationReason,
+		&i.StockReleased,
+		&i.ReconciliationRequired,
+		&i.ReconciliationNotes,
 	)
 	return i, err
 }
@@ -1469,6 +1605,83 @@ func (q *Queries) GetMarketplaceProductByID(ctx context.Context, id string) (Get
 		&i.BusinessOwnerID,
 		&i.BranchName,
 		&i.BranchStateName,
+	)
+	return i, err
+}
+
+const getMarketplaceProductByIDForUpdate = `-- name: GetMarketplaceProductByIDForUpdate :one
+
+SELECT p.id, p.business_id, p.branch_id, p.title, p.slug, p.description, p.category, p.sku, p.price_kobo, p.compare_at_price_kobo, p.stock_quantity, p.low_stock_threshold, p.images, p.weight_grams, p.delivery_restrictions, p.return_policy, p.status, p.is_featured, p.created_at, p.updated_at, p.version,
+       b.name as business_name,
+       b.slug as business_slug,
+       b.status as business_status,
+       b.owner_user_id as business_owner_id
+FROM marketplace_products p
+JOIN marketplace_businesses b ON p.business_id = b.id
+WHERE p.id = $1
+FOR UPDATE
+`
+
+type GetMarketplaceProductByIDForUpdateRow struct {
+	ID                   string             `json:"id"`
+	BusinessID           string             `json:"business_id"`
+	BranchID             pgtype.Text        `json:"branch_id"`
+	Title                string             `json:"title"`
+	Slug                 string             `json:"slug"`
+	Description          string             `json:"description"`
+	Category             string             `json:"category"`
+	Sku                  string             `json:"sku"`
+	PriceKobo            int64              `json:"price_kobo"`
+	CompareAtPriceKobo   pgtype.Int8        `json:"compare_at_price_kobo"`
+	StockQuantity        int32              `json:"stock_quantity"`
+	LowStockThreshold    int32              `json:"low_stock_threshold"`
+	Images               json.RawMessage    `json:"images"`
+	WeightGrams          pgtype.Int4        `json:"weight_grams"`
+	DeliveryRestrictions pgtype.Text        `json:"delivery_restrictions"`
+	ReturnPolicy         pgtype.Text        `json:"return_policy"`
+	Status               string             `json:"status"`
+	IsFeatured           bool               `json:"is_featured"`
+	CreatedAt            pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt            pgtype.Timestamptz `json:"updated_at"`
+	Version              int32              `json:"version"`
+	BusinessName         string             `json:"business_name"`
+	BusinessSlug         string             `json:"business_slug"`
+	BusinessStatus       string             `json:"business_status"`
+	BusinessOwnerID      string             `json:"business_owner_id"`
+}
+
+// -------------------------------------------------------------
+// Inventory Ledger & Reservation Expiry Queries
+// -------------------------------------------------------------
+func (q *Queries) GetMarketplaceProductByIDForUpdate(ctx context.Context, id string) (GetMarketplaceProductByIDForUpdateRow, error) {
+	row := q.db.QueryRow(ctx, getMarketplaceProductByIDForUpdate, id)
+	var i GetMarketplaceProductByIDForUpdateRow
+	err := row.Scan(
+		&i.ID,
+		&i.BusinessID,
+		&i.BranchID,
+		&i.Title,
+		&i.Slug,
+		&i.Description,
+		&i.Category,
+		&i.Sku,
+		&i.PriceKobo,
+		&i.CompareAtPriceKobo,
+		&i.StockQuantity,
+		&i.LowStockThreshold,
+		&i.Images,
+		&i.WeightGrams,
+		&i.DeliveryRestrictions,
+		&i.ReturnPolicy,
+		&i.Status,
+		&i.IsFeatured,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+		&i.Version,
+		&i.BusinessName,
+		&i.BusinessSlug,
+		&i.BusinessStatus,
+		&i.BusinessOwnerID,
 	)
 	return i, err
 }
@@ -1861,7 +2074,7 @@ func (q *Queries) ListAllMarketplaceDisputes(ctx context.Context, dollar_1 strin
 }
 
 const listAllMarketplaceOrders = `-- name: ListAllMarketplaceOrders :many
-SELECT o.id, o.order_number, o.buyer_user_id, o.buyer_name, o.buyer_email, o.buyer_phone, o.delivery_type, o.shipping_address, o.shipping_state_id, o.shipping_lga_id, o.pickup_branch_id, o.subtotal_kobo, o.delivery_fee_kobo, o.total_kobo, o.currency, o.order_status, o.payment_status, o.fulfilment_status, o.idempotency_key, o.notes, o.created_at, o.updated_at, o.version,
+SELECT o.id, o.order_number, o.buyer_user_id, o.buyer_name, o.buyer_email, o.buyer_phone, o.delivery_type, o.shipping_address, o.shipping_state_id, o.shipping_lga_id, o.pickup_branch_id, o.subtotal_kobo, o.delivery_fee_kobo, o.total_kobo, o.currency, o.order_status, o.payment_status, o.fulfilment_status, o.idempotency_key, o.notes, o.created_at, o.updated_at, o.version, o.reservation_expires_at, o.cancellation_reason, o.stock_released, o.reconciliation_required, o.reconciliation_notes,
        COUNT(oi.id) as item_count
 FROM marketplace_orders o
 LEFT JOIN marketplace_order_items oi ON oi.order_id = o.id
@@ -1879,30 +2092,35 @@ type ListAllMarketplaceOrdersParams struct {
 }
 
 type ListAllMarketplaceOrdersRow struct {
-	ID               string             `json:"id"`
-	OrderNumber      string             `json:"order_number"`
-	BuyerUserID      pgtype.Text        `json:"buyer_user_id"`
-	BuyerName        string             `json:"buyer_name"`
-	BuyerEmail       string             `json:"buyer_email"`
-	BuyerPhone       string             `json:"buyer_phone"`
-	DeliveryType     string             `json:"delivery_type"`
-	ShippingAddress  string             `json:"shipping_address"`
-	ShippingStateID  pgtype.Text        `json:"shipping_state_id"`
-	ShippingLgaID    pgtype.Text        `json:"shipping_lga_id"`
-	PickupBranchID   pgtype.Text        `json:"pickup_branch_id"`
-	SubtotalKobo     int64              `json:"subtotal_kobo"`
-	DeliveryFeeKobo  int64              `json:"delivery_fee_kobo"`
-	TotalKobo        int64              `json:"total_kobo"`
-	Currency         string             `json:"currency"`
-	OrderStatus      string             `json:"order_status"`
-	PaymentStatus    string             `json:"payment_status"`
-	FulfilmentStatus string             `json:"fulfilment_status"`
-	IdempotencyKey   pgtype.Text        `json:"idempotency_key"`
-	Notes            pgtype.Text        `json:"notes"`
-	CreatedAt        pgtype.Timestamptz `json:"created_at"`
-	UpdatedAt        pgtype.Timestamptz `json:"updated_at"`
-	Version          int32              `json:"version"`
-	ItemCount        int64              `json:"item_count"`
+	ID                     string             `json:"id"`
+	OrderNumber            string             `json:"order_number"`
+	BuyerUserID            pgtype.Text        `json:"buyer_user_id"`
+	BuyerName              string             `json:"buyer_name"`
+	BuyerEmail             string             `json:"buyer_email"`
+	BuyerPhone             string             `json:"buyer_phone"`
+	DeliveryType           string             `json:"delivery_type"`
+	ShippingAddress        string             `json:"shipping_address"`
+	ShippingStateID        pgtype.Text        `json:"shipping_state_id"`
+	ShippingLgaID          pgtype.Text        `json:"shipping_lga_id"`
+	PickupBranchID         pgtype.Text        `json:"pickup_branch_id"`
+	SubtotalKobo           int64              `json:"subtotal_kobo"`
+	DeliveryFeeKobo        int64              `json:"delivery_fee_kobo"`
+	TotalKobo              int64              `json:"total_kobo"`
+	Currency               string             `json:"currency"`
+	OrderStatus            string             `json:"order_status"`
+	PaymentStatus          string             `json:"payment_status"`
+	FulfilmentStatus       string             `json:"fulfilment_status"`
+	IdempotencyKey         pgtype.Text        `json:"idempotency_key"`
+	Notes                  pgtype.Text        `json:"notes"`
+	CreatedAt              pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt              pgtype.Timestamptz `json:"updated_at"`
+	Version                int32              `json:"version"`
+	ReservationExpiresAt   pgtype.Timestamptz `json:"reservation_expires_at"`
+	CancellationReason     string             `json:"cancellation_reason"`
+	StockReleased          bool               `json:"stock_released"`
+	ReconciliationRequired bool               `json:"reconciliation_required"`
+	ReconciliationNotes    string             `json:"reconciliation_notes"`
+	ItemCount              int64              `json:"item_count"`
 }
 
 func (q *Queries) ListAllMarketplaceOrders(ctx context.Context, arg ListAllMarketplaceOrdersParams) ([]ListAllMarketplaceOrdersRow, error) {
@@ -1938,6 +2156,11 @@ func (q *Queries) ListAllMarketplaceOrders(ctx context.Context, arg ListAllMarke
 			&i.CreatedAt,
 			&i.UpdatedAt,
 			&i.Version,
+			&i.ReservationExpiresAt,
+			&i.CancellationReason,
+			&i.StockReleased,
+			&i.ReconciliationRequired,
+			&i.ReconciliationNotes,
 			&i.ItemCount,
 		); err != nil {
 			return nil, err
@@ -2002,6 +2225,71 @@ func (q *Queries) ListBusinessBranchesByBusiness(ctx context.Context, businessID
 			&i.UpdatedAt,
 			&i.StateName,
 			&i.LgaName,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listExpiredPendingMarketplaceOrders = `-- name: ListExpiredPendingMarketplaceOrders :many
+SELECT id, order_number, buyer_user_id, buyer_name, buyer_email, buyer_phone, delivery_type, shipping_address, shipping_state_id, shipping_lga_id, pickup_branch_id, subtotal_kobo, delivery_fee_kobo, total_kobo, currency, order_status, payment_status, fulfilment_status, idempotency_key, notes, created_at, updated_at, version, reservation_expires_at, cancellation_reason, stock_released, reconciliation_required, reconciliation_notes FROM marketplace_orders
+WHERE payment_status = 'pending'
+  AND order_status = 'placed'
+  AND stock_released = FALSE
+  AND reservation_expires_at IS NOT NULL
+  AND reservation_expires_at <= $1
+ORDER BY reservation_expires_at ASC
+LIMIT $2
+`
+
+type ListExpiredPendingMarketplaceOrdersParams struct {
+	ReservationExpiresAt pgtype.Timestamptz `json:"reservation_expires_at"`
+	Limit                int32              `json:"limit"`
+}
+
+func (q *Queries) ListExpiredPendingMarketplaceOrders(ctx context.Context, arg ListExpiredPendingMarketplaceOrdersParams) ([]MarketplaceOrder, error) {
+	rows, err := q.db.Query(ctx, listExpiredPendingMarketplaceOrders, arg.ReservationExpiresAt, arg.Limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []MarketplaceOrder
+	for rows.Next() {
+		var i MarketplaceOrder
+		if err := rows.Scan(
+			&i.ID,
+			&i.OrderNumber,
+			&i.BuyerUserID,
+			&i.BuyerName,
+			&i.BuyerEmail,
+			&i.BuyerPhone,
+			&i.DeliveryType,
+			&i.ShippingAddress,
+			&i.ShippingStateID,
+			&i.ShippingLgaID,
+			&i.PickupBranchID,
+			&i.SubtotalKobo,
+			&i.DeliveryFeeKobo,
+			&i.TotalKobo,
+			&i.Currency,
+			&i.OrderStatus,
+			&i.PaymentStatus,
+			&i.FulfilmentStatus,
+			&i.IdempotencyKey,
+			&i.Notes,
+			&i.CreatedAt,
+			&i.UpdatedAt,
+			&i.Version,
+			&i.ReservationExpiresAt,
+			&i.CancellationReason,
+			&i.StockReleased,
+			&i.ReconciliationRequired,
+			&i.ReconciliationNotes,
 		); err != nil {
 			return nil, err
 		}
@@ -2157,6 +2445,84 @@ func (q *Queries) ListMarketplaceDisputesByOrder(ctx context.Context, orderID st
 	return items, nil
 }
 
+const listMarketplaceInventoryLogsByBusiness = `-- name: ListMarketplaceInventoryLogsByBusiness :many
+SELECT id, product_id, business_id, actor_user_id, action_type, quantity_delta, balance_after, order_id, reference_id, reason, idempotency_key, created_at FROM marketplace_inventory_logs
+WHERE business_id = $1
+ORDER BY created_at DESC
+`
+
+func (q *Queries) ListMarketplaceInventoryLogsByBusiness(ctx context.Context, businessID string) ([]MarketplaceInventoryLog, error) {
+	rows, err := q.db.Query(ctx, listMarketplaceInventoryLogsByBusiness, businessID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []MarketplaceInventoryLog
+	for rows.Next() {
+		var i MarketplaceInventoryLog
+		if err := rows.Scan(
+			&i.ID,
+			&i.ProductID,
+			&i.BusinessID,
+			&i.ActorUserID,
+			&i.ActionType,
+			&i.QuantityDelta,
+			&i.BalanceAfter,
+			&i.OrderID,
+			&i.ReferenceID,
+			&i.Reason,
+			&i.IdempotencyKey,
+			&i.CreatedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listMarketplaceInventoryLogsByProduct = `-- name: ListMarketplaceInventoryLogsByProduct :many
+SELECT id, product_id, business_id, actor_user_id, action_type, quantity_delta, balance_after, order_id, reference_id, reason, idempotency_key, created_at FROM marketplace_inventory_logs
+WHERE product_id = $1
+ORDER BY created_at DESC
+`
+
+func (q *Queries) ListMarketplaceInventoryLogsByProduct(ctx context.Context, productID string) ([]MarketplaceInventoryLog, error) {
+	rows, err := q.db.Query(ctx, listMarketplaceInventoryLogsByProduct, productID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []MarketplaceInventoryLog
+	for rows.Next() {
+		var i MarketplaceInventoryLog
+		if err := rows.Scan(
+			&i.ID,
+			&i.ProductID,
+			&i.BusinessID,
+			&i.ActorUserID,
+			&i.ActionType,
+			&i.QuantityDelta,
+			&i.BalanceAfter,
+			&i.OrderID,
+			&i.ReferenceID,
+			&i.Reason,
+			&i.IdempotencyKey,
+			&i.CreatedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listMarketplaceOrderItemsByOrder = `-- name: ListMarketplaceOrderItemsByOrder :many
 SELECT oi.id, oi.order_id, oi.product_id, oi.business_id, oi.title_snapshot, oi.sku_snapshot, oi.price_kobo_snapshot, oi.quantity, oi.subtotal_kobo, oi.image_url_snapshot, oi.created_at,
        b.name as business_name,
@@ -2218,7 +2584,7 @@ func (q *Queries) ListMarketplaceOrderItemsByOrder(ctx context.Context, orderID 
 }
 
 const listMarketplaceOrdersByBusiness = `-- name: ListMarketplaceOrdersByBusiness :many
-SELECT DISTINCT o.id, o.order_number, o.buyer_user_id, o.buyer_name, o.buyer_email, o.buyer_phone, o.delivery_type, o.shipping_address, o.shipping_state_id, o.shipping_lga_id, o.pickup_branch_id, o.subtotal_kobo, o.delivery_fee_kobo, o.total_kobo, o.currency, o.order_status, o.payment_status, o.fulfilment_status, o.idempotency_key, o.notes, o.created_at, o.updated_at, o.version,
+SELECT DISTINCT o.id, o.order_number, o.buyer_user_id, o.buyer_name, o.buyer_email, o.buyer_phone, o.delivery_type, o.shipping_address, o.shipping_state_id, o.shipping_lga_id, o.pickup_branch_id, o.subtotal_kobo, o.delivery_fee_kobo, o.total_kobo, o.currency, o.order_status, o.payment_status, o.fulfilment_status, o.idempotency_key, o.notes, o.created_at, o.updated_at, o.version, o.reservation_expires_at, o.cancellation_reason, o.stock_released, o.reconciliation_required, o.reconciliation_notes,
        SUM(oi.subtotal_kobo) as business_subtotal_kobo,
        COUNT(oi.id) as item_count
 FROM marketplace_orders o
@@ -2235,31 +2601,36 @@ type ListMarketplaceOrdersByBusinessParams struct {
 }
 
 type ListMarketplaceOrdersByBusinessRow struct {
-	ID                   string             `json:"id"`
-	OrderNumber          string             `json:"order_number"`
-	BuyerUserID          pgtype.Text        `json:"buyer_user_id"`
-	BuyerName            string             `json:"buyer_name"`
-	BuyerEmail           string             `json:"buyer_email"`
-	BuyerPhone           string             `json:"buyer_phone"`
-	DeliveryType         string             `json:"delivery_type"`
-	ShippingAddress      string             `json:"shipping_address"`
-	ShippingStateID      pgtype.Text        `json:"shipping_state_id"`
-	ShippingLgaID        pgtype.Text        `json:"shipping_lga_id"`
-	PickupBranchID       pgtype.Text        `json:"pickup_branch_id"`
-	SubtotalKobo         int64              `json:"subtotal_kobo"`
-	DeliveryFeeKobo      int64              `json:"delivery_fee_kobo"`
-	TotalKobo            int64              `json:"total_kobo"`
-	Currency             string             `json:"currency"`
-	OrderStatus          string             `json:"order_status"`
-	PaymentStatus        string             `json:"payment_status"`
-	FulfilmentStatus     string             `json:"fulfilment_status"`
-	IdempotencyKey       pgtype.Text        `json:"idempotency_key"`
-	Notes                pgtype.Text        `json:"notes"`
-	CreatedAt            pgtype.Timestamptz `json:"created_at"`
-	UpdatedAt            pgtype.Timestamptz `json:"updated_at"`
-	Version              int32              `json:"version"`
-	BusinessSubtotalKobo int64              `json:"business_subtotal_kobo"`
-	ItemCount            int64              `json:"item_count"`
+	ID                     string             `json:"id"`
+	OrderNumber            string             `json:"order_number"`
+	BuyerUserID            pgtype.Text        `json:"buyer_user_id"`
+	BuyerName              string             `json:"buyer_name"`
+	BuyerEmail             string             `json:"buyer_email"`
+	BuyerPhone             string             `json:"buyer_phone"`
+	DeliveryType           string             `json:"delivery_type"`
+	ShippingAddress        string             `json:"shipping_address"`
+	ShippingStateID        pgtype.Text        `json:"shipping_state_id"`
+	ShippingLgaID          pgtype.Text        `json:"shipping_lga_id"`
+	PickupBranchID         pgtype.Text        `json:"pickup_branch_id"`
+	SubtotalKobo           int64              `json:"subtotal_kobo"`
+	DeliveryFeeKobo        int64              `json:"delivery_fee_kobo"`
+	TotalKobo              int64              `json:"total_kobo"`
+	Currency               string             `json:"currency"`
+	OrderStatus            string             `json:"order_status"`
+	PaymentStatus          string             `json:"payment_status"`
+	FulfilmentStatus       string             `json:"fulfilment_status"`
+	IdempotencyKey         pgtype.Text        `json:"idempotency_key"`
+	Notes                  pgtype.Text        `json:"notes"`
+	CreatedAt              pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt              pgtype.Timestamptz `json:"updated_at"`
+	Version                int32              `json:"version"`
+	ReservationExpiresAt   pgtype.Timestamptz `json:"reservation_expires_at"`
+	CancellationReason     string             `json:"cancellation_reason"`
+	StockReleased          bool               `json:"stock_released"`
+	ReconciliationRequired bool               `json:"reconciliation_required"`
+	ReconciliationNotes    string             `json:"reconciliation_notes"`
+	BusinessSubtotalKobo   int64              `json:"business_subtotal_kobo"`
+	ItemCount              int64              `json:"item_count"`
 }
 
 func (q *Queries) ListMarketplaceOrdersByBusiness(ctx context.Context, arg ListMarketplaceOrdersByBusinessParams) ([]ListMarketplaceOrdersByBusinessRow, error) {
@@ -2295,6 +2666,11 @@ func (q *Queries) ListMarketplaceOrdersByBusiness(ctx context.Context, arg ListM
 			&i.CreatedAt,
 			&i.UpdatedAt,
 			&i.Version,
+			&i.ReservationExpiresAt,
+			&i.CancellationReason,
+			&i.StockReleased,
+			&i.ReconciliationRequired,
+			&i.ReconciliationNotes,
 			&i.BusinessSubtotalKobo,
 			&i.ItemCount,
 		); err != nil {
@@ -2309,7 +2685,7 @@ func (q *Queries) ListMarketplaceOrdersByBusiness(ctx context.Context, arg ListM
 }
 
 const listMarketplaceOrdersByBuyer = `-- name: ListMarketplaceOrdersByBuyer :many
-SELECT o.id, o.order_number, o.buyer_user_id, o.buyer_name, o.buyer_email, o.buyer_phone, o.delivery_type, o.shipping_address, o.shipping_state_id, o.shipping_lga_id, o.pickup_branch_id, o.subtotal_kobo, o.delivery_fee_kobo, o.total_kobo, o.currency, o.order_status, o.payment_status, o.fulfilment_status, o.idempotency_key, o.notes, o.created_at, o.updated_at, o.version,
+SELECT o.id, o.order_number, o.buyer_user_id, o.buyer_name, o.buyer_email, o.buyer_phone, o.delivery_type, o.shipping_address, o.shipping_state_id, o.shipping_lga_id, o.pickup_branch_id, o.subtotal_kobo, o.delivery_fee_kobo, o.total_kobo, o.currency, o.order_status, o.payment_status, o.fulfilment_status, o.idempotency_key, o.notes, o.created_at, o.updated_at, o.version, o.reservation_expires_at, o.cancellation_reason, o.stock_released, o.reconciliation_required, o.reconciliation_notes,
        COUNT(oi.id) as item_count
 FROM marketplace_orders o
 LEFT JOIN marketplace_order_items oi ON oi.order_id = o.id
@@ -2319,30 +2695,35 @@ ORDER BY o.created_at DESC
 `
 
 type ListMarketplaceOrdersByBuyerRow struct {
-	ID               string             `json:"id"`
-	OrderNumber      string             `json:"order_number"`
-	BuyerUserID      pgtype.Text        `json:"buyer_user_id"`
-	BuyerName        string             `json:"buyer_name"`
-	BuyerEmail       string             `json:"buyer_email"`
-	BuyerPhone       string             `json:"buyer_phone"`
-	DeliveryType     string             `json:"delivery_type"`
-	ShippingAddress  string             `json:"shipping_address"`
-	ShippingStateID  pgtype.Text        `json:"shipping_state_id"`
-	ShippingLgaID    pgtype.Text        `json:"shipping_lga_id"`
-	PickupBranchID   pgtype.Text        `json:"pickup_branch_id"`
-	SubtotalKobo     int64              `json:"subtotal_kobo"`
-	DeliveryFeeKobo  int64              `json:"delivery_fee_kobo"`
-	TotalKobo        int64              `json:"total_kobo"`
-	Currency         string             `json:"currency"`
-	OrderStatus      string             `json:"order_status"`
-	PaymentStatus    string             `json:"payment_status"`
-	FulfilmentStatus string             `json:"fulfilment_status"`
-	IdempotencyKey   pgtype.Text        `json:"idempotency_key"`
-	Notes            pgtype.Text        `json:"notes"`
-	CreatedAt        pgtype.Timestamptz `json:"created_at"`
-	UpdatedAt        pgtype.Timestamptz `json:"updated_at"`
-	Version          int32              `json:"version"`
-	ItemCount        int64              `json:"item_count"`
+	ID                     string             `json:"id"`
+	OrderNumber            string             `json:"order_number"`
+	BuyerUserID            pgtype.Text        `json:"buyer_user_id"`
+	BuyerName              string             `json:"buyer_name"`
+	BuyerEmail             string             `json:"buyer_email"`
+	BuyerPhone             string             `json:"buyer_phone"`
+	DeliveryType           string             `json:"delivery_type"`
+	ShippingAddress        string             `json:"shipping_address"`
+	ShippingStateID        pgtype.Text        `json:"shipping_state_id"`
+	ShippingLgaID          pgtype.Text        `json:"shipping_lga_id"`
+	PickupBranchID         pgtype.Text        `json:"pickup_branch_id"`
+	SubtotalKobo           int64              `json:"subtotal_kobo"`
+	DeliveryFeeKobo        int64              `json:"delivery_fee_kobo"`
+	TotalKobo              int64              `json:"total_kobo"`
+	Currency               string             `json:"currency"`
+	OrderStatus            string             `json:"order_status"`
+	PaymentStatus          string             `json:"payment_status"`
+	FulfilmentStatus       string             `json:"fulfilment_status"`
+	IdempotencyKey         pgtype.Text        `json:"idempotency_key"`
+	Notes                  pgtype.Text        `json:"notes"`
+	CreatedAt              pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt              pgtype.Timestamptz `json:"updated_at"`
+	Version                int32              `json:"version"`
+	ReservationExpiresAt   pgtype.Timestamptz `json:"reservation_expires_at"`
+	CancellationReason     string             `json:"cancellation_reason"`
+	StockReleased          bool               `json:"stock_released"`
+	ReconciliationRequired bool               `json:"reconciliation_required"`
+	ReconciliationNotes    string             `json:"reconciliation_notes"`
+	ItemCount              int64              `json:"item_count"`
 }
 
 func (q *Queries) ListMarketplaceOrdersByBuyer(ctx context.Context, buyerUserID pgtype.Text) ([]ListMarketplaceOrdersByBuyerRow, error) {
@@ -2378,6 +2759,11 @@ func (q *Queries) ListMarketplaceOrdersByBuyer(ctx context.Context, buyerUserID 
 			&i.CreatedAt,
 			&i.UpdatedAt,
 			&i.Version,
+			&i.ReservationExpiresAt,
+			&i.CancellationReason,
+			&i.StockReleased,
+			&i.ReconciliationRequired,
+			&i.ReconciliationNotes,
 			&i.ItemCount,
 		); err != nil {
 			return nil, err
@@ -2623,6 +3009,111 @@ func (q *Queries) ListMarketplaceRefundsByOrder(ctx context.Context, orderID str
 	return items, nil
 }
 
+const markOrderCancelledWithReason = `-- name: MarkOrderCancelledWithReason :one
+UPDATE marketplace_orders
+SET order_status = 'cancelled',
+    cancellation_reason = $2,
+    stock_released = $3,
+    updated_at = CURRENT_TIMESTAMP,
+    version = version + 1
+WHERE id = $1
+RETURNING id, order_number, buyer_user_id, buyer_name, buyer_email, buyer_phone, delivery_type, shipping_address, shipping_state_id, shipping_lga_id, pickup_branch_id, subtotal_kobo, delivery_fee_kobo, total_kobo, currency, order_status, payment_status, fulfilment_status, idempotency_key, notes, created_at, updated_at, version, reservation_expires_at, cancellation_reason, stock_released, reconciliation_required, reconciliation_notes
+`
+
+type MarkOrderCancelledWithReasonParams struct {
+	ID                 string `json:"id"`
+	CancellationReason string `json:"cancellation_reason"`
+	StockReleased      bool   `json:"stock_released"`
+}
+
+func (q *Queries) MarkOrderCancelledWithReason(ctx context.Context, arg MarkOrderCancelledWithReasonParams) (MarketplaceOrder, error) {
+	row := q.db.QueryRow(ctx, markOrderCancelledWithReason, arg.ID, arg.CancellationReason, arg.StockReleased)
+	var i MarketplaceOrder
+	err := row.Scan(
+		&i.ID,
+		&i.OrderNumber,
+		&i.BuyerUserID,
+		&i.BuyerName,
+		&i.BuyerEmail,
+		&i.BuyerPhone,
+		&i.DeliveryType,
+		&i.ShippingAddress,
+		&i.ShippingStateID,
+		&i.ShippingLgaID,
+		&i.PickupBranchID,
+		&i.SubtotalKobo,
+		&i.DeliveryFeeKobo,
+		&i.TotalKobo,
+		&i.Currency,
+		&i.OrderStatus,
+		&i.PaymentStatus,
+		&i.FulfilmentStatus,
+		&i.IdempotencyKey,
+		&i.Notes,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+		&i.Version,
+		&i.ReservationExpiresAt,
+		&i.CancellationReason,
+		&i.StockReleased,
+		&i.ReconciliationRequired,
+		&i.ReconciliationNotes,
+	)
+	return i, err
+}
+
+const markOrderRequiresReconciliation = `-- name: MarkOrderRequiresReconciliation :one
+UPDATE marketplace_orders
+SET order_status = 'requires_reconciliation',
+    reconciliation_required = TRUE,
+    reconciliation_notes = $2,
+    updated_at = CURRENT_TIMESTAMP,
+    version = version + 1
+WHERE id = $1
+RETURNING id, order_number, buyer_user_id, buyer_name, buyer_email, buyer_phone, delivery_type, shipping_address, shipping_state_id, shipping_lga_id, pickup_branch_id, subtotal_kobo, delivery_fee_kobo, total_kobo, currency, order_status, payment_status, fulfilment_status, idempotency_key, notes, created_at, updated_at, version, reservation_expires_at, cancellation_reason, stock_released, reconciliation_required, reconciliation_notes
+`
+
+type MarkOrderRequiresReconciliationParams struct {
+	ID                  string `json:"id"`
+	ReconciliationNotes string `json:"reconciliation_notes"`
+}
+
+func (q *Queries) MarkOrderRequiresReconciliation(ctx context.Context, arg MarkOrderRequiresReconciliationParams) (MarketplaceOrder, error) {
+	row := q.db.QueryRow(ctx, markOrderRequiresReconciliation, arg.ID, arg.ReconciliationNotes)
+	var i MarketplaceOrder
+	err := row.Scan(
+		&i.ID,
+		&i.OrderNumber,
+		&i.BuyerUserID,
+		&i.BuyerName,
+		&i.BuyerEmail,
+		&i.BuyerPhone,
+		&i.DeliveryType,
+		&i.ShippingAddress,
+		&i.ShippingStateID,
+		&i.ShippingLgaID,
+		&i.PickupBranchID,
+		&i.SubtotalKobo,
+		&i.DeliveryFeeKobo,
+		&i.TotalKobo,
+		&i.Currency,
+		&i.OrderStatus,
+		&i.PaymentStatus,
+		&i.FulfilmentStatus,
+		&i.IdempotencyKey,
+		&i.Notes,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+		&i.Version,
+		&i.ReservationExpiresAt,
+		&i.CancellationReason,
+		&i.StockReleased,
+		&i.ReconciliationRequired,
+		&i.ReconciliationNotes,
+	)
+	return i, err
+}
+
 const resolveMarketplaceDispute = `-- name: ResolveMarketplaceDispute :one
 UPDATE marketplace_disputes
 SET status = $2,
@@ -2663,6 +3154,49 @@ func (q *Queries) ResolveMarketplaceDispute(ctx context.Context, arg ResolveMark
 		&i.ResolvedAt,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+	)
+	return i, err
+}
+
+const setProductStockQuantity = `-- name: SetProductStockQuantity :one
+UPDATE marketplace_products
+SET stock_quantity = $2,
+    updated_at = CURRENT_TIMESTAMP,
+    version = version + 1
+WHERE id = $1 AND $2 >= 0
+RETURNING id, business_id, branch_id, title, slug, description, category, sku, price_kobo, compare_at_price_kobo, stock_quantity, low_stock_threshold, images, weight_grams, delivery_restrictions, return_policy, status, is_featured, created_at, updated_at, version
+`
+
+type SetProductStockQuantityParams struct {
+	ID            string `json:"id"`
+	StockQuantity int32  `json:"stock_quantity"`
+}
+
+func (q *Queries) SetProductStockQuantity(ctx context.Context, arg SetProductStockQuantityParams) (MarketplaceProduct, error) {
+	row := q.db.QueryRow(ctx, setProductStockQuantity, arg.ID, arg.StockQuantity)
+	var i MarketplaceProduct
+	err := row.Scan(
+		&i.ID,
+		&i.BusinessID,
+		&i.BranchID,
+		&i.Title,
+		&i.Slug,
+		&i.Description,
+		&i.Category,
+		&i.Sku,
+		&i.PriceKobo,
+		&i.CompareAtPriceKobo,
+		&i.StockQuantity,
+		&i.LowStockThreshold,
+		&i.Images,
+		&i.WeightGrams,
+		&i.DeliveryRestrictions,
+		&i.ReturnPolicy,
+		&i.Status,
+		&i.IsFeatured,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+		&i.Version,
 	)
 	return i, err
 }
@@ -2863,7 +3397,7 @@ SET fulfilment_status = $2,
     updated_at = CURRENT_TIMESTAMP,
     version = version + 1
 WHERE id = $1
-RETURNING id, order_number, buyer_user_id, buyer_name, buyer_email, buyer_phone, delivery_type, shipping_address, shipping_state_id, shipping_lga_id, pickup_branch_id, subtotal_kobo, delivery_fee_kobo, total_kobo, currency, order_status, payment_status, fulfilment_status, idempotency_key, notes, created_at, updated_at, version
+RETURNING id, order_number, buyer_user_id, buyer_name, buyer_email, buyer_phone, delivery_type, shipping_address, shipping_state_id, shipping_lga_id, pickup_branch_id, subtotal_kobo, delivery_fee_kobo, total_kobo, currency, order_status, payment_status, fulfilment_status, idempotency_key, notes, created_at, updated_at, version, reservation_expires_at, cancellation_reason, stock_released, reconciliation_required, reconciliation_notes
 `
 
 type UpdateMarketplaceFulfilmentStatusParams struct {
@@ -2898,6 +3432,76 @@ func (q *Queries) UpdateMarketplaceFulfilmentStatus(ctx context.Context, arg Upd
 		&i.CreatedAt,
 		&i.UpdatedAt,
 		&i.Version,
+		&i.ReservationExpiresAt,
+		&i.CancellationReason,
+		&i.StockReleased,
+		&i.ReconciliationRequired,
+		&i.ReconciliationNotes,
+	)
+	return i, err
+}
+
+const updateMarketplaceOrderExpiryFields = `-- name: UpdateMarketplaceOrderExpiryFields :one
+UPDATE marketplace_orders
+SET reservation_expires_at = $2,
+    cancellation_reason = $3,
+    stock_released = $4,
+    reconciliation_required = $5,
+    reconciliation_notes = $6,
+    updated_at = CURRENT_TIMESTAMP,
+    version = version + 1
+WHERE id = $1
+RETURNING id, order_number, buyer_user_id, buyer_name, buyer_email, buyer_phone, delivery_type, shipping_address, shipping_state_id, shipping_lga_id, pickup_branch_id, subtotal_kobo, delivery_fee_kobo, total_kobo, currency, order_status, payment_status, fulfilment_status, idempotency_key, notes, created_at, updated_at, version, reservation_expires_at, cancellation_reason, stock_released, reconciliation_required, reconciliation_notes
+`
+
+type UpdateMarketplaceOrderExpiryFieldsParams struct {
+	ID                     string             `json:"id"`
+	ReservationExpiresAt   pgtype.Timestamptz `json:"reservation_expires_at"`
+	CancellationReason     string             `json:"cancellation_reason"`
+	StockReleased          bool               `json:"stock_released"`
+	ReconciliationRequired bool               `json:"reconciliation_required"`
+	ReconciliationNotes    string             `json:"reconciliation_notes"`
+}
+
+func (q *Queries) UpdateMarketplaceOrderExpiryFields(ctx context.Context, arg UpdateMarketplaceOrderExpiryFieldsParams) (MarketplaceOrder, error) {
+	row := q.db.QueryRow(ctx, updateMarketplaceOrderExpiryFields,
+		arg.ID,
+		arg.ReservationExpiresAt,
+		arg.CancellationReason,
+		arg.StockReleased,
+		arg.ReconciliationRequired,
+		arg.ReconciliationNotes,
+	)
+	var i MarketplaceOrder
+	err := row.Scan(
+		&i.ID,
+		&i.OrderNumber,
+		&i.BuyerUserID,
+		&i.BuyerName,
+		&i.BuyerEmail,
+		&i.BuyerPhone,
+		&i.DeliveryType,
+		&i.ShippingAddress,
+		&i.ShippingStateID,
+		&i.ShippingLgaID,
+		&i.PickupBranchID,
+		&i.SubtotalKobo,
+		&i.DeliveryFeeKobo,
+		&i.TotalKobo,
+		&i.Currency,
+		&i.OrderStatus,
+		&i.PaymentStatus,
+		&i.FulfilmentStatus,
+		&i.IdempotencyKey,
+		&i.Notes,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+		&i.Version,
+		&i.ReservationExpiresAt,
+		&i.CancellationReason,
+		&i.StockReleased,
+		&i.ReconciliationRequired,
+		&i.ReconciliationNotes,
 	)
 	return i, err
 }
@@ -2908,7 +3512,7 @@ SET payment_status = $2,
     updated_at = CURRENT_TIMESTAMP,
     version = version + 1
 WHERE id = $1
-RETURNING id, order_number, buyer_user_id, buyer_name, buyer_email, buyer_phone, delivery_type, shipping_address, shipping_state_id, shipping_lga_id, pickup_branch_id, subtotal_kobo, delivery_fee_kobo, total_kobo, currency, order_status, payment_status, fulfilment_status, idempotency_key, notes, created_at, updated_at, version
+RETURNING id, order_number, buyer_user_id, buyer_name, buyer_email, buyer_phone, delivery_type, shipping_address, shipping_state_id, shipping_lga_id, pickup_branch_id, subtotal_kobo, delivery_fee_kobo, total_kobo, currency, order_status, payment_status, fulfilment_status, idempotency_key, notes, created_at, updated_at, version, reservation_expires_at, cancellation_reason, stock_released, reconciliation_required, reconciliation_notes
 `
 
 type UpdateMarketplaceOrderPaymentStatusParams struct {
@@ -2943,6 +3547,11 @@ func (q *Queries) UpdateMarketplaceOrderPaymentStatus(ctx context.Context, arg U
 		&i.CreatedAt,
 		&i.UpdatedAt,
 		&i.Version,
+		&i.ReservationExpiresAt,
+		&i.CancellationReason,
+		&i.StockReleased,
+		&i.ReconciliationRequired,
+		&i.ReconciliationNotes,
 	)
 	return i, err
 }
@@ -2953,7 +3562,7 @@ SET order_status = $2,
     updated_at = CURRENT_TIMESTAMP,
     version = version + 1
 WHERE id = $1
-RETURNING id, order_number, buyer_user_id, buyer_name, buyer_email, buyer_phone, delivery_type, shipping_address, shipping_state_id, shipping_lga_id, pickup_branch_id, subtotal_kobo, delivery_fee_kobo, total_kobo, currency, order_status, payment_status, fulfilment_status, idempotency_key, notes, created_at, updated_at, version
+RETURNING id, order_number, buyer_user_id, buyer_name, buyer_email, buyer_phone, delivery_type, shipping_address, shipping_state_id, shipping_lga_id, pickup_branch_id, subtotal_kobo, delivery_fee_kobo, total_kobo, currency, order_status, payment_status, fulfilment_status, idempotency_key, notes, created_at, updated_at, version, reservation_expires_at, cancellation_reason, stock_released, reconciliation_required, reconciliation_notes
 `
 
 type UpdateMarketplaceOrderStatusParams struct {
@@ -2988,6 +3597,11 @@ func (q *Queries) UpdateMarketplaceOrderStatus(ctx context.Context, arg UpdateMa
 		&i.CreatedAt,
 		&i.UpdatedAt,
 		&i.Version,
+		&i.ReservationExpiresAt,
+		&i.CancellationReason,
+		&i.StockReleased,
+		&i.ReconciliationRequired,
+		&i.ReconciliationNotes,
 	)
 	return i, err
 }

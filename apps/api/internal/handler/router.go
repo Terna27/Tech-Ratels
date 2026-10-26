@@ -295,6 +295,9 @@ func NewRouter(p RouterParams) http.Handler {
 				seller.Post("/orders/{id}/dispatch", p.MarketplaceHandler.DispatchOrder)
 				seller.Post("/orders/{id}/delivered", p.MarketplaceHandler.ConfirmDelivery)
 				seller.Get("/metrics", p.MarketplaceHandler.GetSellerMetrics)
+				seller.Post("/products/{id}/adjust-stock", p.MarketplaceHandler.AdjustProductStock)
+				seller.Get("/products/{id}/inventory-logs", p.MarketplaceHandler.ListProductInventoryLogs)
+				seller.Get("/inventory-logs", p.MarketplaceHandler.ListBusinessInventoryLogs)
 			})
 
 			// Dev sandbox mock presigned upload endpoint
@@ -317,6 +320,8 @@ func NewRouter(p RouterParams) http.Handler {
 				mktAdm.Get("/payments", p.MarketplaceHandler.ListPaymentsAdmin)
 				mktAdm.Get("/disputes", p.MarketplaceHandler.ListDisputesAdmin)
 				mktAdm.Post("/disputes/{id}/resolve", p.MarketplaceHandler.ResolveDispute)
+				mktAdm.Post("/inventory/expire-stale-orders", p.MarketplaceHandler.AdminTriggerOrderExpiry)
+				mktAdm.Get("/products/{id}/inventory-logs", p.MarketplaceHandler.ListProductInventoryLogs)
 			})
 		})
 
@@ -467,6 +472,7 @@ func NewRouter(p RouterParams) http.Handler {
 			// Internal Automated Triggers (Render Free / External Cron)
 			api.Route("/internal", func(in chi.Router) {
 				in.Post("/cron/reports", p.ReportHandler.RunSchedulerCron)
+				in.Post("/cron/expire-orders", p.MarketplaceHandler.ExpireStaleOrdersCron)
 			})
 		}
 

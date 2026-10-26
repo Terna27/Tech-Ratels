@@ -51,6 +51,7 @@ type Config struct {
 	R2ReportsAccountID           string
 	R2ReportsEndpoint            string
 	ReportCronSecret             string
+	MarketplaceCronSecret        string
 }
 
 func Load() *Config {
@@ -237,6 +238,13 @@ func Load() *Config {
 	}
 	safeguardingEncKey := strings.TrimSpace(os.Getenv("SAFEGUARDING_ENCRYPTION_KEY"))
 	reportCronSecret := strings.TrimSpace(os.Getenv("REPORT_CRON_SECRET"))
+	marketplaceCronSecret := strings.TrimSpace(os.Getenv("MARKETPLACE_CRON_SECRET"))
+	if marketplaceCronSecret == "" {
+		marketplaceCronSecret = reportCronSecret
+	}
+	if marketplaceCronSecret == "" {
+		marketplaceCronSecret = strings.TrimSpace(os.Getenv("CRON_SECRET"))
+	}
 
 	return &Config{
 		DatabaseURL:               dbURL,
@@ -275,6 +283,7 @@ func Load() *Config {
 		R2ReportsAccountID:           r2ReportsAccountID,
 		R2ReportsEndpoint:            r2ReportsEndpoint,
 		ReportCronSecret:             reportCronSecret,
+		MarketplaceCronSecret:        marketplaceCronSecret,
 	}
 }
 

@@ -96,6 +96,7 @@ func setupTestHarness(t *testing.T) *TestHarness {
 	financeH := handler.NewFinanceHandler(financeSvc)
 	inventoryH := handler.NewInventoryHandler(inventorySvc)
 	marketplaceH := handler.NewMarketplaceHandler(marketplaceSvc)
+	marketplaceH.SetCronSecret("test_cron_secret_32_chars_long_123")
 	careersH := handler.NewCareersHandler(careersSvc)
 	heroMediaH := handler.NewHeroMediaHandler(heroMediaSvc)
 	commProjectH := handler.NewCommunityProjectHandler(commProjectSvc)
