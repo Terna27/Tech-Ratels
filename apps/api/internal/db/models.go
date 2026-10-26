@@ -931,6 +931,23 @@ type MarketplaceProduct struct {
 	Version              int32              `json:"version"`
 }
 
+type MarketplaceRefund struct {
+	ID                      string             `json:"id"`
+	OrderID                 string             `json:"order_id"`
+	PaymentID               string             `json:"payment_id"`
+	AmountKobo              int64              `json:"amount_kobo"`
+	Status                  string             `json:"status"`
+	Provider                string             `json:"provider"`
+	ProviderRefundReference string             `json:"provider_refund_reference"`
+	InitiatedByUserID       string             `json:"initiated_by_user_id"`
+	ConfirmedByUserID       pgtype.Text        `json:"confirmed_by_user_id"`
+	Reason                  string             `json:"reason"`
+	SettlementNotes         string             `json:"settlement_notes"`
+	Metadata                json.RawMessage    `json:"metadata"`
+	CreatedAt               pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt               pgtype.Timestamptz `json:"updated_at"`
+}
+
 type MarketplaceShipment struct {
 	ID                  string             `json:"id"`
 	OrderID             string             `json:"order_id"`

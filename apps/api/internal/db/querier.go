@@ -163,6 +163,10 @@ type Querier interface {
 	// -------------------------------------------------------------
 	CreateMarketplaceProduct(ctx context.Context, arg CreateMarketplaceProductParams) (MarketplaceProduct, error)
 	// -------------------------------------------------------------
+	// Marketplace Refund Accounting Ledger
+	// -------------------------------------------------------------
+	CreateMarketplaceRefund(ctx context.Context, arg CreateMarketplaceRefundParams) (MarketplaceRefund, error)
+	// -------------------------------------------------------------
 	// Marketplace Shipments
 	// -------------------------------------------------------------
 	CreateMarketplaceShipment(ctx context.Context, arg CreateMarketplaceShipmentParams) (MarketplaceShipment, error)
@@ -327,10 +331,18 @@ type Querier interface {
 	GetMarketplaceOrderByID(ctx context.Context, id string) (GetMarketplaceOrderByIDRow, error)
 	GetMarketplaceOrderByIdempotencyKey(ctx context.Context, idempotencyKey pgtype.Text) (MarketplaceOrder, error)
 	GetMarketplaceOrderByOrderNumber(ctx context.Context, orderNumber string) (GetMarketplaceOrderByOrderNumberRow, error)
+	GetMarketplaceOrderForUpdate(ctx context.Context, id string) (MarketplaceOrder, error)
 	GetMarketplacePaymentByOrder(ctx context.Context, orderID string) (MarketplacePayment, error)
+	GetMarketplacePaymentByOrderForUpdate(ctx context.Context, orderID string) (MarketplacePayment, error)
 	GetMarketplacePaymentByReference(ctx context.Context, reference string) (MarketplacePayment, error)
+	GetMarketplacePaymentByReferenceForUpdate(ctx context.Context, reference string) (MarketplacePayment, error)
 	GetMarketplaceProductByID(ctx context.Context, id string) (GetMarketplaceProductByIDRow, error)
 	GetMarketplaceProductBySlug(ctx context.Context, slug string) (GetMarketplaceProductBySlugRow, error)
+	GetMarketplaceRefundByID(ctx context.Context, id string) (MarketplaceRefund, error)
+	GetMarketplaceRefundByIDForUpdate(ctx context.Context, id string) (MarketplaceRefund, error)
+	GetMarketplaceRefundByProviderReference(ctx context.Context, providerRefundReference string) (MarketplaceRefund, error)
+	GetMarketplaceRefundByProviderReferenceForUpdate(ctx context.Context, providerRefundReference string) (MarketplaceRefund, error)
+	GetMarketplaceRefundSumsByOrder(ctx context.Context, orderID string) (GetMarketplaceRefundSumsByOrderRow, error)
 	GetMarketplaceSellerOverviewMetrics(ctx context.Context, businessID string) (GetMarketplaceSellerOverviewMetricsRow, error)
 	GetMarketplaceShipmentByOrder(ctx context.Context, orderID string) (MarketplaceShipment, error)
 	GetMaterialRequestByID(ctx context.Context, id string) (GetMaterialRequestByIDRow, error)
@@ -459,6 +471,7 @@ type Querier interface {
 	ListMarketplaceOrdersByBuyer(ctx context.Context, buyerUserID pgtype.Text) ([]ListMarketplaceOrdersByBuyerRow, error)
 	ListMarketplacePayments(ctx context.Context, arg ListMarketplacePaymentsParams) ([]ListMarketplacePaymentsRow, error)
 	ListMarketplaceProducts(ctx context.Context, arg ListMarketplaceProductsParams) ([]ListMarketplaceProductsRow, error)
+	ListMarketplaceRefundsByOrder(ctx context.Context, orderID string) ([]MarketplaceRefund, error)
 	ListMaterialRequestItemsByRequest(ctx context.Context, requestID string) ([]ListMaterialRequestItemsByRequestRow, error)
 	ListMaterialRequests(ctx context.Context, arg ListMaterialRequestsParams) ([]ListMaterialRequestsRow, error)
 	ListMaterialTransferItemsByTransfer(ctx context.Context, transferID string) ([]ListMaterialTransferItemsByTransferRow, error)
@@ -586,6 +599,7 @@ type Querier interface {
 	UpdateMarketplaceOrderStatus(ctx context.Context, arg UpdateMarketplaceOrderStatusParams) (MarketplaceOrder, error)
 	UpdateMarketplacePaymentTransactionStatus(ctx context.Context, arg UpdateMarketplacePaymentTransactionStatusParams) (MarketplacePayment, error)
 	UpdateMarketplaceProduct(ctx context.Context, arg UpdateMarketplaceProductParams) (MarketplaceProduct, error)
+	UpdateMarketplaceRefundStatus(ctx context.Context, arg UpdateMarketplaceRefundStatusParams) (MarketplaceRefund, error)
 	UpdateMarketplaceShipmentStatus(ctx context.Context, arg UpdateMarketplaceShipmentStatusParams) (MarketplaceShipment, error)
 	UpdateMaterialRequestItemApprovedQty(ctx context.Context, arg UpdateMaterialRequestItemApprovedQtyParams) (MaterialRequestItem, error)
 	UpdateMaterialRequestReview(ctx context.Context, arg UpdateMaterialRequestReviewParams) (MaterialRequest, error)

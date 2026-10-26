@@ -208,7 +208,7 @@ func (h *MarketplaceHandler) VerifyPayment(w http.ResponseWriter, r *http.Reques
 			ErrorJSON(w, http.StatusServiceUnavailable, "PAYMENT_PROCESSING_UNAVAILABLE", "Payment processing is currently unavailable.", nil)
 			return
 		}
-		if errors.Is(err, payment.ErrAmountMismatch) || errors.Is(err, payment.ErrCurrencyMismatch) {
+		if errors.Is(err, payment.ErrAmountMismatch) || errors.Is(err, payment.ErrCurrencyMismatch) || errors.Is(err, payment.ErrReferenceMismatch) || errors.Is(err, payment.ErrProviderMismatch) {
 			ErrorJSON(w, http.StatusPaymentRequired, "PAYMENT_MISMATCH", err.Error(), nil)
 			return
 		}
@@ -981,7 +981,7 @@ func (h *MarketplaceHandler) AdminRefundOrder(w http.ResponseWriter, r *http.Req
 		return
 	}
 
-	order, err := h.marketplaceService.InitiateRefund(r.Context(), admin, id, req)
+	refund, order, err := h.marketplaceService.InitiateRefund(r.Context(), admin, id, req)
 	if err != nil {
 		if errors.Is(err, service.ErrOrderNotFound) {
 			ErrorJSON(w, http.StatusNotFound, "NOT_FOUND", "Order not found", nil)
@@ -990,5 +990,57 @@ func (h *MarketplaceHandler) AdminRefundOrder(w http.ResponseWriter, r *http.Req
 		ErrorJSON(w, http.StatusBadRequest, "REFUND_FAILED", err.Error(), nil)
 		return
 	}
-	JSON(w, http.StatusOK, order)
+	JSON(w, http.StatusOK, map[string]interface{}{
+		"status": "refund_initiated",
+		"refund": refund,
+		"order":  order,
+	})
+}
+
+func (h *MarketplaceHandler) AdminConfirmRefund(w http.ResponseWriter, r *http.Request) {
+	admin := GetCurrentUser(r.Context())
+	refundID := chi.URLParam(r, "refundId")
+
+	var req service.ConfirmRefundInput
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		// Optional empty body
+		req = service.ConfirmRefundInput{}
+	}
+
+	refund, order, err := h.marketplaceService.ConfirmRefund(r.Context(), admin, refundID, req)
+	if err != nil {
+		ErrorJSON(w, http.StatusBadRequest, "CONFIRM_FAILED", err.Error(), nil)
+		return
+	}
+	JSON(w, http.StatusOK, map[string]interface{}{
+		"status": "refund_confirmed",
+		"refund": refund,
+		"order":  order,
+	})
+}
+
+func (h *MarketplaceHandler) AdminManualSettleRefund(w http.ResponseWriter, r *http.Request) {
+	admin := GetCurrentUser(r.Context())
+	refundID := chi.URLParam(r, "refundId")
+
+	var req service.ManualSettlementInput
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		ErrorJSON(w, http.StatusBadRequest, "INVALID_REQUEST", "Malformed JSON payload", nil)
+		return
+	}
+
+	refund, order, err := h.marketplaceService.ManualSettleRefund(r.Context(), admin, refundID, req)
+	if err != nil {
+		if strings.Contains(strings.ToLower(err.Error()), "unauthorized") {
+			ErrorJSON(w, http.StatusForbidden, "UNAUTHORIZED", err.Error(), nil)
+			return
+		}
+		ErrorJSON(w, http.StatusBadRequest, "SETTLEMENT_FAILED", err.Error(), nil)
+		return
+	}
+	JSON(w, http.StatusOK, map[string]interface{}{
+		"status": "refund_settled",
+		"refund": refund,
+		"order":  order,
+	})
 }

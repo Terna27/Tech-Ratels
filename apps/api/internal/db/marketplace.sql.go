@@ -518,6 +518,74 @@ func (q *Queries) CreateMarketplaceProduct(ctx context.Context, arg CreateMarket
 	return i, err
 }
 
+const createMarketplaceRefund = `-- name: CreateMarketplaceRefund :one
+
+INSERT INTO marketplace_refunds (
+    id, order_id, payment_id, amount_kobo, status,
+    provider, provider_refund_reference, initiated_by_user_id,
+    confirmed_by_user_id, reason, settlement_notes, metadata,
+    created_at, updated_at
+) VALUES (
+    $1, $2, $3, $4, $5,
+    $6, $7, $8,
+    $9, $10, $11, $12,
+    CURRENT_TIMESTAMP, CURRENT_TIMESTAMP
+) RETURNING id, order_id, payment_id, amount_kobo, status, provider, provider_refund_reference, initiated_by_user_id, confirmed_by_user_id, reason, settlement_notes, metadata, created_at, updated_at
+`
+
+type CreateMarketplaceRefundParams struct {
+	ID                      string          `json:"id"`
+	OrderID                 string          `json:"order_id"`
+	PaymentID               string          `json:"payment_id"`
+	AmountKobo              int64           `json:"amount_kobo"`
+	Status                  string          `json:"status"`
+	Provider                string          `json:"provider"`
+	ProviderRefundReference string          `json:"provider_refund_reference"`
+	InitiatedByUserID       string          `json:"initiated_by_user_id"`
+	ConfirmedByUserID       pgtype.Text     `json:"confirmed_by_user_id"`
+	Reason                  string          `json:"reason"`
+	SettlementNotes         string          `json:"settlement_notes"`
+	Metadata                json.RawMessage `json:"metadata"`
+}
+
+// -------------------------------------------------------------
+// Marketplace Refund Accounting Ledger
+// -------------------------------------------------------------
+func (q *Queries) CreateMarketplaceRefund(ctx context.Context, arg CreateMarketplaceRefundParams) (MarketplaceRefund, error) {
+	row := q.db.QueryRow(ctx, createMarketplaceRefund,
+		arg.ID,
+		arg.OrderID,
+		arg.PaymentID,
+		arg.AmountKobo,
+		arg.Status,
+		arg.Provider,
+		arg.ProviderRefundReference,
+		arg.InitiatedByUserID,
+		arg.ConfirmedByUserID,
+		arg.Reason,
+		arg.SettlementNotes,
+		arg.Metadata,
+	)
+	var i MarketplaceRefund
+	err := row.Scan(
+		&i.ID,
+		&i.OrderID,
+		&i.PaymentID,
+		&i.AmountKobo,
+		&i.Status,
+		&i.Provider,
+		&i.ProviderRefundReference,
+		&i.InitiatedByUserID,
+		&i.ConfirmedByUserID,
+		&i.Reason,
+		&i.SettlementNotes,
+		&i.Metadata,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+	)
+	return i, err
+}
+
 const createMarketplaceShipment = `-- name: CreateMarketplaceShipment :one
 
 INSERT INTO marketplace_shipments (
@@ -1168,6 +1236,43 @@ func (q *Queries) GetMarketplaceOrderByOrderNumber(ctx context.Context, orderNum
 	return i, err
 }
 
+const getMarketplaceOrderForUpdate = `-- name: GetMarketplaceOrderForUpdate :one
+SELECT id, order_number, buyer_user_id, buyer_name, buyer_email, buyer_phone, delivery_type, shipping_address, shipping_state_id, shipping_lga_id, pickup_branch_id, subtotal_kobo, delivery_fee_kobo, total_kobo, currency, order_status, payment_status, fulfilment_status, idempotency_key, notes, created_at, updated_at, version FROM marketplace_orders
+WHERE id = $1
+FOR UPDATE
+`
+
+func (q *Queries) GetMarketplaceOrderForUpdate(ctx context.Context, id string) (MarketplaceOrder, error) {
+	row := q.db.QueryRow(ctx, getMarketplaceOrderForUpdate, id)
+	var i MarketplaceOrder
+	err := row.Scan(
+		&i.ID,
+		&i.OrderNumber,
+		&i.BuyerUserID,
+		&i.BuyerName,
+		&i.BuyerEmail,
+		&i.BuyerPhone,
+		&i.DeliveryType,
+		&i.ShippingAddress,
+		&i.ShippingStateID,
+		&i.ShippingLgaID,
+		&i.PickupBranchID,
+		&i.SubtotalKobo,
+		&i.DeliveryFeeKobo,
+		&i.TotalKobo,
+		&i.Currency,
+		&i.OrderStatus,
+		&i.PaymentStatus,
+		&i.FulfilmentStatus,
+		&i.IdempotencyKey,
+		&i.Notes,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+		&i.Version,
+	)
+	return i, err
+}
+
 const getMarketplacePaymentByOrder = `-- name: GetMarketplacePaymentByOrder :one
 SELECT id, order_id, reference, provider, provider_reference, channel, amount_kobo, currency, status, paid_at, raw_webhook_payload, error_message, created_at, updated_at FROM marketplace_payments
 WHERE order_id = $1
@@ -1197,6 +1302,36 @@ func (q *Queries) GetMarketplacePaymentByOrder(ctx context.Context, orderID stri
 	return i, err
 }
 
+const getMarketplacePaymentByOrderForUpdate = `-- name: GetMarketplacePaymentByOrderForUpdate :one
+SELECT id, order_id, reference, provider, provider_reference, channel, amount_kobo, currency, status, paid_at, raw_webhook_payload, error_message, created_at, updated_at FROM marketplace_payments
+WHERE order_id = $1
+ORDER BY created_at DESC
+LIMIT 1
+FOR UPDATE
+`
+
+func (q *Queries) GetMarketplacePaymentByOrderForUpdate(ctx context.Context, orderID string) (MarketplacePayment, error) {
+	row := q.db.QueryRow(ctx, getMarketplacePaymentByOrderForUpdate, orderID)
+	var i MarketplacePayment
+	err := row.Scan(
+		&i.ID,
+		&i.OrderID,
+		&i.Reference,
+		&i.Provider,
+		&i.ProviderReference,
+		&i.Channel,
+		&i.AmountKobo,
+		&i.Currency,
+		&i.Status,
+		&i.PaidAt,
+		&i.RawWebhookPayload,
+		&i.ErrorMessage,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+	)
+	return i, err
+}
+
 const getMarketplacePaymentByReference = `-- name: GetMarketplacePaymentByReference :one
 SELECT id, order_id, reference, provider, provider_reference, channel, amount_kobo, currency, status, paid_at, raw_webhook_payload, error_message, created_at, updated_at FROM marketplace_payments
 WHERE reference = $1
@@ -1204,6 +1339,34 @@ WHERE reference = $1
 
 func (q *Queries) GetMarketplacePaymentByReference(ctx context.Context, reference string) (MarketplacePayment, error) {
 	row := q.db.QueryRow(ctx, getMarketplacePaymentByReference, reference)
+	var i MarketplacePayment
+	err := row.Scan(
+		&i.ID,
+		&i.OrderID,
+		&i.Reference,
+		&i.Provider,
+		&i.ProviderReference,
+		&i.Channel,
+		&i.AmountKobo,
+		&i.Currency,
+		&i.Status,
+		&i.PaidAt,
+		&i.RawWebhookPayload,
+		&i.ErrorMessage,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+	)
+	return i, err
+}
+
+const getMarketplacePaymentByReferenceForUpdate = `-- name: GetMarketplacePaymentByReferenceForUpdate :one
+SELECT id, order_id, reference, provider, provider_reference, channel, amount_kobo, currency, status, paid_at, raw_webhook_payload, error_message, created_at, updated_at FROM marketplace_payments
+WHERE reference = $1
+FOR UPDATE
+`
+
+func (q *Queries) GetMarketplacePaymentByReferenceForUpdate(ctx context.Context, reference string) (MarketplacePayment, error) {
+	row := q.db.QueryRow(ctx, getMarketplacePaymentByReferenceForUpdate, reference)
 	var i MarketplacePayment
 	err := row.Scan(
 		&i.ID,
@@ -1393,6 +1556,140 @@ func (q *Queries) GetMarketplaceProductBySlug(ctx context.Context, slug string) 
 		&i.BranchName,
 		&i.BranchStateName,
 	)
+	return i, err
+}
+
+const getMarketplaceRefundByID = `-- name: GetMarketplaceRefundByID :one
+SELECT id, order_id, payment_id, amount_kobo, status, provider, provider_refund_reference, initiated_by_user_id, confirmed_by_user_id, reason, settlement_notes, metadata, created_at, updated_at FROM marketplace_refunds
+WHERE id = $1
+`
+
+func (q *Queries) GetMarketplaceRefundByID(ctx context.Context, id string) (MarketplaceRefund, error) {
+	row := q.db.QueryRow(ctx, getMarketplaceRefundByID, id)
+	var i MarketplaceRefund
+	err := row.Scan(
+		&i.ID,
+		&i.OrderID,
+		&i.PaymentID,
+		&i.AmountKobo,
+		&i.Status,
+		&i.Provider,
+		&i.ProviderRefundReference,
+		&i.InitiatedByUserID,
+		&i.ConfirmedByUserID,
+		&i.Reason,
+		&i.SettlementNotes,
+		&i.Metadata,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+	)
+	return i, err
+}
+
+const getMarketplaceRefundByIDForUpdate = `-- name: GetMarketplaceRefundByIDForUpdate :one
+SELECT id, order_id, payment_id, amount_kobo, status, provider, provider_refund_reference, initiated_by_user_id, confirmed_by_user_id, reason, settlement_notes, metadata, created_at, updated_at FROM marketplace_refunds
+WHERE id = $1
+FOR UPDATE
+`
+
+func (q *Queries) GetMarketplaceRefundByIDForUpdate(ctx context.Context, id string) (MarketplaceRefund, error) {
+	row := q.db.QueryRow(ctx, getMarketplaceRefundByIDForUpdate, id)
+	var i MarketplaceRefund
+	err := row.Scan(
+		&i.ID,
+		&i.OrderID,
+		&i.PaymentID,
+		&i.AmountKobo,
+		&i.Status,
+		&i.Provider,
+		&i.ProviderRefundReference,
+		&i.InitiatedByUserID,
+		&i.ConfirmedByUserID,
+		&i.Reason,
+		&i.SettlementNotes,
+		&i.Metadata,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+	)
+	return i, err
+}
+
+const getMarketplaceRefundByProviderReference = `-- name: GetMarketplaceRefundByProviderReference :one
+SELECT id, order_id, payment_id, amount_kobo, status, provider, provider_refund_reference, initiated_by_user_id, confirmed_by_user_id, reason, settlement_notes, metadata, created_at, updated_at FROM marketplace_refunds
+WHERE provider_refund_reference = $1
+ORDER BY created_at DESC
+LIMIT 1
+`
+
+func (q *Queries) GetMarketplaceRefundByProviderReference(ctx context.Context, providerRefundReference string) (MarketplaceRefund, error) {
+	row := q.db.QueryRow(ctx, getMarketplaceRefundByProviderReference, providerRefundReference)
+	var i MarketplaceRefund
+	err := row.Scan(
+		&i.ID,
+		&i.OrderID,
+		&i.PaymentID,
+		&i.AmountKobo,
+		&i.Status,
+		&i.Provider,
+		&i.ProviderRefundReference,
+		&i.InitiatedByUserID,
+		&i.ConfirmedByUserID,
+		&i.Reason,
+		&i.SettlementNotes,
+		&i.Metadata,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+	)
+	return i, err
+}
+
+const getMarketplaceRefundByProviderReferenceForUpdate = `-- name: GetMarketplaceRefundByProviderReferenceForUpdate :one
+SELECT id, order_id, payment_id, amount_kobo, status, provider, provider_refund_reference, initiated_by_user_id, confirmed_by_user_id, reason, settlement_notes, metadata, created_at, updated_at FROM marketplace_refunds
+WHERE provider_refund_reference = $1
+ORDER BY created_at DESC
+LIMIT 1
+FOR UPDATE
+`
+
+func (q *Queries) GetMarketplaceRefundByProviderReferenceForUpdate(ctx context.Context, providerRefundReference string) (MarketplaceRefund, error) {
+	row := q.db.QueryRow(ctx, getMarketplaceRefundByProviderReferenceForUpdate, providerRefundReference)
+	var i MarketplaceRefund
+	err := row.Scan(
+		&i.ID,
+		&i.OrderID,
+		&i.PaymentID,
+		&i.AmountKobo,
+		&i.Status,
+		&i.Provider,
+		&i.ProviderRefundReference,
+		&i.InitiatedByUserID,
+		&i.ConfirmedByUserID,
+		&i.Reason,
+		&i.SettlementNotes,
+		&i.Metadata,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+	)
+	return i, err
+}
+
+const getMarketplaceRefundSumsByOrder = `-- name: GetMarketplaceRefundSumsByOrder :one
+SELECT
+    COALESCE(SUM(CASE WHEN status = 'successful' THEN amount_kobo ELSE 0 END), 0)::bigint AS successful_amount_kobo,
+    COALESCE(SUM(CASE WHEN status = 'pending' THEN amount_kobo ELSE 0 END), 0)::bigint AS pending_amount_kobo
+FROM marketplace_refunds
+WHERE order_id = $1
+`
+
+type GetMarketplaceRefundSumsByOrderRow struct {
+	SuccessfulAmountKobo int64 `json:"successful_amount_kobo"`
+	PendingAmountKobo    int64 `json:"pending_amount_kobo"`
+}
+
+func (q *Queries) GetMarketplaceRefundSumsByOrder(ctx context.Context, orderID string) (GetMarketplaceRefundSumsByOrderRow, error) {
+	row := q.db.QueryRow(ctx, getMarketplaceRefundSumsByOrder, orderID)
+	var i GetMarketplaceRefundSumsByOrderRow
+	err := row.Scan(&i.SuccessfulAmountKobo, &i.PendingAmountKobo)
 	return i, err
 }
 
@@ -2285,6 +2582,47 @@ func (q *Queries) ListMarketplaceProducts(ctx context.Context, arg ListMarketpla
 	return items, nil
 }
 
+const listMarketplaceRefundsByOrder = `-- name: ListMarketplaceRefundsByOrder :many
+SELECT id, order_id, payment_id, amount_kobo, status, provider, provider_refund_reference, initiated_by_user_id, confirmed_by_user_id, reason, settlement_notes, metadata, created_at, updated_at FROM marketplace_refunds
+WHERE order_id = $1
+ORDER BY created_at DESC
+`
+
+func (q *Queries) ListMarketplaceRefundsByOrder(ctx context.Context, orderID string) ([]MarketplaceRefund, error) {
+	rows, err := q.db.Query(ctx, listMarketplaceRefundsByOrder, orderID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []MarketplaceRefund
+	for rows.Next() {
+		var i MarketplaceRefund
+		if err := rows.Scan(
+			&i.ID,
+			&i.OrderID,
+			&i.PaymentID,
+			&i.AmountKobo,
+			&i.Status,
+			&i.Provider,
+			&i.ProviderRefundReference,
+			&i.InitiatedByUserID,
+			&i.ConfirmedByUserID,
+			&i.Reason,
+			&i.SettlementNotes,
+			&i.Metadata,
+			&i.CreatedAt,
+			&i.UpdatedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const resolveMarketplaceDispute = `-- name: ResolveMarketplaceDispute :one
 UPDATE marketplace_disputes
 SET status = $2,
@@ -2791,6 +3129,56 @@ func (q *Queries) UpdateMarketplaceProduct(ctx context.Context, arg UpdateMarket
 		&i.CreatedAt,
 		&i.UpdatedAt,
 		&i.Version,
+	)
+	return i, err
+}
+
+const updateMarketplaceRefundStatus = `-- name: UpdateMarketplaceRefundStatus :one
+UPDATE marketplace_refunds
+SET status = $2,
+    provider_refund_reference = $3,
+    confirmed_by_user_id = $4,
+    settlement_notes = $5,
+    metadata = $6,
+    updated_at = CURRENT_TIMESTAMP
+WHERE id = $1
+RETURNING id, order_id, payment_id, amount_kobo, status, provider, provider_refund_reference, initiated_by_user_id, confirmed_by_user_id, reason, settlement_notes, metadata, created_at, updated_at
+`
+
+type UpdateMarketplaceRefundStatusParams struct {
+	ID                      string          `json:"id"`
+	Status                  string          `json:"status"`
+	ProviderRefundReference string          `json:"provider_refund_reference"`
+	ConfirmedByUserID       pgtype.Text     `json:"confirmed_by_user_id"`
+	SettlementNotes         string          `json:"settlement_notes"`
+	Metadata                json.RawMessage `json:"metadata"`
+}
+
+func (q *Queries) UpdateMarketplaceRefundStatus(ctx context.Context, arg UpdateMarketplaceRefundStatusParams) (MarketplaceRefund, error) {
+	row := q.db.QueryRow(ctx, updateMarketplaceRefundStatus,
+		arg.ID,
+		arg.Status,
+		arg.ProviderRefundReference,
+		arg.ConfirmedByUserID,
+		arg.SettlementNotes,
+		arg.Metadata,
+	)
+	var i MarketplaceRefund
+	err := row.Scan(
+		&i.ID,
+		&i.OrderID,
+		&i.PaymentID,
+		&i.AmountKobo,
+		&i.Status,
+		&i.Provider,
+		&i.ProviderRefundReference,
+		&i.InitiatedByUserID,
+		&i.ConfirmedByUserID,
+		&i.Reason,
+		&i.SettlementNotes,
+		&i.Metadata,
+		&i.CreatedAt,
+		&i.UpdatedAt,
 	)
 	return i, err
 }

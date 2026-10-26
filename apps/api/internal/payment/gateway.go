@@ -7,12 +7,16 @@ import (
 )
 
 var (
-	ErrPaymentFailed          = errors.New("payment processing failed")
-	ErrInvalidSignature       = errors.New("invalid webhook signature")
-	ErrPaymentNotFound       = errors.New("payment transaction not found")
-	ErrUnconfiguredProvider   = errors.New("payment provider is not configured")
-	ErrAmountMismatch         = errors.New("payment amount does not match order total")
-	ErrCurrencyMismatch       = errors.New("payment currency mismatch")
+	ErrPaymentFailed        = errors.New("payment processing failed")
+	ErrInvalidSignature     = errors.New("invalid webhook signature")
+	ErrPaymentNotFound      = errors.New("payment transaction not found")
+	ErrUnconfiguredProvider = errors.New("payment provider is not configured")
+	ErrAmountMismatch       = errors.New("payment amount does not match order total")
+	ErrCurrencyMismatch     = errors.New("payment currency mismatch")
+	ErrReferenceMismatch    = errors.New("payment reference does not match expected reference")
+	ErrProviderMismatch     = errors.New("payment provider mismatch")
+	ErrMalformedResponse    = errors.New("malformed or incomplete provider response")
+	ErrOrderAlreadyPaid     = errors.New("order is already paid")
 )
 
 type InitializePaymentInput struct {
@@ -44,9 +48,36 @@ type VerifyPaymentOutput struct {
 	RawResponse       []byte     `json:"raw_response,omitempty"`
 }
 
+type RefundPaymentInput struct {
+	PaymentReference string `json:"payment_reference"`
+	AmountKobo       int64  `json:"amount_kobo"`
+	Currency         string `json:"currency"`
+	CustomerNote     string `json:"customer_note,omitempty"`
+	MerchantNote     string `json:"merchant_note,omitempty"`
+}
+
+type RefundPaymentOutput struct {
+	RefundReference string `json:"refund_reference"`
+	Status          string `json:"status"` // "pending", "successful", "failed"
+	AmountKobo      int64  `json:"amount_kobo"`
+	Currency        string `json:"currency,omitempty"`
+	RawResponse     []byte `json:"raw_response,omitempty"`
+}
+
+type VerifyRefundOutput struct {
+	RefundReference      string `json:"refund_reference"`
+	TransactionReference string `json:"transaction_reference,omitempty"`
+	Status               string `json:"status"` // "pending", "successful", "failed"
+	AmountKobo           int64  `json:"amount_kobo"`
+	Currency             string `json:"currency,omitempty"`
+	RawResponse          []byte `json:"raw_response,omitempty"`
+}
+
 type PaymentGateway interface {
 	ProviderName() string
 	InitializePayment(ctx context.Context, input InitializePaymentInput) (*InitializePaymentOutput, error)
 	VerifyPayment(ctx context.Context, reference string) (*VerifyPaymentOutput, error)
 	VerifyWebhookSignature(signatureHeader string, body []byte) bool
+	RefundPayment(ctx context.Context, input RefundPaymentInput) (*RefundPaymentOutput, error)
+	VerifyRefund(ctx context.Context, refundReference string) (*VerifyRefundOutput, error)
 }

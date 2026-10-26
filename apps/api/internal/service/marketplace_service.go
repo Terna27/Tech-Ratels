@@ -1171,86 +1171,177 @@ func (s *MarketplaceService) ConfirmPayment(ctx context.Context, reference strin
 		return nil, ErrOrderNotFound
 	}
 
-	// Idempotency: if already paid, return early to prevent duplicate processing
-	if payRec.Status == "successful" && order.PaymentStatus == "paid" {
+	// Idempotency: if already paid or refunded, return early
+	if payRec.Status == "successful" && (order.PaymentStatus == "paid" || order.PaymentStatus == "partially_refunded" || order.PaymentStatus == "refunded") {
 		return &order, nil
 	}
 
-	// Verify payment with authoritative provider
+	// Validate expected payment provider
+	if payRec.Provider != s.paymentGateway.ProviderName() {
+		return nil, fmt.Errorf("%w: expected provider '%s', got '%s'",
+			payment.ErrProviderMismatch, payRec.Provider, s.paymentGateway.ProviderName())
+	}
+
+	// Verify payment with authoritative provider (outside any DB transaction)
 	verifyOut, err := s.paymentGateway.VerifyPayment(ctx, reference)
 	if err != nil {
 		return nil, fmt.Errorf("payment verification failed: %w", err)
 	}
 
 	if verifyOut.Status != "successful" {
-		// Out-of-order event safeguard: Never downgrade an already-paid order to failed
-		if order.PaymentStatus != "paid" {
-			_, _ = s.repo.Queries().UpdateMarketplacePaymentTransactionStatus(ctx, db.UpdateMarketplacePaymentTransactionStatusParams{
+		// Out-of-order event safeguard: Row lock and never downgrade an already-paid or refunded order
+		_ = s.repo.WithTx(ctx, func(q *db.Queries) error {
+			lockedPay, err := q.GetMarketplacePaymentByReferenceForUpdate(ctx, reference)
+			if err != nil {
+				return err
+			}
+			lockedOrder, err := q.GetMarketplaceOrderForUpdate(ctx, lockedPay.OrderID)
+			if err != nil {
+				return err
+			}
+
+			// Never overwrite an already-paid, partially refunded, or refunded order or payment
+			if lockedOrder.PaymentStatus == "paid" || lockedOrder.PaymentStatus == "partially_refunded" || lockedOrder.PaymentStatus == "refunded" || lockedPay.Status == "successful" {
+				return nil
+			}
+
+			rawPayload := verifyOut.RawResponse
+			if len(rawPayload) == 0 {
+				rawPayload = []byte("{}")
+			}
+
+			_, err = q.UpdateMarketplacePaymentTransactionStatus(ctx, db.UpdateMarketplacePaymentTransactionStatusParams{
 				Reference:         reference,
 				Status:            "failed",
 				ProviderReference: TextFromString(verifyOut.ProviderReference),
 				Channel:           TextFromString(verifyOut.Channel),
 				PaidAt:            pgtype.Timestamptz{Valid: false},
-				RawWebhookPayload: verifyOut.RawResponse,
+				RawWebhookPayload: rawPayload,
 				ErrorMessage:      TextFromString("Payment status returned: " + verifyOut.Status),
 			})
-			_, _ = s.repo.Queries().UpdateMarketplaceOrderPaymentStatus(ctx, db.UpdateMarketplaceOrderPaymentStatusParams{
-				ID:            order.ID,
-				PaymentStatus: "failed",
-			})
-		}
+			if err != nil {
+				return err
+			}
+
+			if lockedOrder.PaymentStatus == "pending" && lockedOrder.OrderStatus != "cancelled" && lockedOrder.OrderStatus != "refunded" {
+				_, err = q.UpdateMarketplaceOrderPaymentStatus(ctx, db.UpdateMarketplaceOrderPaymentStatusParams{
+					ID:            lockedOrder.ID,
+					PaymentStatus: "failed",
+				})
+				if err != nil {
+					return err
+				}
+			}
+			return nil
+		})
 		return nil, fmt.Errorf("payment was not successful (status: %s)", verifyOut.Status)
 	}
 
-	// Server-side amount validation: Never mark paid without verifying full amount!
-	if verifyOut.AmountKobo < order.TotalKobo {
+	// Strict Paystack verification:
+	// 1. Returned payment reference must match expected reference exactly
+	if verifyOut.PaymentReference != reference {
+		return nil, fmt.Errorf("%w: expected reference %s, got %s", payment.ErrReferenceMismatch, reference, verifyOut.PaymentReference)
+	}
+
+	// 2. Verified amount must equal expected order total exactly (rejects both underpayment and overpayment)
+	if verifyOut.AmountKobo != order.TotalKobo {
 		return nil, fmt.Errorf("%w: expected %d kobo, got %d kobo", payment.ErrAmountMismatch, order.TotalKobo, verifyOut.AmountKobo)
 	}
 
-	// Server-side currency validation: Provider currency must match order currency
-	if verifyOut.Currency != "" && strings.ToUpper(verifyOut.Currency) != strings.ToUpper(order.Currency) {
+	// 3. Reject missing or mismatched currencies
+	if strings.TrimSpace(verifyOut.Currency) == "" {
+		return nil, fmt.Errorf("%w: verified currency is missing", payment.ErrCurrencyMismatch)
+	}
+	if !strings.EqualFold(verifyOut.Currency, order.Currency) {
 		return nil, fmt.Errorf("%w: expected %s, got %s", payment.ErrCurrencyMismatch, order.Currency, verifyOut.Currency)
 	}
 
-	now := time.Now()
-	paidAt := TimestamptzFromTime(now)
-	if verifyOut.PaidAt != nil {
-		paidAt = TimestamptzFromTime(*verifyOut.PaidAt)
-	}
+	// Atomic transaction with row-level locks
+	err = s.repo.WithTx(ctx, func(q *db.Queries) error {
+		lockedPay, err := q.GetMarketplacePaymentByReferenceForUpdate(ctx, reference)
+		if err != nil {
+			return fmt.Errorf("failed to lock payment record: %w", err)
+		}
 
-	// Update payment record
-	_, err = s.repo.Queries().UpdateMarketplacePaymentTransactionStatus(ctx, db.UpdateMarketplacePaymentTransactionStatusParams{
-		Reference:         reference,
-		Status:            "successful",
-		ProviderReference: TextFromString(verifyOut.ProviderReference),
-		Channel:           TextFromString(verifyOut.Channel),
-		PaidAt:            paidAt,
-		RawWebhookPayload: verifyOut.RawResponse,
-		ErrorMessage:      TextFromString(""),
+		lockedOrder, err := q.GetMarketplaceOrderForUpdate(ctx, lockedPay.OrderID)
+		if err != nil {
+			return fmt.Errorf("failed to lock order record: %w", err)
+		}
+
+		// Concurrency protection: if already marked paid / refunded by a concurrent request, no-op
+		if lockedPay.Status == "successful" && (lockedOrder.PaymentStatus == "paid" || lockedOrder.PaymentStatus == "partially_refunded" || lockedOrder.PaymentStatus == "refunded") {
+			return nil
+		}
+
+		// Update order payment status to paid (unless already partially refunded or refunded)
+		if lockedOrder.PaymentStatus != "refunded" && lockedOrder.PaymentStatus != "partially_refunded" {
+			_, err = q.UpdateMarketplaceOrderPaymentStatus(ctx, db.UpdateMarketplaceOrderPaymentStatusParams{
+				ID:            lockedOrder.ID,
+				PaymentStatus: "paid",
+			})
+			if err != nil {
+				return fmt.Errorf("failed to update order payment status: %w", err)
+			}
+		}
+
+		// Order processing status advances ONLY when the transition is valid:
+		// Do not automatically reset cancelled, fulfilled, or disputed orders to processing.
+		if lockedOrder.OrderStatus == "placed" && lockedOrder.FulfilmentStatus == "unfulfilled" {
+			disputes, err := q.ListMarketplaceDisputesByOrder(ctx, lockedOrder.ID)
+			hasOpenDispute := false
+			if err == nil {
+				for _, d := range disputes {
+					if d.Status == "open" {
+						hasOpenDispute = true
+						break
+					}
+				}
+			}
+			if !hasOpenDispute {
+				_, err = q.UpdateMarketplaceOrderStatus(ctx, db.UpdateMarketplaceOrderStatusParams{
+					ID:          lockedOrder.ID,
+					OrderStatus: "processing",
+				})
+				if err != nil {
+					return fmt.Errorf("failed to advance order status: %w", err)
+				}
+			}
+		}
+
+		now := time.Now()
+		paidAt := TimestamptzFromTime(now)
+		if verifyOut.PaidAt != nil {
+			paidAt = TimestamptzFromTime(*verifyOut.PaidAt)
+		}
+		rawPayload := verifyOut.RawResponse
+		if len(rawPayload) == 0 {
+			rawPayload = []byte("{}")
+		}
+
+		_, err = q.UpdateMarketplacePaymentTransactionStatus(ctx, db.UpdateMarketplacePaymentTransactionStatusParams{
+			Reference:         reference,
+			Status:            "successful",
+			ProviderReference: TextFromString(verifyOut.ProviderReference),
+			Channel:           TextFromString(verifyOut.Channel),
+			PaidAt:            paidAt,
+			RawWebhookPayload: rawPayload,
+			ErrorMessage:      TextFromString(""),
+		})
+		if err != nil {
+			return fmt.Errorf("failed to update payment record: %w", err)
+		}
+
+		return nil
 	})
 	if err != nil {
-		return nil, fmt.Errorf("failed to update payment record: %w", err)
-	}
-
-	// Update order payment and processing status
-	_, err = s.repo.Queries().UpdateMarketplaceOrderPaymentStatus(ctx, db.UpdateMarketplaceOrderPaymentStatusParams{
-		ID:            order.ID,
-		PaymentStatus: "paid",
-	})
-	if err != nil {
-		return nil, err
-	}
-
-	_, err = s.repo.Queries().UpdateMarketplaceOrderStatus(ctx, db.UpdateMarketplaceOrderStatusParams{
-		ID:          order.ID,
-		OrderStatus: "processing",
-	})
-	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("failed to atomically confirm payment: %w", err)
 	}
 
 	_ = s.audit.Log(ctx, nil, nil, "confirm_marketplace_payment", "marketplace_payment", reference, nil, nil, nil, nil)
-	refreshedOrder, _ := s.repo.Queries().GetMarketplaceOrderByID(ctx, order.ID)
+	refreshedOrder, err := s.repo.Queries().GetMarketplaceOrderByID(ctx, payRec.OrderID)
+	if err != nil {
+		return nil, fmt.Errorf("failed to reload order: %w", err)
+	}
 	return &refreshedOrder, nil
 }
 
@@ -1262,10 +1353,12 @@ func (s *MarketplaceService) HandleWebhook(ctx context.Context, signatureHeader 
 	var event struct {
 		Event string `json:"event"`
 		Data  struct {
-			Reference string `json:"reference"`
-			Status    string `json:"status"`
-			Amount    int64  `json:"amount"`
-			Currency  string `json:"currency"`
+			Reference            string `json:"reference"`
+			TransactionReference string `json:"transaction_reference"`
+			RefundReference      string `json:"refund_reference"`
+			Status               string `json:"status"`
+			Amount               int64  `json:"amount"`
+			Currency             string `json:"currency"`
 		} `json:"data"`
 	}
 
@@ -1273,15 +1366,123 @@ func (s *MarketplaceService) HandleWebhook(ctx context.Context, signatureHeader 
 		return fmt.Errorf("failed to decode webhook event: %w", err)
 	}
 
-	ref := event.Data.Reference
-	if ref == "" {
-		return errors.New("webhook event missing reference")
+	// 1. Refund Events (Paystack refund.processed, refund.successful, and refund.failed)
+	if event.Event == "refund.processed" || event.Event == "refund.successful" {
+		refundRef := strings.TrimSpace(event.Data.RefundReference)
+		if refundRef == "" {
+			refundRef = strings.TrimSpace(event.Data.Reference)
+		}
+		if refundRef == "" {
+			// Handle missing refund identifier safely without changing refund status
+			return nil
+		}
+
+		// Match refund event strictly to a unique provider refund identifier (no ambiguous fallback)
+		refund, err := s.repo.Queries().GetMarketplaceRefundByProviderReference(ctx, refundRef)
+		if err != nil {
+			// Unknown or mismatched refund identifier: handle safely without changing refund status
+			return nil
+		}
+
+		// Validate the refund belongs to the expected payment and order
+		pay, pErr := s.repo.Queries().GetMarketplacePaymentByOrder(ctx, refund.OrderID)
+		if pErr != nil {
+			return nil
+		}
+		if refund.PaymentID != pay.ID {
+			return errors.New("webhook refund payment ID does not match order payment")
+		}
+		txnRef := strings.TrimSpace(event.Data.TransactionReference)
+		if txnRef != "" && pay.Reference != "" && txnRef != pay.Reference && (!pay.ProviderReference.Valid || txnRef != pay.ProviderReference.String) {
+			return errors.New("webhook transaction reference does not match refund payment")
+		}
+
+		// Verify amount and currency when supplied by the provider
+		if event.Data.Amount > 0 && event.Data.Amount != refund.AmountKobo {
+			return fmt.Errorf("webhook refund amount %d does not match expected refund amount %d", event.Data.Amount, refund.AmountKobo)
+		}
+		if event.Data.Currency != "" && pay.Currency != "" && !strings.EqualFold(event.Data.Currency, pay.Currency) {
+			return fmt.Errorf("webhook refund currency %s does not match expected payment currency %s", event.Data.Currency, pay.Currency)
+		}
+
+		// Do not treat a pending, processing, or accepted refund as successfully settled
+		provStatus := strings.ToLower(event.Data.Status)
+		if provStatus == "pending" || provStatus == "processing" || provStatus == "accepted" {
+			return nil
+		}
+
+		// State transition and idempotency checks
+		if refund.Status == "successful" {
+			// Idempotent duplicate: harmless no-op
+			return nil
+		}
+		if refund.Status == "failed" {
+			// Failed refunds must not be silently converted to successful
+			return errors.New("cannot convert failed refund to successful")
+		}
+
+		_, _, err = s.settleRefundSuccess(ctx, nil, refund.ID, refundRef, "Confirmed via Paystack webhook: "+event.Event, payload)
+		return err
 	}
 
-	// Confirm payment idempotently on charge.success or successful status
-	if event.Event == "charge.success" || event.Data.Status == "success" || event.Data.Status == "successful" {
+	if event.Event == "refund.failed" {
+		refundRef := strings.TrimSpace(event.Data.RefundReference)
+		if refundRef == "" {
+			refundRef = strings.TrimSpace(event.Data.Reference)
+		}
+		if refundRef == "" {
+			return nil
+		}
+
+		refund, err := s.repo.Queries().GetMarketplaceRefundByProviderReference(ctx, refundRef)
+		if err != nil {
+			return nil
+		}
+
+		// Validate the refund belongs to the expected payment and order
+		pay, pErr := s.repo.Queries().GetMarketplacePaymentByOrder(ctx, refund.OrderID)
+		if pErr != nil {
+			return nil
+		}
+		if refund.PaymentID != pay.ID {
+			return errors.New("webhook refund payment ID does not match order payment")
+		}
+		txnRef := strings.TrimSpace(event.Data.TransactionReference)
+		if txnRef != "" && pay.Reference != "" && txnRef != pay.Reference && (!pay.ProviderReference.Valid || txnRef != pay.ProviderReference.String) {
+			return errors.New("webhook transaction reference does not match refund payment")
+		}
+
+		// State transition and idempotency checks
+		if refund.Status == "failed" {
+			// Idempotent duplicate: harmless no-op
+			return nil
+		}
+		if refund.Status == "successful" {
+			// Successful refunds must NEVER be downgraded
+			return nil
+		}
+
+		_, _, err = s.FailRefund(ctx, nil, refund.ID, "Refund failed at provider: "+event.Event)
+		return err
+	}
+
+	// 2. Charge Events
+	if event.Event == "charge.success" || (event.Event == "" && (event.Data.Status == "success" || event.Data.Status == "successful")) {
+		ref := event.Data.Reference
+		if ref == "" {
+			return errors.New("webhook event missing reference")
+		}
 		_, err := s.ConfirmPayment(ctx, ref)
 		return err
+	}
+
+	// For failed payment events, record failure authoritatively without overwriting successful payments
+	if event.Event == "charge.failed" || (event.Event == "" && event.Data.Status == "failed") {
+		ref := event.Data.Reference
+		if ref != "" {
+			_, _ = s.ConfirmPayment(ctx, ref)
+		}
+		return nil
 	}
 
 	return nil
@@ -1668,37 +1869,420 @@ func (s *MarketplaceService) CancelOrder(ctx context.Context, user *db.User, ord
 }
 
 type RefundOrderInput struct {
-	AmountKobo int64  `json:"amount_kobo"`
-	Reason     string `json:"reason"`
+	AmountKobo       int64  `json:"amount_kobo"`
+	Reason           string `json:"reason"`
+	ManualSettlement bool   `json:"manual_settlement,omitempty"`
+	SettlementNotes  string `json:"settlement_notes,omitempty"`
 }
 
-func (s *MarketplaceService) InitiateRefund(ctx context.Context, admin *db.User, orderID string, input RefundOrderInput) (*db.GetMarketplaceOrderByIDRow, error) {
+type ConfirmRefundInput struct {
+	ProviderRefundReference string `json:"provider_refund_reference,omitempty"`
+	SettlementNotes         string `json:"settlement_notes,omitempty"`
+}
+
+type ManualSettlementInput struct {
+	Evidence string `json:"settlement_evidence"`
+	Reason   string `json:"reason"`
+	Notes    string `json:"notes,omitempty"`
+}
+
+func (s *MarketplaceService) InitiateRefund(ctx context.Context, admin *db.User, orderID string, input RefundOrderInput) (*db.MarketplaceRefund, *db.GetMarketplaceOrderByIDRow, error) {
 	if !isAdmin(admin) {
-		return nil, errors.New("unauthorized: administrative permissions required")
+		return nil, nil, errors.New("unauthorized: administrative permissions required")
+	}
+
+	if input.AmountKobo < 0 {
+		return nil, nil, errors.New("refund amount must be greater than zero")
 	}
 
 	order, err := s.repo.Queries().GetMarketplaceOrderByID(ctx, orderID)
 	if err != nil {
-		return nil, ErrOrderNotFound
+		return nil, nil, ErrOrderNotFound
 	}
 
 	if order.PaymentStatus != "paid" && order.PaymentStatus != "partially_refunded" {
-		return nil, fmt.Errorf("cannot refund an order with payment status '%s'", order.PaymentStatus)
+		return nil, nil, fmt.Errorf("cannot refund an order with payment status '%s'", order.PaymentStatus)
 	}
 
-	refundAmount := input.AmountKobo
-	if refundAmount <= 0 {
-		refundAmount = order.TotalKobo
-	}
-	if refundAmount > order.TotalKobo {
-		return nil, fmt.Errorf("refund amount %d kobo exceeds total order amount %d kobo", refundAmount, order.TotalKobo)
-	}
-
-	isFullRefund := refundAmount == order.TotalKobo
+	var createdRefund db.MarketplaceRefund
 
 	err = s.repo.WithTx(ctx, func(q *db.Queries) error {
-		if isFullRefund {
-			items, err := q.ListMarketplaceOrderItemsByOrder(ctx, orderID)
+		lockedOrder, err := q.GetMarketplaceOrderForUpdate(ctx, orderID)
+		if err != nil {
+			return fmt.Errorf("failed to lock order for refund: %w", err)
+		}
+
+		if lockedOrder.PaymentStatus != "paid" && lockedOrder.PaymentStatus != "partially_refunded" {
+			return fmt.Errorf("cannot refund an order with payment status '%s'", lockedOrder.PaymentStatus)
+		}
+
+		pay, err := q.GetMarketplacePaymentByOrderForUpdate(ctx, orderID)
+		if err != nil {
+			return fmt.Errorf("failed to locate payment for order: %w", err)
+		}
+
+		// Calculate eligible refunds from authoritative refund records and pending reservations
+		sums, err := q.GetMarketplaceRefundSumsByOrder(ctx, orderID)
+		if err != nil {
+			return fmt.Errorf("failed to calculate existing refund sums: %w", err)
+		}
+
+		totalCommittedOrReserved := sums.SuccessfulAmountKobo + sums.PendingAmountKobo
+		remainingEligible := lockedOrder.TotalKobo - totalCommittedOrReserved
+
+		if remainingEligible <= 0 {
+			return errors.New("order is already fully refunded or has pending refund reservations covering the balance")
+		}
+
+		actualRefund := input.AmountKobo
+		if actualRefund <= 0 || actualRefund == lockedOrder.TotalKobo {
+			actualRefund = remainingEligible
+		}
+
+		if actualRefund > remainingEligible {
+			return fmt.Errorf("refund amount %d kobo exceeds eligible remaining amount %d kobo (total order %d kobo, already refunded %d kobo, pending reservations %d kobo)",
+				actualRefund, remainingEligible, lockedOrder.TotalKobo, sums.SuccessfulAmountKobo, sums.PendingAmountKobo)
+		}
+
+		refundID := security.GenerateUUID()
+		refundStatus := "pending"
+
+		r, err := q.CreateMarketplaceRefund(ctx, db.CreateMarketplaceRefundParams{
+			ID:                      refundID,
+			OrderID:                 orderID,
+			PaymentID:               pay.ID,
+			AmountKobo:              actualRefund,
+			Status:                  refundStatus,
+			Provider:                pay.Provider,
+			ProviderRefundReference: "",
+			InitiatedByUserID:       admin.ID,
+			ConfirmedByUserID:       pgtype.Text{Valid: false},
+			Reason:                  input.Reason,
+			SettlementNotes:         input.SettlementNotes,
+			Metadata:                []byte("{}"),
+		})
+		if err != nil {
+			return fmt.Errorf("failed to create refund record: %w", err)
+		}
+		createdRefund = r
+		return nil
+	})
+	if err != nil {
+		return nil, nil, err
+	}
+
+	// Attempt provider refund execution outside the database transaction
+	if createdRefund.Provider != "manual" && createdRefund.Provider != "offline" {
+		payRec, pErr := s.repo.Queries().GetMarketplacePaymentByOrder(ctx, orderID)
+		if pErr == nil {
+			refundOut, pReqErr := s.paymentGateway.RefundPayment(ctx, payment.RefundPaymentInput{
+				PaymentReference: payRec.Reference,
+				AmountKobo:       createdRefund.AmountKobo,
+				Currency:         payRec.Currency,
+				CustomerNote:     input.Reason,
+				MerchantNote:     fmt.Sprintf("Refund for order %s initiated by admin %s", orderID, admin.Email.String),
+			})
+			if pReqErr != nil {
+				_, _, _ = s.FailRefund(ctx, admin, createdRefund.ID, fmt.Sprintf("Payment provider rejected refund: %v", pReqErr))
+				return nil, nil, fmt.Errorf("payment provider refund initiation failed: %w", pReqErr)
+			}
+			if refundOut != nil {
+				if refundOut.Status == "failed" {
+					_, _, _ = s.FailRefund(ctx, admin, createdRefund.ID, "Payment provider returned failed refund status")
+					return nil, nil, errors.New("payment provider rejected refund")
+				}
+				if refundOut.Status == "successful" {
+					return s.settleRefundSuccess(ctx, admin, createdRefund.ID, refundOut.RefundReference, "Completed immediately by payment provider", refundOut.RawResponse)
+				}
+				// If pending, record the provider refund reference
+				if refundOut.RefundReference != "" {
+					meta := refundOut.RawResponse
+					if len(meta) == 0 {
+						meta = []byte("{}")
+					}
+					_ = s.repo.WithTx(ctx, func(q *db.Queries) error {
+						_, err := q.UpdateMarketplaceRefundStatus(ctx, db.UpdateMarketplaceRefundStatusParams{
+							ID:                      createdRefund.ID,
+							Status:                  "pending",
+							ProviderRefundReference: refundOut.RefundReference,
+							ConfirmedByUserID:       pgtype.Text{Valid: false},
+							SettlementNotes:         "Pending provider settlement",
+							Metadata:                meta,
+						})
+						return err
+					})
+					createdRefund.ProviderRefundReference = refundOut.RefundReference
+				}
+			}
+		}
+	}
+
+	_ = s.audit.Log(ctx, &admin.ID, &admin.PrimaryRole, "initiate_marketplace_refund", "marketplace_refund", createdRefund.ID, nil, nil, &input.Reason, nil)
+
+	refreshedOrder, err := s.repo.Queries().GetMarketplaceOrderByID(ctx, orderID)
+	if err != nil {
+		return nil, nil, err
+	}
+	return &createdRefund, &refreshedOrder, nil
+}
+
+func (s *MarketplaceService) ConfirmRefund(ctx context.Context, admin *db.User, refundID string, input ConfirmRefundInput) (*db.MarketplaceRefund, *db.GetMarketplaceOrderByIDRow, error) {
+	if admin != nil && !isAdmin(admin) {
+		return nil, nil, errors.New("unauthorized: administrative permissions required")
+	}
+
+	lockedRefund, err := s.repo.Queries().GetMarketplaceRefundByID(ctx, refundID)
+	if err != nil {
+		return nil, nil, errors.New("marketplace refund not found")
+	}
+
+	// Idempotent no-op if already successful
+	if lockedRefund.Status == "successful" {
+		order, err := s.repo.Queries().GetMarketplaceOrderByID(ctx, lockedRefund.OrderID)
+		if err != nil {
+			return nil, nil, err
+		}
+		return &lockedRefund, &order, nil
+	}
+	if lockedRefund.Status != "pending" {
+		return nil, nil, fmt.Errorf("cannot confirm refund with status '%s'", lockedRefund.Status)
+	}
+
+	// For Paystack refunds:
+	// Do NOT trust administrator-supplied references or notes as proof of settlement.
+	// Require authoritative confirmation from Paystack that the exact refund has succeeded.
+	if lockedRefund.Provider == "paystack" {
+		providerRef := strings.TrimSpace(lockedRefund.ProviderRefundReference)
+		if providerRef == "" {
+			return nil, nil, errors.New("cannot confirm provider refund without recorded provider reference")
+		}
+
+		// Reject forged or mismatched provider reference supplied by caller
+		if input.ProviderRefundReference != "" && input.ProviderRefundReference != providerRef {
+			return nil, nil, errors.New("provided refund reference does not match authoritative provider refund reference")
+		}
+
+		// Authoritatively verify with payment gateway
+		verifyOut, err := s.paymentGateway.VerifyRefund(ctx, providerRef)
+		if err != nil {
+			return nil, nil, fmt.Errorf("reliable provider confirmation is unavailable: %w", err)
+		}
+
+		// Check terminal status: do not treat pending/processing as settled
+		if verifyOut.Status == "pending" {
+			return nil, nil, errors.New("provider refund is still pending or processing; cannot mark as settled")
+		}
+		if verifyOut.Status == "failed" {
+			_, _, _ = s.FailRefund(ctx, admin, refundID, "Provider reported refund failure during verification")
+			return nil, nil, errors.New("provider refund has failed")
+		}
+		if verifyOut.Status != "successful" {
+			return nil, nil, fmt.Errorf("provider refund returned unverified status: %s", verifyOut.Status)
+		}
+
+		// Verify provider refund identifier
+		if verifyOut.RefundReference != "" && verifyOut.RefundReference != providerRef {
+			return nil, nil, fmt.Errorf("verified provider refund identifier mismatch: expected %s, got %s", providerRef, verifyOut.RefundReference)
+		}
+
+		// Verify original transaction reference
+		pay, err := s.repo.Queries().GetMarketplacePaymentByOrder(ctx, lockedRefund.OrderID)
+		if err != nil {
+			return nil, nil, fmt.Errorf("failed to locate order payment: %w", err)
+		}
+		if verifyOut.TransactionReference != "" && pay.Reference != "" && verifyOut.TransactionReference != pay.Reference && (!pay.ProviderReference.Valid || verifyOut.TransactionReference != pay.ProviderReference.String) {
+			return nil, nil, fmt.Errorf("verified provider transaction reference mismatch: expected %s, got %s", pay.Reference, verifyOut.TransactionReference)
+		}
+
+		// Verify amount where available
+		if verifyOut.AmountKobo > 0 && verifyOut.AmountKobo != lockedRefund.AmountKobo {
+			return nil, nil, fmt.Errorf("verified provider refund amount mismatch: expected %d kobo, got %d kobo", lockedRefund.AmountKobo, verifyOut.AmountKobo)
+		}
+
+		// Verify currency where available
+		if verifyOut.Currency != "" && pay.Currency != "" && !strings.EqualFold(verifyOut.Currency, pay.Currency) {
+			return nil, nil, fmt.Errorf("verified provider refund currency mismatch: expected %s, got %s", pay.Currency, verifyOut.Currency)
+		}
+
+		return s.settleRefundSuccess(ctx, admin, refundID, providerRef, "Verified with Paystack provider", verifyOut.RawResponse)
+	}
+
+	// For sandbox mode
+	if lockedRefund.Provider == "dev_sandbox" || lockedRefund.Provider == "sandbox" {
+		providerRef := lockedRefund.ProviderRefundReference
+		if input.ProviderRefundReference != "" && input.ProviderRefundReference != providerRef {
+			return nil, nil, errors.New("provided refund reference does not match authoritative provider refund reference")
+		}
+		verifyOut, err := s.paymentGateway.VerifyRefund(ctx, providerRef)
+		if err != nil {
+			return nil, nil, fmt.Errorf("reliable provider confirmation is unavailable: %w", err)
+		}
+		if verifyOut.Status == "pending" {
+			return nil, nil, errors.New("provider refund is still pending or processing; cannot mark as settled")
+		}
+		if verifyOut.Status == "failed" {
+			_, _, _ = s.FailRefund(ctx, admin, refundID, "Provider reported refund failure during verification")
+			return nil, nil, errors.New("provider refund has failed")
+		}
+		if verifyOut.Status != "successful" {
+			return nil, nil, fmt.Errorf("provider refund returned unverified status: %s", verifyOut.Status)
+		}
+		return s.settleRefundSuccess(ctx, admin, refundID, providerRef, "Verified with sandbox provider", verifyOut.RawResponse)
+	}
+
+	return nil, nil, errors.New("unsupported refund provider for automated confirmation; manual settlement required")
+}
+
+func (s *MarketplaceService) ManualSettleRefund(ctx context.Context, admin *db.User, refundID string, input ManualSettlementInput) (*db.MarketplaceRefund, *db.GetMarketplaceOrderByIDRow, error) {
+	// Restrict this workflow strictly to Super Admin
+	if admin == nil || admin.PrimaryRole != "super_admin" {
+		return nil, nil, errors.New("unauthorized: super admin authorization required for manual settlement")
+	}
+
+	evidence := strings.TrimSpace(input.Evidence)
+	if evidence == "" {
+		return nil, nil, errors.New("settlement evidence is required for manual settlement")
+	}
+
+	reason := strings.TrimSpace(input.Reason)
+	if reason == "" {
+		return nil, nil, errors.New("settlement reason is required for manual settlement")
+	}
+
+	refund, err := s.repo.Queries().GetMarketplaceRefundByID(ctx, refundID)
+	if err != nil {
+		return nil, nil, errors.New("marketplace refund not found")
+	}
+
+	if refund.Status == "successful" {
+		order, err := s.repo.Queries().GetMarketplaceOrderByID(ctx, refund.OrderID)
+		if err != nil {
+			return nil, nil, err
+		}
+		return &refund, &order, nil
+	}
+	if refund.Status != "pending" {
+		return nil, nil, fmt.Errorf("cannot manually settle refund with status '%s'", refund.Status)
+	}
+
+	// Do not let it bypass Paystack refund verification for active electronic Paystack payments
+	if refund.Provider == "paystack" {
+		return nil, nil, errors.New("cannot bypass provider verification for active electronic Paystack refunds; please use provider confirmation or reconciliation")
+	}
+
+	settlementNotes := fmt.Sprintf("Manual settlement authorized by Super Admin (%s): %s | Evidence: %s", admin.Email.String, reason, evidence)
+	if input.Notes != "" {
+		settlementNotes += " | Notes: " + input.Notes
+	}
+
+	meta, _ := json.Marshal(map[string]interface{}{
+		"manual_settlement":   true,
+		"settlement_evidence": evidence,
+		"settlement_reason":   reason,
+		"settled_by_email":    admin.Email.String,
+		"settled_by_id":       admin.ID,
+	})
+
+	resRefund, resOrder, err := s.settleRefundSuccess(ctx, admin, refundID, refund.ProviderRefundReference, settlementNotes, meta)
+	if err != nil {
+		return nil, nil, err
+	}
+
+	_ = s.audit.Log(ctx, &admin.ID, &admin.PrimaryRole, "manual_settle_marketplace_refund", "marketplace_refund", refundID, nil, nil, &reason, nil)
+
+	return resRefund, resOrder, nil
+}
+
+func (s *MarketplaceService) settleRefundSuccess(ctx context.Context, admin *db.User, refundID string, providerRef string, notes string, metadata []byte) (*db.MarketplaceRefund, *db.GetMarketplaceOrderByIDRow, error) {
+	var updatedRefund db.MarketplaceRefund
+	var orderID string
+
+	err := s.repo.WithTx(ctx, func(q *db.Queries) error {
+		lockedRefund, err := q.GetMarketplaceRefundByIDForUpdate(ctx, refundID)
+		if err != nil {
+			return errors.New("marketplace refund not found")
+		}
+		orderID = lockedRefund.OrderID
+
+		// Idempotent no-op if already successful
+		if lockedRefund.Status == "successful" {
+			updatedRefund = lockedRefund
+			return nil
+		}
+		if lockedRefund.Status == "failed" {
+			return errors.New("cannot settle a failed refund")
+		}
+		if lockedRefund.Status != "pending" {
+			return fmt.Errorf("cannot settle refund with status '%s'", lockedRefund.Status)
+		}
+
+		lockedOrder, err := q.GetMarketplaceOrderForUpdate(ctx, lockedRefund.OrderID)
+		if err != nil {
+			return fmt.Errorf("failed to lock order for refund settlement: %w", err)
+		}
+
+		pay, err := q.GetMarketplacePaymentByOrderForUpdate(ctx, lockedRefund.OrderID)
+		if err != nil {
+			return fmt.Errorf("failed to locate payment: %w", err)
+		}
+
+		pRef := lockedRefund.ProviderRefundReference
+		if providerRef != "" {
+			pRef = providerRef
+		}
+
+		var confirmedBy pgtype.Text
+		if admin != nil {
+			confirmedBy = TextFromString(admin.ID)
+		}
+
+		settleNotes := lockedRefund.SettlementNotes
+		if notes != "" {
+			settleNotes = notes
+		}
+
+		meta := lockedRefund.Metadata
+		if len(metadata) > 0 {
+			meta = metadata
+		}
+		if len(meta) == 0 {
+			meta = []byte("{}")
+		}
+
+		refRecord, err := q.UpdateMarketplaceRefundStatus(ctx, db.UpdateMarketplaceRefundStatusParams{
+			ID:                      refundID,
+			Status:                  "successful",
+			ProviderRefundReference: pRef,
+			ConfirmedByUserID:       confirmedBy,
+			SettlementNotes:         settleNotes,
+			Metadata:                meta,
+		})
+		if err != nil {
+			return fmt.Errorf("failed to update refund record: %w", err)
+		}
+		updatedRefund = refRecord
+
+		// Recalculate authoritative successful refund sum
+		sums, err := q.GetMarketplaceRefundSumsByOrder(ctx, lockedRefund.OrderID)
+		if err != nil {
+			return fmt.Errorf("failed to calculate refund sums: %w", err)
+		}
+
+		isFullRefund := sums.SuccessfulAmountKobo >= lockedOrder.TotalKobo
+
+		// Stock restoration idempotency check:
+		// Only restore stock if:
+		// 1. Full refund
+		// 2. Order was NOT already cancelled or refunded (which already restored stock)
+		// 3. Order has NOT been dispatched or delivered
+		shouldRestoreStock := isFullRefund &&
+			lockedOrder.OrderStatus != "cancelled" &&
+			lockedOrder.OrderStatus != "refunded" &&
+			lockedOrder.FulfilmentStatus != "dispatched" &&
+			lockedOrder.FulfilmentStatus != "delivered"
+
+		if shouldRestoreStock {
+			items, err := q.ListMarketplaceOrderItemsByOrder(ctx, lockedOrder.ID)
 			if err != nil {
 				return err
 			}
@@ -1713,61 +2297,159 @@ func (s *MarketplaceService) InitiateRefund(ctx context.Context, admin *db.User,
 					}
 				}
 			}
+		}
 
+		newOrderStatus := lockedOrder.OrderStatus
+		newPaymentStatus := "partially_refunded"
+		if isFullRefund {
+			newOrderStatus = "refunded"
+			newPaymentStatus = "refunded"
+		}
+
+		if newOrderStatus != lockedOrder.OrderStatus {
 			_, err = q.UpdateMarketplaceOrderStatus(ctx, db.UpdateMarketplaceOrderStatusParams{
-				ID:          orderID,
-				OrderStatus: "refunded",
-			})
-			if err != nil {
-				return err
-			}
-			_, err = q.UpdateMarketplaceOrderPaymentStatus(ctx, db.UpdateMarketplaceOrderPaymentStatusParams{
-				ID:            orderID,
-				PaymentStatus: "refunded",
-			})
-			if err != nil {
-				return err
-			}
-		} else {
-			_, err = q.UpdateMarketplaceOrderPaymentStatus(ctx, db.UpdateMarketplaceOrderPaymentStatusParams{
-				ID:            orderID,
-				PaymentStatus: "partially_refunded",
+				ID:          lockedOrder.ID,
+				OrderStatus: newOrderStatus,
 			})
 			if err != nil {
 				return err
 			}
 		}
 
-		pay, err := q.GetMarketplacePaymentByOrder(ctx, orderID)
-		if err == nil {
-			payStatus := "refunded"
-			if !isFullRefund {
-				payStatus = "partially_refunded"
-			}
-			_, _ = q.UpdateMarketplacePaymentTransactionStatus(ctx, db.UpdateMarketplacePaymentTransactionStatusParams{
-				Reference:         pay.Reference,
-				Status:            payStatus,
-				ProviderReference: pay.ProviderReference,
-				Channel:           pay.Channel,
-				PaidAt:            pay.PaidAt,
-				RawWebhookPayload: pay.RawWebhookPayload,
-				ErrorMessage:      TextFromString(fmt.Sprintf("Refund of %d kobo processed by admin (%s): %s", refundAmount, admin.Email.String, input.Reason)),
-			})
+		_, err = q.UpdateMarketplaceOrderPaymentStatus(ctx, db.UpdateMarketplaceOrderPaymentStatusParams{
+			ID:            lockedOrder.ID,
+			PaymentStatus: newPaymentStatus,
+		})
+		if err != nil {
+			return err
+		}
+
+		_, err = q.UpdateMarketplacePaymentTransactionStatus(ctx, db.UpdateMarketplacePaymentTransactionStatusParams{
+			Reference:         pay.Reference,
+			Status:            newPaymentStatus,
+			ProviderReference: pay.ProviderReference,
+			Channel:           pay.Channel,
+			PaidAt:            pay.PaidAt,
+			RawWebhookPayload: pay.RawWebhookPayload, // Preserve original Paystack payload!
+			ErrorMessage:      TextFromString(fmt.Sprintf("Refund %s settled (total refunded: %d kobo)", refundID, sums.SuccessfulAmountKobo)),
+		})
+		if err != nil {
+			return fmt.Errorf("failed to update payment record: %w", err)
 		}
 
 		return nil
 	})
 	if err != nil {
-		return nil, fmt.Errorf("failed to process refund: %w", err)
+		return nil, nil, err
 	}
 
-	_ = s.audit.Log(ctx, &admin.ID, &admin.PrimaryRole, "refund_marketplace_order", "marketplace_order", orderID, nil, nil, &input.Reason, nil)
+	var actorID, role *string
+	if admin != nil {
+		actorID = &admin.ID
+		role = &admin.PrimaryRole
+	}
+	_ = s.audit.Log(ctx, actorID, role, "confirm_marketplace_refund", "marketplace_refund", refundID, nil, nil, nil, nil)
 
-	updated, err := s.repo.Queries().GetMarketplaceOrderByID(ctx, orderID)
+	refreshedOrder, err := s.repo.Queries().GetMarketplaceOrderByID(ctx, orderID)
+	if err != nil {
+		return nil, nil, err
+	}
+	return &updatedRefund, &refreshedOrder, nil
+}
+
+func (s *MarketplaceService) FailRefund(ctx context.Context, admin *db.User, refundID string, failureReason string) (*db.MarketplaceRefund, *db.GetMarketplaceOrderByIDRow, error) {
+	if admin != nil && !isAdmin(admin) {
+		return nil, nil, errors.New("unauthorized: administrative permissions required")
+	}
+
+	var updatedRefund db.MarketplaceRefund
+	var orderID string
+
+	err := s.repo.WithTx(ctx, func(q *db.Queries) error {
+		lockedRefund, err := q.GetMarketplaceRefundByIDForUpdate(ctx, refundID)
+		if err != nil {
+			return errors.New("marketplace refund not found")
+		}
+		orderID = lockedRefund.OrderID
+
+		if lockedRefund.Status == "failed" {
+			updatedRefund = lockedRefund
+			return nil
+		}
+		if lockedRefund.Status != "pending" {
+			return fmt.Errorf("cannot fail refund with status '%s'", lockedRefund.Status)
+		}
+
+		meta := lockedRefund.Metadata
+		if len(meta) == 0 {
+			meta = []byte("{}")
+		}
+
+		refRecord, err := q.UpdateMarketplaceRefundStatus(ctx, db.UpdateMarketplaceRefundStatusParams{
+			ID:                      refundID,
+			Status:                  "failed",
+			ProviderRefundReference: lockedRefund.ProviderRefundReference,
+			ConfirmedByUserID:       pgtype.Text{Valid: false},
+			SettlementNotes:         failureReason,
+			Metadata:                meta,
+		})
+		if err != nil {
+			return fmt.Errorf("failed to update refund record: %w", err)
+		}
+		updatedRefund = refRecord
+		return nil
+	})
+	if err != nil {
+		return nil, nil, err
+	}
+
+	var actorID, role *string
+	if admin != nil {
+		actorID = &admin.ID
+		role = &admin.PrimaryRole
+	}
+	_ = s.audit.Log(ctx, actorID, role, "fail_marketplace_refund", "marketplace_refund", refundID, nil, nil, &failureReason, nil)
+
+	refreshedOrder, err := s.repo.Queries().GetMarketplaceOrderByID(ctx, orderID)
+	if err != nil {
+		return nil, nil, err
+	}
+	return &updatedRefund, &refreshedOrder, nil
+}
+
+func (s *MarketplaceService) GetRefundByID(ctx context.Context, admin *db.User, refundID string) (*db.MarketplaceRefund, error) {
+	if !isAdmin(admin) {
+		return nil, errors.New("unauthorized: administrative permissions required")
+	}
+	r, err := s.repo.Queries().GetMarketplaceRefundByID(ctx, refundID)
+	if err != nil {
+		return nil, errors.New("marketplace refund not found")
+	}
+	return &r, nil
+}
+
+func (s *MarketplaceService) ListRefundsByOrder(ctx context.Context, user *db.User, orderID string) ([]db.MarketplaceRefund, error) {
+	if user == nil {
+		return nil, ErrUnauthorizedBuyerAction
+	}
+	order, err := s.repo.Queries().GetMarketplaceOrderByID(ctx, orderID)
+	if err != nil {
+		return nil, ErrOrderNotFound
+	}
+
+	isBuyer := order.BuyerUserID.Valid && order.BuyerUserID.String == user.ID
+	if !isAdmin(user) && !isBuyer {
+		return nil, ErrUnauthorizedBuyerAction
+	}
+
+	list, err := s.repo.Queries().ListMarketplaceRefundsByOrder(ctx, orderID)
 	if err != nil {
 		return nil, err
 	}
-	return &updated, nil
+	if list == nil {
+		list = []db.MarketplaceRefund{}
+	}
+	return list, nil
 }
 
 // -------------------------------------------------------------

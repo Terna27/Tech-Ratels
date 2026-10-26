@@ -27,6 +27,10 @@ func (s *SandboxGateway) ProviderName() string {
 	return "dev_sandbox"
 }
 
+func (s *SandboxGateway) SetAmount(reference string, amountKobo int64) {
+	s.amounts.Store(reference, amountKobo)
+}
+
 func (s *SandboxGateway) InitializePayment(ctx context.Context, input InitializePaymentInput) (*InitializePaymentOutput, error) {
 	log.Printf("[SANDBOX_PAYMENT] Initializing sandbox checkout for Order %s: ₦%.2f (%d kobo) for %s\n",
 		input.OrderReference, float64(input.AmountKobo)/100.0, input.AmountKobo, input.CustomerEmail)
@@ -80,4 +84,48 @@ func (s *SandboxGateway) VerifyPayment(ctx context.Context, reference string) (*
 func (s *SandboxGateway) VerifyWebhookSignature(signatureHeader string, body []byte) bool {
 	// In sandbox mode, allow valid sandbox secret or test header
 	return signatureHeader == "sandbox-signature-ok" || signatureHeader != ""
+}
+
+func (s *SandboxGateway) RefundPayment(ctx context.Context, input RefundPaymentInput) (*RefundPaymentOutput, error) {
+	if strings.Contains(strings.ToLower(input.MerchantNote), "fail") || strings.Contains(strings.ToLower(input.CustomerNote), "fail") {
+		return &RefundPaymentOutput{
+			RefundReference: "sandbox_ref_fail_" + input.PaymentReference,
+			Status:          "failed",
+			AmountKobo:      input.AmountKobo,
+			Currency:        input.Currency,
+			RawResponse:     []byte(`{"status":false,"message":"Simulated sandbox refund failure"}`),
+		}, nil
+	}
+
+	return &RefundPaymentOutput{
+		RefundReference: "sandbox_ref_" + input.PaymentReference,
+		Status:          "pending",
+		AmountKobo:      input.AmountKobo,
+		Currency:        input.Currency,
+		RawResponse:     []byte(`{"status":true,"message":"Refund queued in sandbox"}`),
+	}, nil
+}
+
+func (s *SandboxGateway) VerifyRefund(ctx context.Context, refundReference string) (*VerifyRefundOutput, error) {
+	lowerRef := strings.ToLower(refundReference)
+	if strings.Contains(lowerRef, "fail") {
+		return &VerifyRefundOutput{
+			RefundReference: refundReference,
+			Status:          "failed",
+			RawResponse:     []byte(`{"status":"failed","message":"Simulated sandbox refund failure"}`),
+		}, nil
+	}
+	if strings.Contains(lowerRef, "pending") || strings.Contains(lowerRef, "processing") {
+		return &VerifyRefundOutput{
+			RefundReference: refundReference,
+			Status:          "pending",
+			RawResponse:     []byte(`{"status":"pending","message":"Simulated sandbox refund pending"}`),
+		}, nil
+	}
+
+	return &VerifyRefundOutput{
+		RefundReference: refundReference,
+		Status:          "successful",
+		RawResponse:     []byte(`{"status":"processed","message":"Simulated sandbox refund processed successfully"}`),
+	}, nil
 }
