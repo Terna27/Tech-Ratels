@@ -13,7 +13,9 @@ import (
 	"testing"
 	"time"
 
+	"github.com/go-chi/chi/v5"
 	"ratels-api/internal/db"
+	"ratels-api/internal/handler"
 	"ratels-api/internal/security"
 	"ratels-api/internal/service"
 	"ratels-api/internal/storage"
@@ -664,5 +666,53 @@ func TestReportDownload_AdminAccess_NoRegression(t *testing.T) {
 	}
 	if len(pdfBytes) == 0 || fileName == "" || mime != "application/pdf" {
 		t.Errorf("invalid draft export data returned to admin")
+	}
+}
+
+// TestReportDownload_UnconfiguredStorage_Returns503 verifies that when report storage is unconfigured
+// in production, downloads return 503 Service Unavailable rather than failing silently or leaking data.
+func TestReportDownload_UnconfiguredStorage_Returns503(t *testing.T) {
+	h := setupTestHarness(t)
+	defer h.Cleanup()
+
+	uid := time.Now().UnixNano()
+	creator, _ := createHandlerTestUser(t, h, "national_admin", fmt.Sprintf("na_unconf_%d@test.com", uid))
+	approver, _ := createHandlerTestUser(t, h, "super_admin", fmt.Sprintf("sa_unconf_%d@test.com", uid))
+	period := fmt.Sprintf("208%d-17", uid%9)
+	defer func() {
+		_, _ = h.Pool.Exec(context.Background(), "DELETE FROM public_report_snapshots WHERE reporting_period = $1", period)
+	}()
+
+	_, pub := createAndPublishTestReport(t, h, creator, approver, "cleanups", period)
+
+	// Replace report service with one configured with UnconfiguredReportExportStorage
+	unconfSvc := service.NewReportService(h.Repo, nil, service.NewAuditService(h.Repo), storage.NewUnconfiguredReportExportStorage())
+	unconfHandler := handler.NewReportHandler(unconfSvc)
+
+	// Create test router for the unconfigured handler
+	r := chi.NewRouter()
+	r.Get("/api/v1/public/reports/publications/{id}/pdf", unconfHandler.DownloadPDF)
+	r.Get("/api/v1/public/reports/publications/{id}/csv", unconfHandler.DownloadCSV)
+
+	// 1. PDF download attempt returns 503
+	reqPDF, _ := http.NewRequest("GET", fmt.Sprintf("/api/v1/public/reports/publications/%s/pdf", pub.PublicationID), nil)
+	rrPDF := httptest.NewRecorder()
+	r.ServeHTTP(rrPDF, reqPDF)
+	if rrPDF.Code != http.StatusServiceUnavailable {
+		t.Fatalf("expected 503 Service Unavailable when storage is unconfigured, got %d: %s", rrPDF.Code, rrPDF.Body.String())
+	}
+	if !strings.Contains(rrPDF.Body.String(), "STORAGE_UNAVAILABLE") {
+		t.Errorf("expected STORAGE_UNAVAILABLE error code, got: %s", rrPDF.Body.String())
+	}
+
+	// 2. CSV download attempt returns 503
+	reqCSV, _ := http.NewRequest("GET", fmt.Sprintf("/api/v1/public/reports/publications/%s/csv", pub.PublicationID), nil)
+	rrCSV := httptest.NewRecorder()
+	r.ServeHTTP(rrCSV, reqCSV)
+	if rrCSV.Code != http.StatusServiceUnavailable {
+		t.Fatalf("expected 503 Service Unavailable when storage is unconfigured, got %d: %s", rrCSV.Code, rrCSV.Body.String())
+	}
+	if !strings.Contains(rrCSV.Body.String(), "STORAGE_UNAVAILABLE") {
+		t.Errorf("expected STORAGE_UNAVAILABLE error code, got: %s", rrCSV.Body.String())
 	}
 }

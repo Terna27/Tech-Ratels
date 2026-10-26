@@ -16,6 +16,7 @@ import (
 	"github.com/go-chi/chi/v5"
 	"ratels-api/internal/security"
 	"ratels-api/internal/service"
+	"ratels-api/internal/storage"
 	"ratels-api/internal/worker"
 )
 
@@ -318,6 +319,10 @@ func (h *ReportHandler) DownloadPDF(w http.ResponseWriter, r *http.Request) {
 			ErrorJSON(w, http.StatusNotFound, "NOT_FOUND", "The requested publication is not available for public download", nil)
 			return
 		}
+		if errors.Is(err, storage.ErrReportExportUnconfig) {
+			ErrorJSON(w, http.StatusServiceUnavailable, "STORAGE_UNAVAILABLE", "Report document export storage is currently unavailable", nil)
+			return
+		}
 
 		h.reportService.RecordDownloadAudit(ctx, nil, "report_download_failed", clientIP, map[string]interface{}{
 			"publication_id": id,
@@ -389,6 +394,10 @@ func (h *ReportHandler) DownloadCSV(w http.ResponseWriter, r *http.Request) {
 			errors.Is(err, service.ErrUnauthorizedExportAccess) ||
 			errors.Is(err, service.ErrReportNotAvailable) {
 			ErrorJSON(w, http.StatusNotFound, "NOT_FOUND", "The requested publication is not available for public download", nil)
+			return
+		}
+		if errors.Is(err, storage.ErrReportExportUnconfig) {
+			ErrorJSON(w, http.StatusServiceUnavailable, "STORAGE_UNAVAILABLE", "Report document export storage is currently unavailable", nil)
 			return
 		}
 
@@ -981,6 +990,10 @@ func (h *ReportHandler) RegenerateExportAdmin(w http.ResponseWriter, r *http.Req
 			ErrorJSON(w, http.StatusBadRequest, "INVALID_STATE", "Cannot regenerate export for withdrawn or rejected report", nil)
 			return
 		}
+		if errors.Is(err, storage.ErrReportExportUnconfig) {
+			ErrorJSON(w, http.StatusServiceUnavailable, "STORAGE_UNAVAILABLE", "Report document export storage is currently unavailable", nil)
+			return
+		}
 		ErrorJSON(w, http.StatusInternalServerError, "INTERNAL_ERROR", "Failed regenerating report export", err.Error())
 		return
 	}
@@ -1015,6 +1028,10 @@ func (h *ReportHandler) DownloadExportAdmin(w http.ResponseWriter, r *http.Reque
 		}
 		if errors.Is(err, service.ErrUnauthorizedExportAccess) {
 			ErrorJSON(w, http.StatusForbidden, "FORBIDDEN", err.Error(), nil)
+			return
+		}
+		if errors.Is(err, storage.ErrReportExportUnconfig) {
+			ErrorJSON(w, http.StatusServiceUnavailable, "STORAGE_UNAVAILABLE", "Report document export storage is currently unavailable", nil)
 			return
 		}
 		ErrorJSON(w, http.StatusInternalServerError, "INTERNAL_ERROR", "Failed retrieving export payload", err.Error())

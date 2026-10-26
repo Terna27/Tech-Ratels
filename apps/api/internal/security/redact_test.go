@@ -42,6 +42,20 @@ func TestRedactString(t *testing.T) {
 			mustNotHave:  []string{"my_custom_jwt_secret_32_characters_long"},
 			mustHave:     []string{"[REDACTED]"},
 		},
+		{
+			name:         "R2 reports secret key and access key in error message",
+			input:        `S3 PutObject failed: access_key_id=AKIAR2REPORTSTOKEN123 secret_access_key=cf_super_private_secret_key_456`,
+			knownSecrets: nil,
+			mustNotHave:  []string{"AKIAR2REPORTSTOKEN123", "cf_super_private_secret_key_456"},
+			mustHave:     []string{"access_key_id=[REDACTED]", "secret_access_key=[REDACTED]"},
+		},
+		{
+			name:         "R2 environment variable assignment in logs",
+			input:        `config error: r2_reports_secret_access_key=secret_report_token_value_999`,
+			knownSecrets: nil,
+			mustNotHave:  []string{"secret_report_token_value_999"},
+			mustHave:     []string{"r2_reports_secret_access_key=[REDACTED]"},
+		},
 	}
 
 	for _, tc := range testCases {

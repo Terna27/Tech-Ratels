@@ -318,3 +318,35 @@ func (s *DevSandboxReportExportStorage) DeleteExport(ctx context.Context, storag
 	delete(s.objects, storageKey)
 	return nil
 }
+
+// -----------------------------------------------------------------------
+// UnconfiguredReportExportStorage (Production Safety Fallback)
+// -----------------------------------------------------------------------
+
+// UnconfiguredReportExportStorage implements ReportExportStorage as an explicit unconfigured fallback.
+type UnconfiguredReportExportStorage struct{}
+
+func NewUnconfiguredReportExportStorage() *UnconfiguredReportExportStorage {
+	return &UnconfiguredReportExportStorage{}
+}
+
+func (s *UnconfiguredReportExportStorage) IsConfigured() bool {
+	return false
+}
+
+func (s *UnconfiguredReportExportStorage) StoreExport(ctx context.Context, snapshotID string, format string, originalFileName string, contentType string, data []byte) (string, string, int64, error) {
+	return "", "", 0, ErrReportExportUnconfig
+}
+
+func (s *UnconfiguredReportExportStorage) GeneratePresignedDownload(ctx context.Context, storageKey, downloadFileName string, expiry time.Duration) (string, error) {
+	return "", ErrReportExportUnconfig
+}
+
+func (s *UnconfiguredReportExportStorage) ReadExport(ctx context.Context, storageKey string) ([]byte, error) {
+	return nil, ErrReportExportUnconfig
+}
+
+func (s *UnconfiguredReportExportStorage) DeleteExport(ctx context.Context, storageKey string) error {
+	return ErrReportExportUnconfig
+}
+

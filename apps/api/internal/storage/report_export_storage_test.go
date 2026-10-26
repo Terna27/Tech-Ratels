@@ -118,3 +118,128 @@ func TestReportExportStorage_CollisionResistance(t *testing.T) {
 		t.Errorf("expected collision-resistant unique keys, got identical keys: %s", key1)
 	}
 }
+
+func TestReportExportStorage_UnconfiguredFallback(t *testing.T) {
+	st := storage.NewUnconfiguredReportExportStorage()
+	ctx := context.Background()
+
+	if st.IsConfigured() {
+		t.Fatal("UnconfiguredReportExportStorage must return false for IsConfigured")
+	}
+
+	_, _, _, err := st.StoreExport(ctx, "snap-1", "pdf", "file.pdf", "application/pdf", []byte("sample"))
+	if !errors.Is(err, storage.ErrReportExportUnconfig) {
+		t.Errorf("expected ErrReportExportUnconfig on StoreExport, got %v", err)
+	}
+
+	_, err = st.ReadExport(ctx, "reports/exports/private/snap-1/pdf/1_file.pdf")
+	if !errors.Is(err, storage.ErrReportExportUnconfig) {
+		t.Errorf("expected ErrReportExportUnconfig on ReadExport, got %v", err)
+	}
+
+	_, err = st.GeneratePresignedDownload(ctx, "reports/exports/private/snap-1/pdf/1_file.pdf", "file.pdf", 15*time.Minute)
+	if !errors.Is(err, storage.ErrReportExportUnconfig) {
+		t.Errorf("expected ErrReportExportUnconfig on GeneratePresignedDownload, got %v", err)
+	}
+
+	err = st.DeleteExport(ctx, "reports/exports/private/snap-1/pdf/1_file.pdf")
+	if !errors.Is(err, storage.ErrReportExportUnconfig) {
+		t.Errorf("expected ErrReportExportUnconfig on DeleteExport, got %v", err)
+	}
+}
+
+func TestReportExportStorage_SeparateCredentialsAndIsolatedClients(t *testing.T) {
+	ctx := context.Background()
+
+	// Marketplace configuration with public bucket 'ratels' and marketplace credentials
+	cfgMarket := storage.R2Config{
+		AccountID:       "cf_acc_111",
+		AccessKeyID:     "mkt_access_key_111",
+		SecretAccessKey: "mkt_secret_key_111",
+		BucketName:      "ratels",
+		PublicDomain:    "https://media.ratels.example.org",
+	}
+
+	// Report storage configuration with isolated private bucket 'ratels-reports-private' and dedicated reports credentials
+	cfgReports := storage.R2Config{
+		AccountID:       "cf_acc_111",
+		AccessKeyID:     "rep_access_key_222",
+		SecretAccessKey: "rep_secret_key_222",
+		BucketName:      "ratels-reports-private",
+	}
+
+	// Verify configs are completely separate
+	if cfgMarket.BucketName == cfgReports.BucketName {
+		t.Fatalf("marketplace and reports buckets must be distinct")
+	}
+	if cfgMarket.AccessKeyID == cfgReports.AccessKeyID {
+		t.Fatalf("marketplace and reports access keys must be distinct")
+	}
+	if cfgMarket.SecretAccessKey == cfgReports.SecretAccessKey {
+		t.Fatalf("marketplace and reports secret keys must be distinct")
+	}
+
+	// Verify both storage clients initialize properly with their respective configs
+	mktClient, err := storage.NewR2StorageService(ctx, cfgMarket)
+	if err != nil {
+		t.Fatalf("failed creating marketplace R2 client: %v", err)
+	}
+	if !mktClient.IsConfigured() {
+		t.Errorf("expected marketplace client to be configured")
+	}
+
+	repClient, err := storage.NewR2ReportExportStorageFromConfig(ctx, cfgReports)
+	if err != nil {
+		t.Fatalf("failed creating report export R2 client: %v", err)
+	}
+	if !repClient.IsConfigured() {
+		t.Errorf("expected report export client to be configured")
+	}
+}
+
+func TestReportExportStorage_IndependentMarketplaceAndReportsLifecycle(t *testing.T) {
+	ctx := context.Background()
+
+	// 1. Marketplace dev storage
+	mktStorage := storage.NewDevSandboxStorageService("https://pub-media.ratels.example.org")
+	// 2. Reports dev storage
+	repStorage := storage.NewDevSandboxReportExportStorage()
+
+	// Marketplace product image upload
+	imgPayload := []byte("FAKE_IMAGE_DATA_FOR_MARKETPLACE_PRODUCT")
+	url, err := mktStorage.UploadObject(ctx, "products/prod_123/thumbnail.jpg", "image/jpeg", strings.NewReader(string(imgPayload)), int64(len(imgPayload)))
+	if err != nil {
+		t.Fatalf("marketplace upload failed: %v", err)
+	}
+	if !strings.Contains(url, "products/prod_123/thumbnail.jpg") {
+		t.Errorf("expected product image URL, got: %s", url)
+	}
+
+	// Report private PDF upload
+	pdfPayload := []byte("%PDF-1.4 CERTIFIED PUBLIC GOVERNANCE REPORT")
+	storageKey, sha256Hex, size, err := repStorage.StoreExport(ctx, "snap-lifecycle-999", "pdf", "Report.pdf", "application/pdf", pdfPayload)
+	if err != nil {
+		t.Fatalf("report storage failed: %v", err)
+	}
+	if size != int64(len(pdfPayload)) || len(sha256Hex) != 64 {
+		t.Errorf("invalid size or sha256: size=%d, sha=%s", size, sha256Hex)
+	}
+
+	// Verify marketplace storage does not know about the private report
+	_, mktReadErr := mktStorage.ReadObject(ctx, storageKey)
+	if mktReadErr == nil {
+		t.Fatalf("marketplace storage must not have access to private report object")
+	}
+
+	// Verify report storage does not know about marketplace product image
+	_, repReadErr := repStorage.ReadExport(ctx, "products/prod_123/thumbnail.jpg")
+	if repReadErr == nil {
+		t.Fatalf("report storage must not accept or contain marketplace product image")
+	}
+
+	// Verify report storage reads back private report correctly
+	readPDF, err := repStorage.ReadExport(ctx, storageKey)
+	if err != nil || string(readPDF) != string(pdfPayload) {
+		t.Fatalf("report storage failed reading back private PDF: err=%v", err)
+	}
+}

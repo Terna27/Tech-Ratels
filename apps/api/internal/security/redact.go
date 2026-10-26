@@ -13,8 +13,8 @@ var (
 	uriCredentialsRegex = regexp.MustCompile(`([a-zA-Z][a-zA-Z0-9+.-]*://[^:\s@/]+):([^@\s/]+)(@)`)
 
 	// kvCredentialsRegex matches key-value connection parameters or config keys
-	// e.g. password=secret, pwd=secret, secret=secret, token=secret, api_key=secret, brevo_api_key=secret
-	kvCredentialsRegex = regexp.MustCompile(`(?i)\b(password|pwd|secret|token|api_key|apikey|api-key|brevo_api_key|resend_api_key|x-sib-api-key)\s*[:=]\s*['"]?([^\s'";]+)['"]?`)
+	// e.g. password=secret, pwd=secret, secret=secret, token=secret, api_key=secret, access_key_id=secret, secret_access_key=secret
+	kvCredentialsRegex = regexp.MustCompile(`(?i)\b(password|pwd|secret|token|api_key|apikey|api-key|brevo_api_key|resend_api_key|x-sib-api-key|access_key_id|secret_access_key|r2_access_key_id|r2_secret_access_key|r2_reports_access_key_id|r2_reports_secret_access_key)\s*[:=]\s*['"]?([^\s'";]+)['"]?`)
 
 	// urlTokenRegex redacts raw verification tokens in URLs or query strings
 	urlTokenRegex = regexp.MustCompile(`(?i)([?&]token=)[a-zA-Z0-9_\-]+`)

@@ -45,7 +45,11 @@ type Config struct {
 	SafeguardingReportingEnabled bool
 	R2SafeguardingBucketName     string
 	SafeguardingEncryptionKey    string
+	R2ReportsAccessKeyID         string
+	R2ReportsSecretAccessKey     string
 	R2ReportsBucketName          string
+	R2ReportsAccountID           string
+	R2ReportsEndpoint            string
 	ReportCronSecret             string
 }
 
@@ -220,12 +224,16 @@ func Load() *Config {
 	}
 
 	r2SafeguardingBucket := strings.TrimSpace(os.Getenv("R2_SAFEGUARDING_BUCKET_NAME"))
+	r2ReportsAccessKeyID := strings.TrimSpace(os.Getenv("R2_REPORTS_ACCESS_KEY_ID"))
+	r2ReportsSecretAccessKey := strings.TrimSpace(os.Getenv("R2_REPORTS_SECRET_ACCESS_KEY"))
 	r2ReportsBucket := strings.TrimSpace(os.Getenv("R2_REPORTS_BUCKET_NAME"))
-	if r2ReportsBucket == "" {
-		r2ReportsBucket = r2SafeguardingBucket
+	r2ReportsAccountID := strings.TrimSpace(os.Getenv("R2_REPORTS_ACCOUNT_ID"))
+	if r2ReportsAccountID == "" {
+		r2ReportsAccountID = r2AccountID
 	}
-	if r2ReportsBucket == "" && !isProduction {
-		r2ReportsBucket = r2BucketName
+	r2ReportsEndpoint := strings.TrimRight(strings.TrimSpace(os.Getenv("R2_REPORTS_ENDPOINT")), "/")
+	if r2ReportsEndpoint == "" {
+		r2ReportsEndpoint = r2Endpoint
 	}
 	safeguardingEncKey := strings.TrimSpace(os.Getenv("SAFEGUARDING_ENCRYPTION_KEY"))
 	reportCronSecret := strings.TrimSpace(os.Getenv("REPORT_CRON_SECRET"))
@@ -261,7 +269,11 @@ func Load() *Config {
 		SafeguardingReportingEnabled: safeguardingEnabled,
 		R2SafeguardingBucketName:     r2SafeguardingBucket,
 		SafeguardingEncryptionKey:    safeguardingEncKey,
+		R2ReportsAccessKeyID:         r2ReportsAccessKeyID,
+		R2ReportsSecretAccessKey:     r2ReportsSecretAccessKey,
 		R2ReportsBucketName:          r2ReportsBucket,
+		R2ReportsAccountID:           r2ReportsAccountID,
+		R2ReportsEndpoint:            r2ReportsEndpoint,
 		ReportCronSecret:             reportCronSecret,
 	}
 }
@@ -336,9 +348,9 @@ func (c *Config) Validate() error {
 			return fmt.Errorf("unsupported PAYMENT_PROVIDER in production: %q; supported providers are 'paystack' and 'unconfigured'", c.PaymentProvider)
 		}
 
-		// Cloudflare R2: If any R2 configuration is provided in production, all required keys must be provided
-		hasAnyR2 := c.R2AccessKeyID != "" || c.R2SecretAccessKey != "" || c.R2BucketName != "" || c.R2AccountID != ""
-		if hasAnyR2 {
+		// Cloudflare R2 Marketplace: If any marketplace R2 configuration is provided in production, all required keys must be provided
+		hasAnyMarketplaceR2 := c.R2AccessKeyID != "" || c.R2SecretAccessKey != "" || c.R2BucketName != "" || c.R2AccountID != ""
+		if hasAnyMarketplaceR2 {
 			if c.R2AccessKeyID == "" {
 				return errors.New("R2_ACCESS_KEY_ID is required in production when Cloudflare R2 is configured")
 			}
@@ -353,9 +365,34 @@ func (c *Config) Validate() error {
 			}
 		}
 
+		// Cloudflare R2 Dedicated Private Reports: If private report storage is enabled in production, validate credentials and isolation
+		hasAnyReportsR2 := c.R2ReportsBucketName != "" || c.R2ReportsAccessKeyID != "" || c.R2ReportsSecretAccessKey != ""
+		if hasAnyReportsR2 {
+			if c.R2ReportsBucketName == "" {
+				return errors.New("R2_REPORTS_BUCKET_NAME is required in production when private report storage is configured")
+			}
+			if c.R2ReportsAccessKeyID == "" {
+				return errors.New("R2_REPORTS_ACCESS_KEY_ID is required in production when private report storage is configured")
+			}
+			if c.R2ReportsSecretAccessKey == "" {
+				return errors.New("R2_REPORTS_SECRET_ACCESS_KEY is required in production when private report storage is configured")
+			}
+			if c.R2ReportsAccountID == "" && c.R2ReportsEndpoint == "" {
+				return errors.New("R2_ACCOUNT_ID (or R2_REPORTS_ACCOUNT_ID / R2_REPORTS_ENDPOINT) is required in production when private report storage is configured")
+			}
+		}
+
 		// Enforce dedicated private bucket for report exports in production
 		if c.R2ReportsBucketName != "" && c.R2BucketName != "" && c.R2ReportsBucketName == c.R2BucketName {
 			return errors.New("R2_REPORTS_BUCKET_NAME must not share the public media bucket (R2_BUCKET_NAME); report exports require an isolated private bucket")
+		}
+
+		// Enforce dedicated credentials for report exports in production: must not reuse marketplace credentials
+		if c.R2ReportsAccessKeyID != "" && c.R2AccessKeyID != "" && c.R2ReportsAccessKeyID == c.R2AccessKeyID {
+			return errors.New("R2_REPORTS_ACCESS_KEY_ID must not reuse marketplace credentials (R2_ACCESS_KEY_ID); report exports require dedicated credentials")
+		}
+		if c.R2ReportsSecretAccessKey != "" && c.R2SecretAccessKey != "" && c.R2ReportsSecretAccessKey == c.R2SecretAccessKey {
+			return errors.New("R2_REPORTS_SECRET_ACCESS_KEY must not reuse marketplace credentials (R2_SECRET_ACCESS_KEY); report exports require dedicated credentials")
 		}
 
 		// Safeguarding: in production, if enabled, require encryption key and verify length >= 32

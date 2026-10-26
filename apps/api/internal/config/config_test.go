@@ -323,6 +323,84 @@ func TestConfig_EmailProviderConfiguration(t *testing.T) {
 		os.Setenv("R2_SECRET_ACCESS_KEY", "cf_secret_123")
 		os.Setenv("R2_BUCKET_NAME", "ratels-media-public")
 		os.Setenv("R2_REPORTS_BUCKET_NAME", "ratels-media-public")
+		os.Setenv("R2_REPORTS_ACCESS_KEY_ID", "cf_rep_key_456")
+		os.Setenv("R2_REPORTS_SECRET_ACCESS_KEY", "cf_rep_sec_456")
+		defer func() {
+			os.Unsetenv("APP_ENV")
+			os.Unsetenv("DATABASE_URL")
+			os.Unsetenv("JWT_SECRET")
+			os.Unsetenv("ALLOWED_ORIGINS")
+			os.Unsetenv("EMAIL_PROVIDER")
+			os.Unsetenv("R2_ACCOUNT_ID")
+			os.Unsetenv("R2_ACCESS_KEY_ID")
+			os.Unsetenv("R2_SECRET_ACCESS_KEY")
+			os.Unsetenv("R2_BUCKET_NAME")
+			os.Unsetenv("R2_REPORTS_BUCKET_NAME")
+			os.Unsetenv("R2_REPORTS_ACCESS_KEY_ID")
+			os.Unsetenv("R2_REPORTS_SECRET_ACCESS_KEY")
+		}()
+
+		cfg := Load()
+		err := cfg.Validate()
+		if err == nil || !strings.Contains(err.Error(), "R2_REPORTS_BUCKET_NAME must not share the public media bucket") {
+			t.Errorf("expected error when R2_REPORTS_BUCKET_NAME shares the public media bucket, got: %v", err)
+		}
+	})
+
+	t.Run("Accepts valid separate marketplace and reports credentials in production", func(t *testing.T) {
+		os.Setenv("APP_ENV", "production")
+		os.Setenv("DATABASE_URL", "postgres://user:pass@localhost:5432/ratels_prod")
+		os.Setenv("JWT_SECRET", "super-secret-jwt-key-with-over-32-characters!")
+		os.Setenv("ALLOWED_ORIGINS", "https://ratels-web.onrender.com")
+		os.Setenv("EMAIL_PROVIDER", "unconfigured")
+		os.Setenv("R2_ACCOUNT_ID", "cf_acc_123")
+		os.Setenv("R2_ACCESS_KEY_ID", "cf_marketplace_key")
+		os.Setenv("R2_SECRET_ACCESS_KEY", "cf_marketplace_secret")
+		os.Setenv("R2_BUCKET_NAME", "ratels")
+		os.Setenv("R2_REPORTS_BUCKET_NAME", "ratels-reports-private")
+		os.Setenv("R2_REPORTS_ACCESS_KEY_ID", "cf_reports_key")
+		os.Setenv("R2_REPORTS_SECRET_ACCESS_KEY", "cf_reports_secret")
+		defer func() {
+			os.Unsetenv("APP_ENV")
+			os.Unsetenv("DATABASE_URL")
+			os.Unsetenv("JWT_SECRET")
+			os.Unsetenv("ALLOWED_ORIGINS")
+			os.Unsetenv("EMAIL_PROVIDER")
+			os.Unsetenv("R2_ACCOUNT_ID")
+			os.Unsetenv("R2_ACCESS_KEY_ID")
+			os.Unsetenv("R2_SECRET_ACCESS_KEY")
+			os.Unsetenv("R2_BUCKET_NAME")
+			os.Unsetenv("R2_REPORTS_BUCKET_NAME")
+			os.Unsetenv("R2_REPORTS_ACCESS_KEY_ID")
+			os.Unsetenv("R2_REPORTS_SECRET_ACCESS_KEY")
+		}()
+
+		cfg := Load()
+		if err := cfg.Validate(); err != nil {
+			t.Fatalf("expected valid config with separate credentials to succeed, got: %v", err)
+		}
+		if cfg.R2AccessKeyID == cfg.R2ReportsAccessKeyID {
+			t.Fatalf("marketplace and reports access keys must be distinct")
+		}
+		if cfg.R2SecretAccessKey == cfg.R2ReportsSecretAccessKey {
+			t.Fatalf("marketplace and reports secret keys must be distinct")
+		}
+		if cfg.R2BucketName == cfg.R2ReportsBucketName {
+			t.Fatalf("marketplace and reports buckets must be distinct")
+		}
+	})
+
+	t.Run("Rejects missing report credentials in production when reports bucket is set", func(t *testing.T) {
+		os.Setenv("APP_ENV", "production")
+		os.Setenv("DATABASE_URL", "postgres://user:pass@localhost:5432/ratels_prod")
+		os.Setenv("JWT_SECRET", "super-secret-jwt-key-with-over-32-characters!")
+		os.Setenv("ALLOWED_ORIGINS", "https://ratels-web.onrender.com")
+		os.Setenv("EMAIL_PROVIDER", "unconfigured")
+		os.Setenv("R2_ACCOUNT_ID", "cf_acc_123")
+		os.Setenv("R2_ACCESS_KEY_ID", "cf_marketplace_key")
+		os.Setenv("R2_SECRET_ACCESS_KEY", "cf_marketplace_secret")
+		os.Setenv("R2_BUCKET_NAME", "ratels")
+		os.Setenv("R2_REPORTS_BUCKET_NAME", "ratels-reports-private")
 		defer func() {
 			os.Unsetenv("APP_ENV")
 			os.Unsetenv("DATABASE_URL")
@@ -338,8 +416,101 @@ func TestConfig_EmailProviderConfiguration(t *testing.T) {
 
 		cfg := Load()
 		err := cfg.Validate()
-		if err == nil || !strings.Contains(err.Error(), "R2_REPORTS_BUCKET_NAME must not share the public media bucket") {
-			t.Errorf("expected error when R2_REPORTS_BUCKET_NAME shares the public media bucket, got: %v", err)
+		if err == nil || !strings.Contains(err.Error(), "R2_REPORTS_ACCESS_KEY_ID is required") {
+			t.Errorf("expected error for missing reports access key, got: %v", err)
+		}
+	})
+
+	t.Run("Rejects partially configured report credentials in production", func(t *testing.T) {
+		os.Setenv("APP_ENV", "production")
+		os.Setenv("DATABASE_URL", "postgres://user:pass@localhost:5432/ratels_prod")
+		os.Setenv("JWT_SECRET", "super-secret-jwt-key-with-over-32-characters!")
+		os.Setenv("ALLOWED_ORIGINS", "https://ratels-web.onrender.com")
+		os.Setenv("EMAIL_PROVIDER", "unconfigured")
+		os.Setenv("R2_ACCOUNT_ID", "cf_acc_123")
+		os.Setenv("R2_ACCESS_KEY_ID", "cf_marketplace_key")
+		os.Setenv("R2_SECRET_ACCESS_KEY", "cf_marketplace_secret")
+		os.Setenv("R2_BUCKET_NAME", "ratels")
+		os.Setenv("R2_REPORTS_BUCKET_NAME", "ratels-reports-private")
+		os.Setenv("R2_REPORTS_ACCESS_KEY_ID", "cf_reports_key")
+		// Missing R2_REPORTS_SECRET_ACCESS_KEY
+		defer func() {
+			os.Unsetenv("APP_ENV")
+			os.Unsetenv("DATABASE_URL")
+			os.Unsetenv("JWT_SECRET")
+			os.Unsetenv("ALLOWED_ORIGINS")
+			os.Unsetenv("EMAIL_PROVIDER")
+			os.Unsetenv("R2_ACCOUNT_ID")
+			os.Unsetenv("R2_ACCESS_KEY_ID")
+			os.Unsetenv("R2_SECRET_ACCESS_KEY")
+			os.Unsetenv("R2_BUCKET_NAME")
+			os.Unsetenv("R2_REPORTS_BUCKET_NAME")
+			os.Unsetenv("R2_REPORTS_ACCESS_KEY_ID")
+		}()
+
+		cfg := Load()
+		err := cfg.Validate()
+		if err == nil || !strings.Contains(err.Error(), "R2_REPORTS_SECRET_ACCESS_KEY is required") {
+			t.Errorf("expected error for missing reports secret key, got: %v", err)
+		}
+	})
+
+	t.Run("Rejects reusing marketplace credentials for report exports in production", func(t *testing.T) {
+		os.Setenv("APP_ENV", "production")
+		os.Setenv("DATABASE_URL", "postgres://user:pass@localhost:5432/ratels_prod")
+		os.Setenv("JWT_SECRET", "super-secret-jwt-key-with-over-32-characters!")
+		os.Setenv("ALLOWED_ORIGINS", "https://ratels-web.onrender.com")
+		os.Setenv("EMAIL_PROVIDER", "unconfigured")
+		os.Setenv("R2_ACCOUNT_ID", "cf_acc_123")
+		os.Setenv("R2_ACCESS_KEY_ID", "shared_marketplace_key")
+		os.Setenv("R2_SECRET_ACCESS_KEY", "shared_marketplace_secret")
+		os.Setenv("R2_BUCKET_NAME", "ratels")
+		os.Setenv("R2_REPORTS_BUCKET_NAME", "ratels-reports-private")
+		os.Setenv("R2_REPORTS_ACCESS_KEY_ID", "shared_marketplace_key") // Attempting to reuse marketplace key
+		os.Setenv("R2_REPORTS_SECRET_ACCESS_KEY", "shared_marketplace_secret")
+		defer func() {
+			os.Unsetenv("APP_ENV")
+			os.Unsetenv("DATABASE_URL")
+			os.Unsetenv("JWT_SECRET")
+			os.Unsetenv("ALLOWED_ORIGINS")
+			os.Unsetenv("EMAIL_PROVIDER")
+			os.Unsetenv("R2_ACCOUNT_ID")
+			os.Unsetenv("R2_ACCESS_KEY_ID")
+			os.Unsetenv("R2_SECRET_ACCESS_KEY")
+			os.Unsetenv("R2_BUCKET_NAME")
+			os.Unsetenv("R2_REPORTS_BUCKET_NAME")
+			os.Unsetenv("R2_REPORTS_ACCESS_KEY_ID")
+			os.Unsetenv("R2_REPORTS_SECRET_ACCESS_KEY")
+		}()
+
+		cfg := Load()
+		err := cfg.Validate()
+		if err == nil || !strings.Contains(err.Error(), "R2_REPORTS_ACCESS_KEY_ID must not reuse marketplace credentials") {
+			t.Errorf("expected error when reports reuses marketplace access key, got: %v", err)
+		}
+	})
+
+	t.Run("Does not silently populate report credentials from marketplace credentials", func(t *testing.T) {
+		os.Setenv("APP_ENV", "development")
+		os.Setenv("R2_ACCESS_KEY_ID", "marketplace_only_key")
+		os.Setenv("R2_SECRET_ACCESS_KEY", "marketplace_only_secret")
+		os.Setenv("R2_BUCKET_NAME", "ratels")
+		defer func() {
+			os.Unsetenv("APP_ENV")
+			os.Unsetenv("R2_ACCESS_KEY_ID")
+			os.Unsetenv("R2_SECRET_ACCESS_KEY")
+			os.Unsetenv("R2_BUCKET_NAME")
+		}()
+
+		cfg := Load()
+		if cfg.R2ReportsAccessKeyID != "" {
+			t.Errorf("expected R2ReportsAccessKeyID to be empty, got: %q", cfg.R2ReportsAccessKeyID)
+		}
+		if cfg.R2ReportsSecretAccessKey != "" {
+			t.Errorf("expected R2ReportsSecretAccessKey to be empty, got: %q", cfg.R2ReportsSecretAccessKey)
+		}
+		if cfg.R2ReportsBucketName == cfg.R2BucketName {
+			t.Errorf("R2ReportsBucketName must not silently equal R2BucketName")
 		}
 	})
 }

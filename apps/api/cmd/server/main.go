@@ -230,24 +230,30 @@ func main() {
 
 	// Transparency & Public Reports Subsystem
 	var reportExportStorage storage.ReportExportStorage
-	if cfg.R2AccessKeyID != "" && cfg.R2SecretAccessKey != "" && cfg.R2ReportsBucketName != "" {
+	if cfg.R2ReportsAccessKeyID != "" && cfg.R2ReportsSecretAccessKey != "" && cfg.R2ReportsBucketName != "" {
 		r2Exp, err := storage.NewR2ReportExportStorageFromConfig(ctx, storage.R2Config{
-			AccountID:       cfg.R2AccountID,
-			AccessKeyID:     cfg.R2AccessKeyID,
-			SecretAccessKey: cfg.R2SecretAccessKey,
+			AccountID:       cfg.R2ReportsAccountID,
+			AccessKeyID:     cfg.R2ReportsAccessKeyID,
+			SecretAccessKey: cfg.R2ReportsSecretAccessKey,
 			BucketName:      cfg.R2ReportsBucketName,
-			Endpoint:        cfg.R2Endpoint,
+			Endpoint:        cfg.R2ReportsEndpoint,
 		})
 		if err != nil {
+			if isProduction {
+				log.Fatalf("FATAL: Failed to initialize private Cloudflare R2 report export storage in production: %v\n", err)
+			}
 			log.Printf("WARNING: Failed to initialize private Cloudflare R2 report export storage: %v; falling back to dev sandbox\n", err)
 			reportExportStorage = storage.NewDevSandboxReportExportStorage()
 		} else {
 			reportExportStorage = r2Exp
-			log.Printf("Report export storage initialized via Cloudflare R2 (private bucket: %s)\n", cfg.R2ReportsBucketName)
+			log.Printf("Report export storage initialized via dedicated Cloudflare R2 credentials (private bucket: %s)\n", cfg.R2ReportsBucketName)
 		}
-	} else {
+	} else if !isProduction {
 		reportExportStorage = storage.NewDevSandboxReportExportStorage()
 		log.Println("Report export storage running in development safe sandbox mode (in-memory mock).")
+	} else {
+		reportExportStorage = storage.NewUnconfiguredReportExportStorage()
+		log.Println("WARNING: Private report export storage is UNCONFIGURED in production. Document exports will return 503 until dedicated reports R2 credentials are configured.")
 	}
 
 	reportService := service.NewReportService(repo, notifService, auditService, reportExportStorage)
