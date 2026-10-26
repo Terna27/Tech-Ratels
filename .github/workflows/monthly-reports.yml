@@ -1,0 +1,43 @@
+
+name: Ratels Monthly Reporting
+
+on:
+  schedule:
+    - cron: '0 2 1 * *'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ratels-monthly-reporting
+  cancel-in-progress: false
+
+jobs:
+  monthly-reports:
+    name: Generate Monthly Draft Reports
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+
+    defaults:
+      run:
+        working-directory: apps/api
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: apps/api/go.mod
+          cache-dependency-path: apps/api/go.sum
+
+      - name: Build Go reporting runner
+        run: go build -o report-cron ./cmd/report-cron
+
+      - name: Execute monthly reporting
+        env:
+          REPORT_CRON_SECRET: ${{ secrets.REPORT_CRON_SECRET }}
+          RATELS_API_URL: ${{ secrets.RATELS_API_URL }}
+          APP_ENV: production
+        run: ./report-cron
