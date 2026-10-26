@@ -14,12 +14,16 @@ import (
 	"mime/multipart"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 	"time"
+
+	"github.com/jackc/pgx/v5/pgtype"
 
 	"ratels-api/internal/db"
 	"ratels-api/internal/handler"
 	"ratels-api/internal/payment"
+	"ratels-api/internal/security"
 	"ratels-api/internal/service"
 )
 
@@ -783,5 +787,169 @@ func TestMarketplaceHandler_ProductImageUpload_DeleteEndpoint(t *testing.T) {
 
 	if rr.Code != http.StatusOK {
 		t.Fatalf("Expected 200 OK when seller deletes their own image, got %d: %s", rr.Code, rr.Body.String())
+	}
+}
+
+func TestMarketplaceHTTP_FulfilmentSecurityAndJurisdiction(t *testing.T) {
+	h := setupTestHarness(t)
+	defer h.Cleanup()
+	ctx := context.Background()
+
+	adminUser, adminToken := createTestUserWithToken(t, h, "mkt_sec_sa", "Super Admin", "super_admin")
+	seller1, token1 := createTestUserWithToken(t, h, "mkt_sec_s1", "Seller 1", "member")
+	seller2, token2 := createTestUserWithToken(t, h, "mkt_sec_s2", "Seller 2", "member")
+	_ = seller2
+	buyer, buyerToken := createTestUserWithToken(t, h, "mkt_sec_b", "Buyer", "member")
+
+	states, err := h.Repo.Queries().ListStates(ctx)
+	if err != nil || len(states) < 2 {
+		t.Fatalf("Need at least 2 states, got %d, err=%v", len(states), err)
+	}
+	lagosState := states[0]
+	kanoState := states[1]
+
+	// Appoint Lagos State Coordinator
+	lagosCoord, lagosToken := createTestUserWithToken(t, h, "mkt_sec_lagos", "Lagos Coord", "state_coordinator")
+	_, err = h.Repo.Queries().CreateAppointment(ctx, db.CreateAppointmentParams{
+		ID:               security.GenerateUUID(),
+		UserID:           lagosCoord.ID,
+		RoleTitle:        "State Coordinator (Lagos)",
+		RoleType:         "state_coordinator",
+		JurisdictionType: "state",
+		JurisdictionID:   pgtype.Text{String: lagosState.ID, Valid: true},
+		StartDate:        pgtype.Timestamptz{Time: time.Now().Add(-1 * time.Hour), Valid: true},
+		Status:           "active",
+	})
+	if err != nil {
+		t.Fatalf("Failed to appoint Lagos coordinator: %v", err)
+	}
+
+	// Register store 1
+	biz1, _ := h.MarketplaceService.RegisterBusiness(ctx, seller1, service.RegisterBusinessInput{
+		Name:          "Store 1",
+		Category:      "tools_hardware",
+		OwnershipType: "member_owned",
+		ContactEmail:  "s1@example.org",
+		ContactPhone:  "+2348011223344",
+	})
+	_, _ = h.MarketplaceService.ApproveBusiness(ctx, adminUser, biz1.ID, true, "")
+
+	prod1, _ := h.MarketplaceService.CreateProduct(ctx, seller1, service.CreateProductInput{
+		BusinessID:    biz1.ID,
+		Title:         "Product 1",
+		Category:      "safety_gear",
+		SKU:           fmt.Sprintf("SKU-P1-%d", time.Now().UnixNano()),
+		PriceKobo:     300000,
+		StockQuantity: 10,
+	})
+
+	// Create unpaid order
+	orderUnpaid, err := h.MarketplaceService.CreateOrder(ctx, buyer, service.CheckoutInput{
+		Items:           []service.CartItemInput{{ProductID: prod1.ID, Quantity: 1}},
+		BuyerName:       "Buyer Sensitive",
+		BuyerEmail:      "buyer.sensitive@example.com",
+		BuyerPhone:      "+2348012345678",
+		DeliveryType:    "delivery",
+		ShippingAddress: "10 Secret Way, Kano",
+		ShippingStateID: &kanoState.ID,
+	})
+	if err != nil {
+		t.Fatalf("CreateOrder failed: %v", err)
+	}
+
+	// 1. Seller 1 attempts to dispatch unpaid order -> HTTP 400 DISPATCH_FAILED
+	dispBody, _ := json.Marshal(map[string]interface{}{
+		"carrier_name":    "GIG",
+		"tracking_number": "TRK-001",
+	})
+	req, _ := http.NewRequest("POST", fmt.Sprintf("/api/v1/marketplace/seller/orders/%s/dispatch", orderUnpaid.Order.ID), bytes.NewBuffer(dispBody))
+	req.Header.Set("Authorization", "Bearer "+token1)
+	req.Header.Set("Content-Type", "application/json")
+	rr := httptest.NewRecorder()
+	h.Router.ServeHTTP(rr, req)
+
+	if rr.Code != http.StatusBadRequest {
+		t.Fatalf("Expected 400 Bad Request for unpaid order dispatch, got %d: %s", rr.Code, rr.Body.String())
+	}
+	if !strings.Contains(rr.Body.String(), "DISPATCH_FAILED") {
+		t.Errorf("Expected DISPATCH_FAILED code, got: %s", rr.Body.String())
+	}
+
+	// Pay order
+	_, err = h.MarketplaceService.ConfirmPayment(ctx, orderUnpaid.Payment.Reference)
+	if err != nil {
+		t.Fatalf("ConfirmPayment failed: %v", err)
+	}
+
+	// 2. Seller 2 (unauthorized) attempts to dispatch Seller 1's order -> HTTP 403 FORBIDDEN
+	req, _ = http.NewRequest("POST", fmt.Sprintf("/api/v1/marketplace/seller/orders/%s/dispatch", orderUnpaid.Order.ID), bytes.NewBuffer(dispBody))
+	req.Header.Set("Authorization", "Bearer "+token2)
+	req.Header.Set("Content-Type", "application/json")
+	rr = httptest.NewRecorder()
+	h.Router.ServeHTTP(rr, req)
+
+	if rr.Code != http.StatusForbidden {
+		t.Fatalf("Expected 403 Forbidden for cross-seller dispatch, got %d: %s", rr.Code, rr.Body.String())
+	}
+
+	// 3. Lagos Coordinator attempts to cancel Kano order via admin API -> HTTP 403 SCOPE_UNAUTHORIZED
+	cancelBody, _ := json.Marshal(map[string]interface{}{"reason": "Coordinator cancel"})
+	req, _ = http.NewRequest("POST", fmt.Sprintf("/api/v1/marketplace/admin/orders/%s/cancel", orderUnpaid.Order.ID), bytes.NewBuffer(cancelBody))
+	req.Header.Set("Authorization", "Bearer "+lagosToken)
+	req.Header.Set("Content-Type", "application/json")
+	rr = httptest.NewRecorder()
+	h.Router.ServeHTTP(rr, req)
+
+	if rr.Code != http.StatusForbidden {
+		t.Fatalf("Expected 403 Forbidden for cross-state cancellation, got %d: %s", rr.Code, rr.Body.String())
+	}
+	if !strings.Contains(rr.Body.String(), "SCOPE_UNAUTHORIZED") {
+		t.Errorf("Expected SCOPE_UNAUTHORIZED error code, got: %s", rr.Body.String())
+	}
+
+	// 4. Seller 1 fetches order -> Customer email must be [REDACTED]
+	req, _ = http.NewRequest("GET", fmt.Sprintf("/api/v1/marketplace/orders/%s", orderUnpaid.Order.ID), nil)
+	req.Header.Set("Authorization", "Bearer "+token1)
+	rr = httptest.NewRecorder()
+	h.Router.ServeHTTP(rr, req)
+
+	if rr.Code != http.StatusOK {
+		t.Fatalf("Expected 200 OK for seller fetching order, got %d: %s", rr.Code, rr.Body.String())
+	}
+	var sellerView map[string]interface{}
+	_ = json.Unmarshal(rr.Body.Bytes(), &sellerView)
+	orderObj, ok := sellerView["order"].(map[string]interface{})
+	if !ok {
+		t.Fatalf("Expected order object in response: %s", rr.Body.String())
+	}
+	if orderObj["buyer_email"] != "[REDACTED]" {
+		t.Errorf("Expected buyer_email to be [REDACTED] for seller, got: %v", orderObj["buyer_email"])
+	}
+
+	// 5. Buyer fetches their own order -> Actual email intact
+	req, _ = http.NewRequest("GET", fmt.Sprintf("/api/v1/marketplace/orders/%s", orderUnpaid.Order.ID), nil)
+	req.Header.Set("Authorization", "Bearer "+buyerToken)
+	rr = httptest.NewRecorder()
+	h.Router.ServeHTTP(rr, req)
+
+	if rr.Code != http.StatusOK {
+		t.Fatalf("Expected 200 OK for buyer fetching order, got %d: %s", rr.Code, rr.Body.String())
+	}
+	var buyerView map[string]interface{}
+	_ = json.Unmarshal(rr.Body.Bytes(), &buyerView)
+	orderObjBuyer, _ := buyerView["order"].(map[string]interface{})
+	if orderObjBuyer["buyer_email"] != "buyer.sensitive@example.com" {
+		t.Errorf("Expected buyer to see their actual email, got: %v", orderObjBuyer["buyer_email"])
+	}
+
+	// 6. Super Admin can cancel Kano order -> HTTP 200 OK
+	req, _ = http.NewRequest("POST", fmt.Sprintf("/api/v1/marketplace/admin/orders/%s/cancel", orderUnpaid.Order.ID), bytes.NewBuffer(cancelBody))
+	req.Header.Set("Authorization", "Bearer "+adminToken)
+	req.Header.Set("Content-Type", "application/json")
+	rr = httptest.NewRecorder()
+	h.Router.ServeHTTP(rr, req)
+
+	if rr.Code != http.StatusOK {
+		t.Fatalf("Expected 200 OK for super admin cancellation, got %d: %s", rr.Code, rr.Body.String())
 	}
 }

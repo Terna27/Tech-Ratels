@@ -263,7 +263,11 @@ func (h *MarketplaceHandler) GetOrder(w http.ResponseWriter, r *http.Request) {
 			ErrorJSON(w, http.StatusNotFound, "NOT_FOUND", "Order not found", nil)
 			return
 		}
-		if errors.Is(err, service.ErrUnauthorizedBuyerAction) {
+		if errors.Is(err, service.ErrScopeUnauthorized) {
+			ErrorJSON(w, http.StatusForbidden, "SCOPE_UNAUTHORIZED", err.Error(), nil)
+			return
+		}
+		if errors.Is(err, service.ErrUnauthorizedBuyerAction) || errors.Is(err, service.ErrUnauthorizedSellerAction) {
 			ErrorJSON(w, http.StatusForbidden, "FORBIDDEN", err.Error(), nil)
 			return
 		}
@@ -310,6 +314,10 @@ func (h *MarketplaceHandler) CancelOrder(w http.ResponseWriter, r *http.Request)
 	if err != nil {
 		if errors.Is(err, service.ErrOrderNotFound) {
 			ErrorJSON(w, http.StatusNotFound, "NOT_FOUND", "Order not found", nil)
+			return
+		}
+		if errors.Is(err, service.ErrScopeUnauthorized) {
+			ErrorJSON(w, http.StatusForbidden, "SCOPE_UNAUTHORIZED", err.Error(), nil)
 			return
 		}
 		if errors.Is(err, service.ErrUnauthorizedBuyerAction) {
@@ -689,6 +697,18 @@ func (h *MarketplaceHandler) DispatchOrder(w http.ResponseWriter, r *http.Reques
 
 	sh, err := h.marketplaceService.DispatchOrder(r.Context(), user, orderID, req)
 	if err != nil {
+		if errors.Is(err, service.ErrScopeUnauthorized) {
+			ErrorJSON(w, http.StatusForbidden, "SCOPE_UNAUTHORIZED", err.Error(), nil)
+			return
+		}
+		if errors.Is(err, service.ErrUnauthorizedSellerAction) || errors.Is(err, service.ErrCrossSellerDispatch) {
+			ErrorJSON(w, http.StatusForbidden, "FORBIDDEN", err.Error(), nil)
+			return
+		}
+		if errors.Is(err, service.ErrOrderNotFound) {
+			ErrorJSON(w, http.StatusNotFound, "NOT_FOUND", err.Error(), nil)
+			return
+		}
 		ErrorJSON(w, http.StatusBadRequest, "DISPATCH_FAILED", err.Error(), nil)
 		return
 	}
@@ -710,6 +730,18 @@ func (h *MarketplaceHandler) ConfirmDelivery(w http.ResponseWriter, r *http.Requ
 
 	sh, err := h.marketplaceService.ConfirmDelivery(r.Context(), user, orderID, req.ProofURL, req.Notes)
 	if err != nil {
+		if errors.Is(err, service.ErrScopeUnauthorized) {
+			ErrorJSON(w, http.StatusForbidden, "SCOPE_UNAUTHORIZED", err.Error(), nil)
+			return
+		}
+		if errors.Is(err, service.ErrUnauthorizedSellerAction) || errors.Is(err, service.ErrUnauthorizedBuyerAction) {
+			ErrorJSON(w, http.StatusForbidden, "FORBIDDEN", err.Error(), nil)
+			return
+		}
+		if errors.Is(err, service.ErrOrderNotFound) {
+			ErrorJSON(w, http.StatusNotFound, "NOT_FOUND", err.Error(), nil)
+			return
+		}
 		ErrorJSON(w, http.StatusBadRequest, "DELIVERY_CONFIRM_FAILED", err.Error(), nil)
 		return
 	}
@@ -987,6 +1019,10 @@ func (h *MarketplaceHandler) AdminRefundOrder(w http.ResponseWriter, r *http.Req
 			ErrorJSON(w, http.StatusNotFound, "NOT_FOUND", "Order not found", nil)
 			return
 		}
+		if errors.Is(err, service.ErrScopeUnauthorized) {
+			ErrorJSON(w, http.StatusForbidden, "SCOPE_UNAUTHORIZED", err.Error(), nil)
+			return
+		}
 		ErrorJSON(w, http.StatusBadRequest, "REFUND_FAILED", err.Error(), nil)
 		return
 	}
@@ -1009,6 +1045,10 @@ func (h *MarketplaceHandler) AdminConfirmRefund(w http.ResponseWriter, r *http.R
 
 	refund, order, err := h.marketplaceService.ConfirmRefund(r.Context(), admin, refundID, req)
 	if err != nil {
+		if errors.Is(err, service.ErrScopeUnauthorized) {
+			ErrorJSON(w, http.StatusForbidden, "SCOPE_UNAUTHORIZED", err.Error(), nil)
+			return
+		}
 		ErrorJSON(w, http.StatusBadRequest, "CONFIRM_FAILED", err.Error(), nil)
 		return
 	}

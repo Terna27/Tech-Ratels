@@ -32,6 +32,12 @@ var (
 	ErrEmptyCart                = errors.New("cannot create order with an empty cart")
 	ErrInvalidPrice             = errors.New("invalid price: amount must be a positive integer in kobo")
 	ErrPaymentNotFound          = errors.New("marketplace payment not found")
+	ErrOrderNotPaid             = errors.New("cannot dispatch an unpaid order")
+	ErrOrderAlreadyDelivered    = errors.New("order has already been delivered")
+	ErrOrderAlreadyDispatched   = errors.New("order has already been dispatched")
+	ErrOrderAlreadyCancelled    = errors.New("order is already cancelled")
+	ErrOrderAlreadyRefunded     = errors.New("cannot dispatch a refunded order")
+	ErrCrossSellerDispatch      = errors.New("sellers can dispatch only items belonging to their businesses")
 )
 
 type MarketplaceService struct {
@@ -1504,41 +1510,50 @@ func (s *MarketplaceService) GetOrderByID(ctx context.Context, user *db.User, id
 
 	isBuyer := o.BuyerUserID.Valid && o.BuyerUserID.String == user.ID
 
-	// Ownership check if authenticated user is buyer or seller
-	if !isAdmin(user) && !isBuyer {
-		// Seller check: does user own the business of any item in this order?
-		rawItems, _ := s.repo.Queries().ListMarketplaceOrderItemsByOrder(ctx, id)
-		isSeller := false
-		for _, item := range rawItems {
-			b, _ := s.repo.Queries().GetMarketplaceBusinessByID(ctx, item.BusinessID)
-			if b.OwnerUserID == user.ID {
-				isSeller = true
-				break
-			}
-		}
-		if !isSeller {
-			return nil, nil, nil, ErrUnauthorizedBuyerAction
+	apps := s.getActiveAppointments(ctx, user.ID)
+	orderStateID, orderZoneID := s.resolveOrderGeographyRow(ctx, s.repo.Queries(), o.ShippingStateID, o.PickupBranchID)
+	isNationwide := s.isNationwideAdmin(user, apps)
+	hasJurisdiction := s.hasCoordinatorJurisdiction(user, apps, orderStateID, orderZoneID)
+	hasCoordRole := user.PrimaryRole == "state_coordinator" || user.PrimaryRole == "zonal_coordinator" || s.hasAnyCoordinatorAppointment(apps)
+
+	if !isBuyer && !isNationwide {
+		if hasCoordRole && !hasJurisdiction {
+			return nil, nil, nil, ErrScopeUnauthorized
 		}
 	}
 
-	items, err := s.repo.Queries().ListMarketplaceOrderItemsByOrder(ctx, id)
+	rawItems, err := s.repo.Queries().ListMarketplaceOrderItemsByOrder(ctx, id)
 	if err != nil {
 		return nil, nil, nil, err
 	}
-	if items == nil {
-		items = []db.ListMarketplaceOrderItemsByOrderRow{}
+	if rawItems == nil {
+		rawItems = []db.ListMarketplaceOrderItemsByOrderRow{}
 	}
 
-	// Multi-tenant isolation: A seller must only see items belonging to their own business
-	if !isAdmin(user) && !isBuyer {
+	items := rawItems
+
+	// Ownership check if authenticated user is seller (and not buyer, and not authorized admin)
+	if !isBuyer && !isNationwide && !hasJurisdiction {
 		var filtered []db.ListMarketplaceOrderItemsByOrderRow
-		for _, item := range items {
+		for _, item := range rawItems {
 			b, err := s.repo.Queries().GetMarketplaceBusinessByID(ctx, item.BusinessID)
 			if err == nil && b.OwnerUserID == user.ID {
 				filtered = append(filtered, item)
 			}
 		}
+		if len(filtered) == 0 {
+			return nil, nil, nil, ErrUnauthorizedSellerAction
+		}
 		items = filtered
+
+		// Customer privacy: minimize customer personal info for seller view
+		o.BuyerEmail = "[REDACTED]"
+		o.BuyerUserID = pgtype.Text{Valid: false}
+		if o.DeliveryType == "pickup" {
+			o.ShippingAddress = ""
+			o.ShippingStateID = pgtype.Text{Valid: false}
+			o.ShippingLgaID = pgtype.Text{Valid: false}
+		}
 	}
 
 	var shipmentPtr *db.MarketplaceShipment
@@ -1577,11 +1592,16 @@ func (s *MarketplaceService) ListOrdersByBuyer(ctx context.Context, buyerUser *d
 }
 
 func (s *MarketplaceService) ListOrdersByBusiness(ctx context.Context, user *db.User, businessID string, status *string) ([]db.ListMarketplaceOrdersByBusinessRow, error) {
+	if user == nil {
+		return nil, errors.New("authentication required")
+	}
 	b, err := s.repo.Queries().GetMarketplaceBusinessByID(ctx, businessID)
 	if err != nil {
 		return nil, ErrBusinessNotFound
 	}
-	if b.OwnerUserID != user.ID && !isAdmin(user) {
+	apps := s.getActiveAppointments(ctx, user.ID)
+	isNationwide := s.isNationwideAdmin(user, apps)
+	if b.OwnerUserID != user.ID && !isNationwide {
 		return nil, ErrUnauthorizedSellerAction
 	}
 
@@ -1600,11 +1620,33 @@ func (s *MarketplaceService) ListOrdersByBusiness(ctx context.Context, user *db.
 	if list == nil {
 		list = []db.ListMarketplaceOrdersByBusinessRow{}
 	}
+
+	// Customer privacy: sanitize PII for seller-facing responses
+	if !isNationwide {
+		for i := range list {
+			list[i].BuyerEmail = "[REDACTED]"
+			list[i].BuyerUserID = pgtype.Text{Valid: false}
+			if list[i].DeliveryType == "pickup" {
+				list[i].ShippingAddress = ""
+				list[i].ShippingStateID = pgtype.Text{Valid: false}
+				list[i].ShippingLgaID = pgtype.Text{Valid: false}
+			}
+		}
+	}
+
 	return list, nil
 }
 
 func (s *MarketplaceService) ListAllOrders(ctx context.Context, admin *db.User, orderStatus, paymentStatus, fulfilmentStatus *string) ([]db.ListAllMarketplaceOrdersRow, error) {
-	if !isAdmin(admin) {
+	if admin == nil {
+		return nil, errors.New("authentication required")
+	}
+
+	apps := s.getActiveAppointments(ctx, admin.ID)
+	isNationwide := s.isNationwideAdmin(admin, apps)
+	hasCoord := admin.PrimaryRole == "state_coordinator" || admin.PrimaryRole == "zonal_coordinator" || s.hasAnyCoordinatorAppointment(apps)
+
+	if !isNationwide && !hasCoord {
 		return nil, errors.New("unauthorized: administrative permissions required")
 	}
 
@@ -1632,7 +1674,23 @@ func (s *MarketplaceService) ListAllOrders(ctx context.Context, admin *db.User, 
 	if list == nil {
 		list = []db.ListAllMarketplaceOrdersRow{}
 	}
-	return list, nil
+
+	if isNationwide {
+		return list, nil
+	}
+
+	// Filter by coordinator jurisdiction
+	var filtered []db.ListAllMarketplaceOrdersRow
+	for _, row := range list {
+		stateID, zoneID := s.resolveOrderGeographyRow(ctx, s.repo.Queries(), row.ShippingStateID, row.PickupBranchID)
+		if s.hasCoordinatorJurisdiction(admin, apps, stateID, zoneID) {
+			filtered = append(filtered, row)
+		}
+	}
+	if filtered == nil {
+		filtered = []db.ListAllMarketplaceOrdersRow{}
+	}
+	return filtered, nil
 }
 
 // -------------------------------------------------------------
@@ -1652,74 +1710,122 @@ func (s *MarketplaceService) DispatchOrder(ctx context.Context, user *db.User, o
 		return nil, errors.New("authentication required")
 	}
 
-	order, err := s.repo.Queries().GetMarketplaceOrderByID(ctx, orderID)
-	if err != nil {
-		return nil, ErrOrderNotFound
-	}
+	var createdShipment db.MarketplaceShipment
+	err := s.repo.WithTx(ctx, func(q *db.Queries) error {
+		lockedOrder, err := q.GetMarketplaceOrderForUpdate(ctx, orderID)
+		if err != nil {
+			return ErrOrderNotFound
+		}
 
-	if order.PaymentStatus != "paid" {
-		return nil, errors.New("cannot dispatch an unpaid order")
-	}
+		// 1. Payment status guard: require confirmed payment before dispatch
+		if lockedOrder.PaymentStatus != "paid" {
+			return ErrOrderNotPaid
+		}
 
-	if order.OrderStatus == "cancelled" || order.OrderStatus == "refunded" {
-		return nil, fmt.Errorf("cannot dispatch an order with status '%s'", order.OrderStatus)
-	}
-	if order.OrderStatus == "delivered" || order.FulfilmentStatus == "delivered" {
-		return nil, errors.New("order has already been delivered")
-	}
-	if order.FulfilmentStatus == "dispatched" {
-		return nil, errors.New("order has already been dispatched")
-	}
+		// 2. Order status guards
+		if lockedOrder.OrderStatus == "cancelled" {
+			return fmt.Errorf("cannot dispatch an order with status '%s'", lockedOrder.OrderStatus)
+		}
+		if lockedOrder.OrderStatus == "refunded" {
+			return fmt.Errorf("cannot dispatch an order with status '%s'", lockedOrder.OrderStatus)
+		}
+		if lockedOrder.OrderStatus == "delivered" || lockedOrder.FulfilmentStatus == "delivered" {
+			return ErrOrderAlreadyDelivered
+		}
+		if lockedOrder.FulfilmentStatus == "dispatched" || lockedOrder.OrderStatus == "dispatched" {
+			return ErrOrderAlreadyDispatched
+		}
 
-	// Verify user is seller of an item in this order or admin
-	items, err := s.repo.Queries().ListMarketplaceOrderItemsByOrder(ctx, orderID)
+		// 3. Fulfilment state transition guard
+		if lockedOrder.FulfilmentStatus != "unfulfilled" && lockedOrder.FulfilmentStatus != "preparing" {
+			return fmt.Errorf("invalid fulfilment state transition from '%s' to 'dispatched'", lockedOrder.FulfilmentStatus)
+		}
+
+		// 4. Duplicate shipment check
+		existingSh, err := q.GetMarketplaceShipmentByOrder(ctx, orderID)
+		if err == nil && existingSh.ID != "" {
+			return ErrOrderAlreadyDispatched
+		}
+
+		// 5. Authorization:
+		items, err := q.ListMarketplaceOrderItemsByOrder(ctx, orderID)
+		if err != nil {
+			return err
+		}
+		if len(items) == 0 {
+			return errors.New("cannot dispatch order with no items")
+		}
+
+		apps := s.getActiveAppointments(ctx, user.ID)
+		orderStateID, orderZoneID, _ := s.resolveOrderGeography(ctx, q, &lockedOrder)
+		isNationwide := s.isNationwideAdmin(user, apps)
+		hasJurisdiction := s.hasCoordinatorJurisdiction(user, apps, orderStateID, orderZoneID)
+		hasCoordRole := user.PrimaryRole == "state_coordinator" || user.PrimaryRole == "zonal_coordinator" || s.hasAnyCoordinatorAppointment(apps)
+
+		if hasCoordRole && !hasJurisdiction {
+			return ErrScopeUnauthorized
+		}
+
+		if !isNationwide && !hasJurisdiction {
+			// Seller authorization:
+			// Confirm that sellers can dispatch only items belonging to their businesses.
+			// Do not allow a seller to dispatch another seller's products.
+			for _, itm := range items {
+				b, err := q.GetMarketplaceBusinessByID(ctx, itm.BusinessID)
+				if err != nil {
+					return ErrBusinessNotFound
+				}
+				if b.OwnerUserID != user.ID {
+					return ErrUnauthorizedSellerAction
+				}
+			}
+		}
+
+		shipmentID := security.GenerateUUID()
+		sh, err := q.CreateMarketplaceShipment(ctx, db.CreateMarketplaceShipmentParams{
+			ID:                  shipmentID,
+			OrderID:             orderID,
+			CarrierName:         input.CarrierName,
+			TrackingNumber:      input.TrackingNumber,
+			TrackingUrl:         TextFromString(input.TrackingURL),
+			Status:              "dispatched",
+			DispatchedAt:        TimestamptzFromTime(time.Now()),
+			EstimatedDeliveryAt: Timestamptz(input.EstimatedDeliveryDate),
+			DeliveredAt:         pgtype.Timestamptz{Valid: false},
+			DeliveryNotes:       TextFromString(input.DeliveryNotes),
+			ProofOfDeliveryUrl:  TextFromString(""),
+		})
+		if err != nil {
+			return fmt.Errorf("failed to create shipment record: %w", err)
+		}
+
+		// Update order statuses
+		_, err = q.UpdateMarketplaceFulfilmentStatus(ctx, db.UpdateMarketplaceFulfilmentStatusParams{
+			ID:               orderID,
+			FulfilmentStatus: "dispatched",
+		})
+		if err != nil {
+			return fmt.Errorf("failed to update fulfilment status: %w", err)
+		}
+
+		_, err = q.UpdateMarketplaceOrderStatus(ctx, db.UpdateMarketplaceOrderStatusParams{
+			ID:          orderID,
+			OrderStatus: "dispatched",
+		})
+		if err != nil {
+			return fmt.Errorf("failed to update order status: %w", err)
+		}
+
+		createdShipment = sh
+		return nil
+	})
+
 	if err != nil {
 		return nil, err
 	}
-	if !isAdmin(user) {
-		isSeller := false
-		for _, itm := range items {
-			b, _ := s.repo.Queries().GetMarketplaceBusinessByID(ctx, itm.BusinessID)
-			if b.OwnerUserID == user.ID {
-				isSeller = true
-				break
-			}
-		}
-		if !isSeller {
-			return nil, ErrUnauthorizedSellerAction
-		}
-	}
 
-	shipmentID := security.GenerateUUID()
-	sh, err := s.repo.Queries().CreateMarketplaceShipment(ctx, db.CreateMarketplaceShipmentParams{
-		ID:                  shipmentID,
-		OrderID:             orderID,
-		CarrierName:         input.CarrierName,
-		TrackingNumber:      input.TrackingNumber,
-		TrackingUrl:         TextFromString(input.TrackingURL),
-		Status:              "dispatched",
-		DispatchedAt:        TimestamptzFromTime(time.Now()),
-		EstimatedDeliveryAt: Timestamptz(input.EstimatedDeliveryDate),
-		DeliveredAt:         pgtype.Timestamptz{Valid: false},
-		DeliveryNotes:       TextFromString(input.DeliveryNotes),
-		ProofOfDeliveryUrl:  TextFromString(""),
-	})
-	if err != nil {
-		return nil, fmt.Errorf("failed to create shipment record: %w", err)
-	}
-
-	// Update order statuses
-	_, _ = s.repo.Queries().UpdateMarketplaceFulfilmentStatus(ctx, db.UpdateMarketplaceFulfilmentStatusParams{
-		ID:               orderID,
-		FulfilmentStatus: "dispatched",
-	})
-	_, _ = s.repo.Queries().UpdateMarketplaceOrderStatus(ctx, db.UpdateMarketplaceOrderStatusParams{
-		ID:          orderID,
-		OrderStatus: "dispatched",
-	})
-
-	_ = s.audit.Log(ctx, &user.ID, &user.PrimaryRole, "dispatch_marketplace_order", "marketplace_shipment", sh.ID, nil, nil, nil, nil)
-	return &sh, nil
+	_ = s.audit.Log(ctx, &user.ID, &user.PrimaryRole, "dispatch_marketplace_order", "marketplace_shipment", createdShipment.ID, nil, nil, nil, nil)
+	return &createdShipment, nil
 }
 
 func (s *MarketplaceService) ConfirmDelivery(ctx context.Context, user *db.User, orderID string, proofURL, notes string) (*db.MarketplaceShipment, error) {
@@ -1727,59 +1833,90 @@ func (s *MarketplaceService) ConfirmDelivery(ctx context.Context, user *db.User,
 		return nil, errors.New("authentication required")
 	}
 
-	order, err := s.repo.Queries().GetMarketplaceOrderByID(ctx, orderID)
-	if err != nil {
-		return nil, ErrOrderNotFound
-	}
+	var updatedSh db.MarketplaceShipment
+	err := s.repo.WithTx(ctx, func(q *db.Queries) error {
+		lockedOrder, err := q.GetMarketplaceOrderForUpdate(ctx, orderID)
+		if err != nil {
+			return ErrOrderNotFound
+		}
 
-	// Verify caller is buyer, seller of an item, or admin
-	isBuyer := order.BuyerUserID.Valid && order.BuyerUserID.String == user.ID
-	if !isBuyer && !isAdmin(user) {
-		items, _ := s.repo.Queries().ListMarketplaceOrderItemsByOrder(ctx, orderID)
-		isSeller := false
-		for _, itm := range items {
-			b, _ := s.repo.Queries().GetMarketplaceBusinessByID(ctx, itm.BusinessID)
-			if b.OwnerUserID == user.ID {
-				isSeller = true
-				break
+		isBuyer := lockedOrder.BuyerUserID.Valid && lockedOrder.BuyerUserID.String == user.ID
+		apps := s.getActiveAppointments(ctx, user.ID)
+		orderStateID, orderZoneID, _ := s.resolveOrderGeography(ctx, q, &lockedOrder)
+		isNationwide := s.isNationwideAdmin(user, apps)
+		hasJurisdiction := s.hasCoordinatorJurisdiction(user, apps, orderStateID, orderZoneID)
+		hasCoordRole := user.PrimaryRole == "state_coordinator" || user.PrimaryRole == "zonal_coordinator" || s.hasAnyCoordinatorAppointment(apps)
+
+		if hasCoordRole && !hasJurisdiction && !isBuyer {
+			return ErrScopeUnauthorized
+		}
+
+		if !isBuyer && !isNationwide && !hasJurisdiction {
+			// Seller check: must own all items in this order
+			rawItems, err := q.ListMarketplaceOrderItemsByOrder(ctx, orderID)
+			if err != nil {
+				return err
+			}
+			if len(rawItems) == 0 {
+				return ErrUnauthorizedSellerAction
+			}
+			for _, item := range rawItems {
+				b, err := q.GetMarketplaceBusinessByID(ctx, item.BusinessID)
+				if err != nil || b.OwnerUserID != user.ID {
+					return ErrUnauthorizedSellerAction
+				}
 			}
 		}
-		if !isSeller {
-			return nil, ErrUnauthorizedBuyerAction
+
+		if lockedOrder.FulfilmentStatus == "delivered" || lockedOrder.OrderStatus == "delivered" {
+			return errors.New("order is already marked as delivered")
 		}
-	}
+		if lockedOrder.FulfilmentStatus != "dispatched" {
+			return errors.New("only dispatched orders can be confirmed as delivered")
+		}
 
-	if order.OrderStatus == "cancelled" || order.OrderStatus == "refunded" {
-		return nil, fmt.Errorf("cannot confirm delivery for an order with status '%s'", order.OrderStatus)
-	}
+		sh, err := q.GetMarketplaceShipmentByOrder(ctx, orderID)
+		if err != nil {
+			return errors.New("shipment record not found for dispatched order")
+		}
 
-	sh, err := s.repo.Queries().GetMarketplaceShipmentByOrder(ctx, orderID)
+		now := time.Now()
+		upSh, err := q.UpdateMarketplaceShipmentStatus(ctx, db.UpdateMarketplaceShipmentStatusParams{
+			ID:                 sh.ID,
+			Status:             "delivered",
+			DeliveredAt:        TimestamptzFromTime(now),
+			ProofOfDeliveryUrl: TextFromString(proofURL),
+			DeliveryNotes:      TextFromString(notes),
+		})
+		if err != nil {
+			return fmt.Errorf("failed to update delivery: %w", err)
+		}
+
+		_, err = q.UpdateMarketplaceFulfilmentStatus(ctx, db.UpdateMarketplaceFulfilmentStatusParams{
+			ID:               orderID,
+			FulfilmentStatus: "delivered",
+		})
+		if err != nil {
+			return fmt.Errorf("failed to update fulfilment status: %w", err)
+		}
+
+		_, err = q.UpdateMarketplaceOrderStatus(ctx, db.UpdateMarketplaceOrderStatusParams{
+			ID:          orderID,
+			OrderStatus: "delivered",
+		})
+		if err != nil {
+			return fmt.Errorf("failed to update order status: %w", err)
+		}
+
+		updatedSh = upSh
+		return nil
+	})
+
 	if err != nil {
-		return nil, errors.New("shipment record not found for this order")
+		return nil, err
 	}
 
-	now := time.Now()
-	updatedSh, err := s.repo.Queries().UpdateMarketplaceShipmentStatus(ctx, db.UpdateMarketplaceShipmentStatusParams{
-		ID:                 sh.ID,
-		Status:             "delivered",
-		DeliveredAt:        TimestamptzFromTime(now),
-		ProofOfDeliveryUrl: TextFromString(proofURL),
-		DeliveryNotes:      TextFromString(notes),
-	})
-	if err != nil {
-		return nil, fmt.Errorf("failed to update delivery: %w", err)
-	}
-
-	_, _ = s.repo.Queries().UpdateMarketplaceFulfilmentStatus(ctx, db.UpdateMarketplaceFulfilmentStatusParams{
-		ID:               orderID,
-		FulfilmentStatus: "delivered",
-	})
-	_, _ = s.repo.Queries().UpdateMarketplaceOrderStatus(ctx, db.UpdateMarketplaceOrderStatusParams{
-		ID:          orderID,
-		OrderStatus: "delivered",
-	})
-
-	_ = s.audit.Log(ctx, &user.ID, &user.PrimaryRole, "confirm_marketplace_delivery", "marketplace_shipment", sh.ID, nil, nil, nil, nil)
+	_ = s.audit.Log(ctx, &user.ID, &user.PrimaryRole, "confirm_marketplace_delivery", "marketplace_shipment", updatedSh.ID, nil, nil, nil, nil)
 	return &updatedSh, nil
 }
 
@@ -1788,28 +1925,42 @@ func (s *MarketplaceService) CancelOrder(ctx context.Context, user *db.User, ord
 		return nil, errors.New("authentication required")
 	}
 
-	order, err := s.repo.Queries().GetMarketplaceOrderByID(ctx, orderID)
-	if err != nil {
-		return nil, ErrOrderNotFound
-	}
+	err := s.repo.WithTx(ctx, func(q *db.Queries) error {
+		lockedOrder, err := q.GetMarketplaceOrderForUpdate(ctx, orderID)
+		if err != nil {
+			return ErrOrderNotFound
+		}
 
-	isBuyer := order.BuyerUserID.Valid && order.BuyerUserID.String == user.ID
-	if !isBuyer && !isAdmin(user) {
-		return nil, ErrUnauthorizedBuyerAction
-	}
+		isBuyer := lockedOrder.BuyerUserID.Valid && lockedOrder.BuyerUserID.String == user.ID
+		apps := s.getActiveAppointments(ctx, user.ID)
+		orderStateID, orderZoneID, _ := s.resolveOrderGeography(ctx, q, &lockedOrder)
+		isNationwide := s.isNationwideAdmin(user, apps)
+		hasJurisdiction := s.hasCoordinatorJurisdiction(user, apps, orderStateID, orderZoneID)
+		hasCoordRole := user.PrimaryRole == "state_coordinator" || user.PrimaryRole == "zonal_coordinator" || s.hasAnyCoordinatorAppointment(apps)
 
-	if order.OrderStatus == "cancelled" {
-		return nil, errors.New("order is already cancelled")
-	}
-	if order.OrderStatus == "delivered" || order.FulfilmentStatus == "delivered" {
-		return nil, errors.New("cannot cancel an order that has already been delivered")
-	}
-	if order.FulfilmentStatus == "dispatched" {
-		return nil, errors.New("cannot cancel an order that has already been dispatched; please request a return or dispute")
-	}
+		if !isBuyer && !isNationwide {
+			if hasCoordRole && !hasJurisdiction {
+				return ErrScopeUnauthorized
+			}
+			if !hasJurisdiction {
+				return ErrUnauthorizedBuyerAction
+			}
+		}
 
-	// Atomic cancellation and stock restoration
-	err = s.repo.WithTx(ctx, func(q *db.Queries) error {
+		if lockedOrder.OrderStatus == "cancelled" {
+			return errors.New("order is already cancelled")
+		}
+		if lockedOrder.OrderStatus == "delivered" || lockedOrder.FulfilmentStatus == "delivered" {
+			return errors.New("cannot cancel an order that has already been delivered")
+		}
+		if lockedOrder.FulfilmentStatus == "dispatched" || lockedOrder.OrderStatus == "dispatched" {
+			return errors.New("cannot cancel an order that has already been dispatched; please request a return or dispute")
+		}
+		if lockedOrder.OrderStatus == "refunded" {
+			return errors.New("cannot cancel a refunded order")
+		}
+
+		// Atomic cancellation and stock restoration
 		items, err := q.ListMarketplaceOrderItemsByOrder(ctx, orderID)
 		if err != nil {
 			return err
@@ -1834,7 +1985,7 @@ func (s *MarketplaceService) CancelOrder(ctx context.Context, user *db.User, ord
 			return err
 		}
 
-		if order.PaymentStatus == "paid" {
+		if lockedOrder.PaymentStatus == "paid" {
 			_, _ = q.UpdateMarketplaceOrderPaymentStatus(ctx, db.UpdateMarketplaceOrderPaymentStatusParams{
 				ID:            orderID,
 				PaymentStatus: "refunded",
@@ -1856,7 +2007,7 @@ func (s *MarketplaceService) CancelOrder(ctx context.Context, user *db.User, ord
 		return nil
 	})
 	if err != nil {
-		return nil, fmt.Errorf("failed to cancel order: %w", err)
+		return nil, err
 	}
 
 	_ = s.audit.Log(ctx, &user.ID, &user.PrimaryRole, "cancel_marketplace_order", "marketplace_order", orderID, nil, nil, &reason, nil)
@@ -1887,7 +2038,15 @@ type ManualSettlementInput struct {
 }
 
 func (s *MarketplaceService) InitiateRefund(ctx context.Context, admin *db.User, orderID string, input RefundOrderInput) (*db.MarketplaceRefund, *db.GetMarketplaceOrderByIDRow, error) {
-	if !isAdmin(admin) {
+	if admin == nil {
+		return nil, nil, errors.New("authentication required")
+	}
+
+	apps := s.getActiveAppointments(ctx, admin.ID)
+	isNationwide := s.isNationwideAdmin(admin, apps)
+	hasCoordRole := admin.PrimaryRole == "state_coordinator" || admin.PrimaryRole == "zonal_coordinator" || s.hasAnyCoordinatorAppointment(apps)
+
+	if !isNationwide && !hasCoordRole {
 		return nil, nil, errors.New("unauthorized: administrative permissions required")
 	}
 
@@ -1900,6 +2059,11 @@ func (s *MarketplaceService) InitiateRefund(ctx context.Context, admin *db.User,
 		return nil, nil, ErrOrderNotFound
 	}
 
+	orderStateID, orderZoneID := s.resolveOrderGeographyRow(ctx, s.repo.Queries(), order.ShippingStateID, order.PickupBranchID)
+	if !isNationwide && !s.hasCoordinatorJurisdiction(admin, apps, orderStateID, orderZoneID) {
+		return nil, nil, ErrScopeUnauthorized
+	}
+
 	if order.PaymentStatus != "paid" && order.PaymentStatus != "partially_refunded" {
 		return nil, nil, fmt.Errorf("cannot refund an order with payment status '%s'", order.PaymentStatus)
 	}
@@ -1910,6 +2074,11 @@ func (s *MarketplaceService) InitiateRefund(ctx context.Context, admin *db.User,
 		lockedOrder, err := q.GetMarketplaceOrderForUpdate(ctx, orderID)
 		if err != nil {
 			return fmt.Errorf("failed to lock order for refund: %w", err)
+		}
+
+		stID, znID, _ := s.resolveOrderGeography(ctx, q, &lockedOrder)
+		if !isNationwide && !s.hasCoordinatorJurisdiction(admin, apps, stID, znID) {
+			return ErrScopeUnauthorized
 		}
 
 		if lockedOrder.PaymentStatus != "paid" && lockedOrder.PaymentStatus != "partially_refunded" {
@@ -2027,13 +2196,25 @@ func (s *MarketplaceService) InitiateRefund(ctx context.Context, admin *db.User,
 }
 
 func (s *MarketplaceService) ConfirmRefund(ctx context.Context, admin *db.User, refundID string, input ConfirmRefundInput) (*db.MarketplaceRefund, *db.GetMarketplaceOrderByIDRow, error) {
-	if admin != nil && !isAdmin(admin) {
-		return nil, nil, errors.New("unauthorized: administrative permissions required")
-	}
-
 	lockedRefund, err := s.repo.Queries().GetMarketplaceRefundByID(ctx, refundID)
 	if err != nil {
 		return nil, nil, errors.New("marketplace refund not found")
+	}
+
+	if admin != nil {
+		apps := s.getActiveAppointments(ctx, admin.ID)
+		isNationwide := s.isNationwideAdmin(admin, apps)
+		hasCoordRole := admin.PrimaryRole == "state_coordinator" || admin.PrimaryRole == "zonal_coordinator" || s.hasAnyCoordinatorAppointment(apps)
+		if !isNationwide && !hasCoordRole {
+			return nil, nil, errors.New("unauthorized: administrative permissions required")
+		}
+		order, err := s.repo.Queries().GetMarketplaceOrderByID(ctx, lockedRefund.OrderID)
+		if err == nil {
+			stID, znID := s.resolveOrderGeographyRow(ctx, s.repo.Queries(), order.ShippingStateID, order.PickupBranchID)
+			if !isNationwide && !s.hasCoordinatorJurisdiction(admin, apps, stID, znID) {
+				return nil, nil, ErrScopeUnauthorized
+			}
+		}
 	}
 
 	// Idempotent no-op if already successful
@@ -2219,6 +2400,16 @@ func (s *MarketplaceService) settleRefundSuccess(ctx context.Context, admin *db.
 		lockedOrder, err := q.GetMarketplaceOrderForUpdate(ctx, lockedRefund.OrderID)
 		if err != nil {
 			return fmt.Errorf("failed to lock order for refund settlement: %w", err)
+		}
+
+		if admin != nil {
+			apps := s.getActiveAppointments(ctx, admin.ID)
+			if !s.isNationwideAdmin(admin, apps) {
+				stID, znID, _ := s.resolveOrderGeography(ctx, q, &lockedOrder)
+				if !s.hasCoordinatorJurisdiction(admin, apps, stID, znID) {
+					return ErrScopeUnauthorized
+				}
+			}
 		}
 
 		pay, err := q.GetMarketplacePaymentByOrderForUpdate(ctx, lockedRefund.OrderID)
@@ -2627,6 +2818,137 @@ func (s *MarketplaceService) ListPayments(ctx context.Context, admin *db.User, s
 // -------------------------------------------------------------
 // Helper functions
 // -------------------------------------------------------------
+
+func (s *MarketplaceService) isNationwideAdmin(u *db.User, appointments []db.Appointment) bool {
+	if u == nil {
+		return false
+	}
+	if u.PrimaryRole == "super_admin" || u.PrimaryRole == "national_admin" {
+		return true
+	}
+	for _, a := range appointments {
+		if a.Status != "active" {
+			continue
+		}
+		if a.RoleType == "super_admin" || a.RoleType == "national_admin" || strings.ToLower(a.JurisdictionType) == "national" {
+			return true
+		}
+	}
+	return false
+}
+
+func (s *MarketplaceService) hasAnyCoordinatorAppointment(appointments []db.Appointment) bool {
+	for _, a := range appointments {
+		if a.Status != "active" {
+			continue
+		}
+		if a.RoleType == "state_coordinator" || a.RoleType == "zonal_coordinator" ||
+			strings.ToLower(a.JurisdictionType) == "state" || strings.ToLower(a.JurisdictionType) == "zone" || strings.ToLower(a.JurisdictionType) == "zonal" {
+			return true
+		}
+	}
+	return false
+}
+
+func (s *MarketplaceService) getActiveAppointments(ctx context.Context, userID string) []db.Appointment {
+	if strings.TrimSpace(userID) == "" {
+		return nil
+	}
+	apps, err := s.repo.Queries().ListActiveAppointmentsByUser(ctx, userID)
+	if err != nil {
+		return nil
+	}
+	now := time.Now()
+	var valid []db.Appointment
+	for _, a := range apps {
+		if a.Status == "active" {
+			if !a.EndDate.Valid || a.EndDate.Time.After(now) {
+				valid = append(valid, a)
+			}
+		}
+	}
+	return valid
+}
+
+func (s *MarketplaceService) resolveOrderGeography(ctx context.Context, q *db.Queries, order *db.MarketplaceOrder) (stateID string, zoneID string, err error) {
+	if order == nil {
+		return "", "", nil
+	}
+	stID, znID := s.resolveOrderGeographyRow(ctx, q, order.ShippingStateID, order.PickupBranchID)
+	return stID, znID, nil
+}
+
+func (s *MarketplaceService) resolveOrderGeographyRow(ctx context.Context, q *db.Queries, shippingStateID, pickupBranchID pgtype.Text) (stateID string, zoneID string) {
+	if shippingStateID.Valid && strings.TrimSpace(shippingStateID.String) != "" {
+		stateID = shippingStateID.String
+	} else if pickupBranchID.Valid && strings.TrimSpace(pickupBranchID.String) != "" {
+		br, err := q.GetBusinessBranchByID(ctx, pickupBranchID.String)
+		if err == nil {
+			stateID = br.StateID
+		}
+	}
+
+	if stateID != "" {
+		st, err := q.GetStateByID(ctx, stateID)
+		if err == nil {
+			zoneID = st.ZoneID
+		}
+	}
+	return stateID, zoneID
+}
+
+func (s *MarketplaceService) hasCoordinatorJurisdiction(user *db.User, appointments []db.Appointment, orderStateID, orderZoneID string) bool {
+	if user == nil {
+		return false
+	}
+	if s.isNationwideAdmin(user, appointments) {
+		return true
+	}
+
+	for _, a := range appointments {
+		if a.Status != "active" {
+			continue
+		}
+		jType := strings.ToLower(a.JurisdictionType)
+		jID := ""
+		if a.JurisdictionID.Valid {
+			jID = a.JurisdictionID.String
+		}
+
+		// State coordinator
+		if (a.RoleType == "state_coordinator" || jType == "state") && jID != "" {
+			if orderStateID != "" && jID == orderStateID {
+				return true
+			}
+		}
+
+		// Zonal coordinator
+		if (a.RoleType == "zonal_coordinator" || jType == "zone" || jType == "zonal") && jID != "" {
+			if orderZoneID != "" && jID == orderZoneID {
+				return true
+			}
+		}
+	}
+
+	// Fallback for user.PrimaryRole if appointment is not in appointments table
+	if user.PrimaryRole == "state_coordinator" && orderStateID != "" {
+		prof, err := s.repo.Queries().GetMemberProfileByUserID(context.Background(), user.ID)
+		if err == nil && prof.HomeStateID.Valid && prof.HomeStateID.String == orderStateID {
+			return true
+		}
+	}
+	if user.PrimaryRole == "zonal_coordinator" && orderZoneID != "" {
+		prof, err := s.repo.Queries().GetMemberProfileByUserID(context.Background(), user.ID)
+		if err == nil && prof.HomeStateID.Valid && prof.HomeStateID.String != "" {
+			st, err := s.repo.Queries().GetStateByID(context.Background(), prof.HomeStateID.String)
+			if err == nil && st.ZoneID == orderZoneID {
+				return true
+			}
+		}
+	}
+
+	return false
+}
 
 func isAdmin(u *db.User) bool {
 	if u == nil {
