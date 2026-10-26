@@ -201,3 +201,148 @@ func TestPaystackGateway_VerifyWebhookSignature(t *testing.T) {
 		t.Fatal("expected verification to fail when secret is empty")
 	}
 }
+
+func TestPaystackGateway_RefundPayment_Success(t *testing.T) {
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Header.Get("Authorization") != "Bearer sk_test_secret" {
+			w.WriteHeader(http.StatusUnauthorized)
+			return
+		}
+		if r.URL.Path != "/refund" {
+			w.WriteHeader(http.StatusNotFound)
+			return
+		}
+		if r.Method != http.MethodPost {
+			w.WriteHeader(http.StatusMethodNotAllowed)
+			return
+		}
+
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(`{
+			"status": true,
+			"message": "Refund queued successfully",
+			"data": {
+				"status": "pending",
+				"reference": "REFUND_PAYSTACK_123",
+				"refund_reference": "REFUND_PAYSTACK_123",
+				"amount": 50000,
+				"currency": "NGN"
+			}
+		}`))
+	}))
+	defer ts.Close()
+
+	gw := NewPaystackGateway("sk_test_secret", "pk_test_public")
+	gw.SetBaseURL(ts.URL)
+
+	out, err := gw.RefundPayment(context.Background(), RefundPaymentInput{
+		PaymentReference: "ORIG_PAY_123",
+		AmountKobo:       50000,
+		Currency:         "NGN",
+		MerchantNote:     "Damaged product refund",
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if out.RefundReference != "REFUND_PAYSTACK_123" {
+		t.Errorf("expected refund reference 'REFUND_PAYSTACK_123', got %s", out.RefundReference)
+	}
+	if out.Status != "pending" {
+		t.Errorf("expected status 'pending', got %s", out.Status)
+	}
+	if out.AmountKobo != 50000 {
+		t.Errorf("expected amount 50000, got %d", out.AmountKobo)
+	}
+	if out.Currency != "NGN" {
+		t.Errorf("expected currency 'NGN', got %s", out.Currency)
+	}
+}
+
+func TestPaystackGateway_RefundPayment_HTTPErrorStatus(t *testing.T) {
+	statuses := []int{http.StatusBadRequest, http.StatusUnauthorized, http.StatusNotFound, http.StatusInternalServerError}
+	for _, status := range statuses {
+		t.Run(http.StatusText(status), func(t *testing.T) {
+			ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				w.WriteHeader(status)
+				_, _ = w.Write([]byte(`{"status": false, "message": "error occurred"}`))
+			}))
+			defer ts.Close()
+
+			gw := NewPaystackGateway("sk_test", "pk_test")
+			gw.SetBaseURL(ts.URL)
+
+			_, err := gw.RefundPayment(context.Background(), RefundPaymentInput{
+				PaymentReference: "ORIG_PAY_123",
+				AmountKobo:       50000,
+				Currency:         "NGN",
+			})
+			if err == nil {
+				t.Fatalf("expected error for HTTP status %d, got nil", status)
+			}
+		})
+	}
+}
+
+func TestPaystackGateway_RefundPayment_MalformedJSON(t *testing.T) {
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(`{"status": true, "data": { broken json...`))
+	}))
+	defer ts.Close()
+
+	gw := NewPaystackGateway("sk_test", "pk_test")
+	gw.SetBaseURL(ts.URL)
+
+	_, err := gw.RefundPayment(context.Background(), RefundPaymentInput{
+		PaymentReference: "ORIG_PAY_123",
+		AmountKobo:       50000,
+		Currency:         "NGN",
+	})
+	if err == nil {
+		t.Fatal("expected error for malformed json, got nil")
+	}
+	if !errors.Is(err, ErrMalformedResponse) {
+		t.Errorf("expected ErrMalformedResponse, got %v", err)
+	}
+}
+
+func TestPaystackGateway_RefundPayment_ValidationAndUnconfigured(t *testing.T) {
+	gwUnconf := NewPaystackGateway("", "")
+	_, err := gwUnconf.RefundPayment(context.Background(), RefundPaymentInput{
+		PaymentReference: "REF1",
+		AmountKobo:       1000,
+	})
+	if !errors.Is(err, ErrUnconfiguredProvider) {
+		t.Fatalf("expected ErrUnconfiguredProvider, got %v", err)
+	}
+
+	gw := NewPaystackGateway("sk_test", "pk_test")
+
+	// Missing reference
+	_, err = gw.RefundPayment(context.Background(), RefundPaymentInput{
+		PaymentReference: "",
+		AmountKobo:       1000,
+	})
+	if err == nil {
+		t.Fatal("expected error for empty payment reference, got nil")
+	}
+
+	// Zero or negative amount
+	_, err = gw.RefundPayment(context.Background(), RefundPaymentInput{
+		PaymentReference: "REF1",
+		AmountKobo:       0,
+	})
+	if err == nil {
+		t.Fatal("expected error for zero amount, got nil")
+	}
+
+	_, err = gw.RefundPayment(context.Background(), RefundPaymentInput{
+		PaymentReference: "REF1",
+		AmountKobo:       -500,
+	})
+	if err == nil {
+		t.Fatal("expected error for negative amount, got nil")
+	}
+}
+

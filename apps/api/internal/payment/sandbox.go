@@ -85,3 +85,23 @@ func (s *SandboxGateway) VerifyWebhookSignature(signatureHeader string, body []b
 	// In sandbox mode, allow valid sandbox secret or test header
 	return signatureHeader == "sandbox-signature-ok" || signatureHeader != ""
 }
+
+func (s *SandboxGateway) RefundPayment(ctx context.Context, input RefundPaymentInput) (*RefundPaymentOutput, error) {
+	if strings.Contains(strings.ToLower(input.MerchantNote), "fail") || strings.Contains(strings.ToLower(input.CustomerNote), "fail") {
+		return &RefundPaymentOutput{
+			RefundReference: "sandbox_ref_fail_" + input.PaymentReference,
+			Status:          "failed",
+			AmountKobo:      input.AmountKobo,
+			Currency:        input.Currency,
+			RawResponse:     []byte(`{"status":false,"message":"Simulated sandbox refund failure"}`),
+		}, nil
+	}
+
+	return &RefundPaymentOutput{
+		RefundReference: "sandbox_ref_" + input.PaymentReference,
+		Status:          "pending",
+		AmountKobo:      input.AmountKobo,
+		Currency:        input.Currency,
+		RawResponse:     []byte(`{"status":true,"message":"Refund queued in sandbox"}`),
+	}, nil
+}

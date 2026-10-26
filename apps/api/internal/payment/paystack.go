@@ -226,3 +226,92 @@ func (p *PaystackGateway) VerifyWebhookSignature(signatureHeader string, body []
 
 	return hmac.Equal([]byte(expectedMAC), []byte(signatureHeader))
 }
+
+func (p *PaystackGateway) RefundPayment(ctx context.Context, input RefundPaymentInput) (*RefundPaymentOutput, error) {
+	if p.secretKey == "" {
+		return nil, ErrUnconfiguredProvider
+	}
+	if strings.TrimSpace(input.PaymentReference) == "" {
+		return nil, errors.New("payment reference is required for refund")
+	}
+	if input.AmountKobo <= 0 {
+		return nil, errors.New("refund amount must be greater than zero")
+	}
+
+	payload := map[string]interface{}{
+		"transaction":   input.PaymentReference,
+		"amount":        input.AmountKobo,
+		"currency":      input.Currency,
+		"merchant_note": input.MerchantNote,
+		"customer_note": input.CustomerNote,
+	}
+
+	reqBody, err := json.Marshal(payload)
+	if err != nil {
+		return nil, fmt.Errorf("failed to encode paystack refund request: %w", err)
+	}
+
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, p.baseURL+"/refund", bytes.NewReader(reqBody))
+	if err != nil {
+		return nil, fmt.Errorf("failed to create paystack refund request: %w", err)
+	}
+
+	req.Header.Set("Authorization", "Bearer "+p.secretKey)
+	req.Header.Set("Content-Type", "application/json")
+
+	resp, err := p.httpClient.Do(req)
+	if err != nil {
+		return nil, fmt.Errorf("paystack refund request failed: %w", err)
+	}
+	defer resp.Body.Close()
+
+	bodyBytes, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return nil, fmt.Errorf("failed to read paystack refund response: %w", err)
+	}
+
+	if resp.StatusCode != http.StatusOK && resp.StatusCode != http.StatusCreated && resp.StatusCode != http.StatusAccepted {
+		return nil, fmt.Errorf("paystack refund returned unexpected HTTP status %d: %s", resp.StatusCode, string(bodyBytes))
+	}
+
+	var psResp struct {
+		Status  bool   `json:"status"`
+		Message string `json:"message"`
+		Data    struct {
+			Status          string `json:"status"` // "pending", "processing", "processed", "failed"
+			Reference       string `json:"reference"`
+			RefundReference string `json:"refund_reference"`
+			Amount          int64  `json:"amount"`
+			Currency        string `json:"currency"`
+		} `json:"data"`
+	}
+
+	if err := json.Unmarshal(bodyBytes, &psResp); err != nil {
+		return nil, fmt.Errorf("%w: failed to parse refund response: %v", ErrMalformedResponse, err)
+	}
+
+	if !psResp.Status {
+		return nil, fmt.Errorf("paystack refund error: %s", psResp.Message)
+	}
+
+	refRef := psResp.Data.RefundReference
+	if refRef == "" {
+		refRef = psResp.Data.Reference
+	}
+
+	status := "pending"
+	switch psResp.Data.Status {
+	case "processed", "success", "successful":
+		status = "successful"
+	case "failed":
+		status = "failed"
+	}
+
+	return &RefundPaymentOutput{
+		RefundReference: refRef,
+		Status:          status,
+		AmountKobo:      psResp.Data.Amount,
+		Currency:        psResp.Data.Currency,
+		RawResponse:     bodyBytes,
+	}, nil
+}

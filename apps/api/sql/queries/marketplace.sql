@@ -556,3 +556,65 @@ SELECT
 FROM marketplace_order_items oi
 JOIN marketplace_orders o ON oi.order_id = o.id
 WHERE oi.business_id = $1;
+
+-- -------------------------------------------------------------
+-- Marketplace Refund Accounting Ledger
+-- -------------------------------------------------------------
+
+-- name: CreateMarketplaceRefund :one
+INSERT INTO marketplace_refunds (
+    id, order_id, payment_id, amount_kobo, status,
+    provider, provider_refund_reference, initiated_by_user_id,
+    confirmed_by_user_id, reason, settlement_notes, metadata,
+    created_at, updated_at
+) VALUES (
+    $1, $2, $3, $4, $5,
+    $6, $7, $8,
+    $9, $10, $11, $12,
+    CURRENT_TIMESTAMP, CURRENT_TIMESTAMP
+) RETURNING *;
+
+-- name: GetMarketplaceRefundByID :one
+SELECT * FROM marketplace_refunds
+WHERE id = $1;
+
+-- name: GetMarketplaceRefundByIDForUpdate :one
+SELECT * FROM marketplace_refunds
+WHERE id = $1
+FOR UPDATE;
+
+-- name: GetMarketplaceRefundByProviderReference :one
+SELECT * FROM marketplace_refunds
+WHERE provider_refund_reference = $1
+ORDER BY created_at DESC
+LIMIT 1;
+
+-- name: GetMarketplaceRefundByProviderReferenceForUpdate :one
+SELECT * FROM marketplace_refunds
+WHERE provider_refund_reference = $1
+ORDER BY created_at DESC
+LIMIT 1
+FOR UPDATE;
+
+-- name: ListMarketplaceRefundsByOrder :many
+SELECT * FROM marketplace_refunds
+WHERE order_id = $1
+ORDER BY created_at DESC;
+
+-- name: GetMarketplaceRefundSumsByOrder :one
+SELECT 
+    COALESCE(SUM(CASE WHEN status = 'successful' THEN amount_kobo ELSE 0 END), 0)::bigint AS successful_amount_kobo,
+    COALESCE(SUM(CASE WHEN status = 'pending' THEN amount_kobo ELSE 0 END), 0)::bigint AS pending_amount_kobo
+FROM marketplace_refunds
+WHERE order_id = $1;
+
+-- name: UpdateMarketplaceRefundStatus :one
+UPDATE marketplace_refunds
+SET status = $2,
+    provider_refund_reference = $3,
+    confirmed_by_user_id = $4,
+    settlement_notes = $5,
+    metadata = $6,
+    updated_at = CURRENT_TIMESTAMP
+WHERE id = $1
+RETURNING *;

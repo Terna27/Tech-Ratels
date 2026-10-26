@@ -981,7 +981,7 @@ func (h *MarketplaceHandler) AdminRefundOrder(w http.ResponseWriter, r *http.Req
 		return
 	}
 
-	order, err := h.marketplaceService.InitiateRefund(r.Context(), admin, id, req)
+	refund, order, err := h.marketplaceService.InitiateRefund(r.Context(), admin, id, req)
 	if err != nil {
 		if errors.Is(err, service.ErrOrderNotFound) {
 			ErrorJSON(w, http.StatusNotFound, "NOT_FOUND", "Order not found", nil)
@@ -990,5 +990,31 @@ func (h *MarketplaceHandler) AdminRefundOrder(w http.ResponseWriter, r *http.Req
 		ErrorJSON(w, http.StatusBadRequest, "REFUND_FAILED", err.Error(), nil)
 		return
 	}
-	JSON(w, http.StatusOK, order)
+	JSON(w, http.StatusOK, map[string]interface{}{
+		"status": "refund_initiated",
+		"refund": refund,
+		"order":  order,
+	})
+}
+
+func (h *MarketplaceHandler) AdminConfirmRefund(w http.ResponseWriter, r *http.Request) {
+	admin := GetCurrentUser(r.Context())
+	refundID := chi.URLParam(r, "refundId")
+
+	var req service.ConfirmRefundInput
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		// Optional empty body
+		req = service.ConfirmRefundInput{}
+	}
+
+	refund, order, err := h.marketplaceService.ConfirmRefund(r.Context(), admin, refundID, req)
+	if err != nil {
+		ErrorJSON(w, http.StatusBadRequest, "CONFIRM_FAILED", err.Error(), nil)
+		return
+	}
+	JSON(w, http.StatusOK, map[string]interface{}{
+		"status": "refund_confirmed",
+		"refund": refund,
+		"order":  order,
+	})
 }

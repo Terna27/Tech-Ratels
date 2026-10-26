@@ -911,7 +911,7 @@ func TestMarketplaceService_AdminRefundAndOverpaymentRejection(t *testing.T) {
 
 	// Total order = 1,000,000 kobo (₦10,000)
 	// 1. Overpayment refund rejected (e.g. 1,500,000 kobo > 1,000,000 kobo)
-	_, err = env.MarketplaceService.InitiateRefund(ctx, admin, orderRes.Order.ID, service.RefundOrderInput{
+	_, _, err = env.MarketplaceService.InitiateRefund(ctx, admin, orderRes.Order.ID, service.RefundOrderInput{
 		AmountKobo: 1500000,
 		Reason:     "Over-refund exploit attempt",
 	})
@@ -919,25 +919,33 @@ func TestMarketplaceService_AdminRefundAndOverpaymentRejection(t *testing.T) {
 		t.Fatal("Expected error when refund amount exceeds total order amount, got nil")
 	}
 
-	// 2. Partial refund processed (300,000 kobo of 1,000,000 kobo)
-	partialOrder, err := env.MarketplaceService.InitiateRefund(ctx, admin, orderRes.Order.ID, service.RefundOrderInput{
-		AmountKobo: 300000,
-		Reason:     "Partial goodwill concession",
+	// 2. Partial refund processed via authorized manual settlement (300,000 kobo of 1,000,000 kobo)
+	refund1, partialOrder, err := env.MarketplaceService.InitiateRefund(ctx, admin, orderRes.Order.ID, service.RefundOrderInput{
+		AmountKobo:       300000,
+		Reason:           "Partial goodwill concession",
+		ManualSettlement: true,
 	})
 	if err != nil {
 		t.Fatalf("InitiateRefund (partial) failed: %v", err)
+	}
+	if refund1.Status != "successful" {
+		t.Errorf("Expected refund status 'successful', got %s", refund1.Status)
 	}
 	if partialOrder.PaymentStatus != "partially_refunded" {
 		t.Errorf("Expected payment_status 'partially_refunded', got %s", partialOrder.PaymentStatus)
 	}
 
-	// 3. Full refund processed
-	refundedOrder, err := env.MarketplaceService.InitiateRefund(ctx, admin, orderRes.Order.ID, service.RefundOrderInput{
-		AmountKobo: 1000000,
-		Reason:     "Defective batch recalled",
+	// 3. Full refund processed via authorized manual settlement
+	refund2, refundedOrder, err := env.MarketplaceService.InitiateRefund(ctx, admin, orderRes.Order.ID, service.RefundOrderInput{
+		AmountKobo:       1000000,
+		Reason:           "Defective batch recalled",
+		ManualSettlement: true,
 	})
 	if err != nil {
 		t.Fatalf("InitiateRefund failed: %v", err)
+	}
+	if refund2.Status != "successful" {
+		t.Errorf("Expected refund status 'successful', got %s", refund2.Status)
 	}
 	if refundedOrder.PaymentStatus != "refunded" || refundedOrder.OrderStatus != "refunded" {
 		t.Errorf("Expected refunded / refunded, got %s / %s", refundedOrder.PaymentStatus, refundedOrder.OrderStatus)
