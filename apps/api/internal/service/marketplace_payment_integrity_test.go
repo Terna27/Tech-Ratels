@@ -15,10 +15,11 @@ import (
 )
 
 type mockCustomGateway struct {
-	providerName string
-	verifyFn     func(ctx context.Context, reference string) (*payment.VerifyPaymentOutput, error)
-	verifySigFn  func(signatureHeader string, body []byte) bool
-	refundFn     func(ctx context.Context, input payment.RefundPaymentInput) (*payment.RefundPaymentOutput, error)
+	providerName   string
+	verifyFn       func(ctx context.Context, reference string) (*payment.VerifyPaymentOutput, error)
+	verifySigFn    func(signatureHeader string, body []byte) bool
+	refundFn       func(ctx context.Context, input payment.RefundPaymentInput) (*payment.RefundPaymentOutput, error)
+	verifyRefundFn func(ctx context.Context, refundReference string) (*payment.VerifyRefundOutput, error)
 }
 
 func (m *mockCustomGateway) ProviderName() string {
@@ -73,6 +74,17 @@ func (m *mockCustomGateway) RefundPayment(ctx context.Context, input payment.Ref
 	}, nil
 }
 
+func (m *mockCustomGateway) VerifyRefund(ctx context.Context, refundReference string) (*payment.VerifyRefundOutput, error) {
+	if m.verifyRefundFn != nil {
+		return m.verifyRefundFn(ctx, refundReference)
+	}
+	return &payment.VerifyRefundOutput{
+		RefundReference: refundReference,
+		Status:          "successful",
+		RawResponse:     []byte(`{"status":"processed"}`),
+	}, nil
+}
+
 func helperCreateOrderWithGateway(t *testing.T, env *TestEnv, gw payment.PaymentGateway, amountKobo int64) (*service.MarketplaceService, *service.CreateOrderResult, *db.User) {
 	t.Helper()
 	ctx := context.Background()
@@ -80,6 +92,22 @@ func helperCreateOrderWithGateway(t *testing.T, env *TestEnv, gw payment.Payment
 	seller := createRegisteredUser(t, env, fmt.Sprintf("seller_%d", time.Now().UnixNano()), "member")
 	admin := createRegisteredUser(t, env, fmt.Sprintf("admin_%d", time.Now().UnixNano()), "super_admin")
 	buyer := createRegisteredUser(t, env, fmt.Sprintf("buyer_%d", time.Now().UnixNano()), "member")
+
+	if mg, ok := gw.(*mockCustomGateway); ok && mg.verifyFn == nil {
+		mg.verifyFn = func(ctx context.Context, reference string) (*payment.VerifyPaymentOutput, error) {
+			now := time.Now()
+			return &payment.VerifyPaymentOutput{
+				PaymentReference:  reference,
+				ProviderReference: "ps_ref_" + reference,
+				Status:            "successful",
+				AmountKobo:        amountKobo,
+				Currency:          "NGN",
+				PaidAt:            &now,
+				Channel:           "card",
+				CustomerEmail:     "buyer@example.org",
+			}, nil
+		}
+	}
 
 	mktSvc := service.NewMarketplaceService(env.Repo, env.AuditService, gw)
 
@@ -580,9 +608,9 @@ func TestMarketplaceRefund_PendingAndConfirmation(t *testing.T) {
 		t.Errorf("stock must not be restored while refund is pending (expected 99, got %d)", pRow.StockQuantity)
 	}
 
-	// 2. Confirm refund (manual settlement or verified provider confirmation)
+	// 2. Confirm refund (verified provider confirmation)
 	confirmedRefund, confirmedOrder, err := mktSvc.ConfirmRefund(ctx, admin, refund.ID, service.ConfirmRefundInput{
-		ProviderRefundReference: "pstk_ref_123",
+		ProviderRefundReference: refund.ProviderRefundReference,
 		SettlementNotes:         "Settlement confirmed with bank",
 	})
 	if err != nil {
@@ -1055,5 +1083,742 @@ func TestMarketplacePaymentIntegrity_AtomicRollbackOnDatabaseFailure(t *testing.
 	}
 	if order.OrderStatus != "placed" {
 		t.Errorf("expected order status to remain 'placed' after rollback, got '%s'", order.OrderStatus)
+	}
+}
+
+// -------------------------------------------------------------
+// Step 62.10 Regression Tests: Secure Refund Confirmation
+// -------------------------------------------------------------
+
+// 1. Admin confirmation without provider proof
+func TestMarketplaceRefund_AdminConfirmationWithoutProviderProof(t *testing.T) {
+	env := setupTestEnv(t)
+	defer env.Pool.Close()
+	ctx := context.Background()
+
+	admin := createRegisteredUser(t, env, fmt.Sprintf("admin_noproof_%d", time.Now().UnixNano()), "super_admin")
+	gw := &mockCustomGateway{
+		providerName: "paystack",
+		refundFn: func(ctx context.Context, input payment.RefundPaymentInput) (*payment.RefundPaymentOutput, error) {
+			return &payment.RefundPaymentOutput{
+				RefundReference: "pstk_ref_noproof_1",
+				Status:          "pending",
+				AmountKobo:      input.AmountKobo,
+				Currency:        "NGN",
+			}, nil
+		},
+		verifyRefundFn: func(ctx context.Context, refundReference string) (*payment.VerifyRefundOutput, error) {
+			// Provider reports error or unverified
+			return nil, errors.New("provider refund not found or not yet processed")
+		},
+	}
+	mktSvc, orderRes, _ := helperCreateOrderWithGateway(t, env, gw, 300000)
+	_, err := mktSvc.ConfirmPayment(ctx, orderRes.Payment.Reference)
+	if err != nil {
+		t.Fatalf("ConfirmPayment failed: %v", err)
+	}
+
+	r, _, err := mktSvc.InitiateRefund(ctx, admin, orderRes.Order.ID, service.RefundOrderInput{
+		AmountKobo: 100000,
+		Reason:     "Return item",
+	})
+	if err != nil {
+		t.Fatalf("InitiateRefund failed: %v", err)
+	}
+
+	// Attempt confirmation without provider proof
+	_, _, err = mktSvc.ConfirmRefund(ctx, admin, r.ID, service.ConfirmRefundInput{})
+	if err == nil {
+		t.Fatal("expected ConfirmRefund to fail without provider proof, got nil")
+	}
+
+	// Assert refund remains pending
+	rCheck, err := mktSvc.GetRefundByID(ctx, admin, r.ID)
+	if err != nil {
+		t.Fatalf("GetRefundByID failed: %v", err)
+	}
+	if rCheck.Status != "pending" {
+		t.Errorf("expected refund status to remain 'pending', got '%s'", rCheck.Status)
+	}
+}
+
+// 2. Empty confirmation request
+func TestMarketplaceRefund_EmptyConfirmationRequest(t *testing.T) {
+	env := setupTestEnv(t)
+	defer env.Pool.Close()
+	ctx := context.Background()
+
+	admin := createRegisteredUser(t, env, fmt.Sprintf("admin_empty_%d", time.Now().UnixNano()), "super_admin")
+	gw := &mockCustomGateway{
+		providerName: "paystack",
+		refundFn: func(ctx context.Context, input payment.RefundPaymentInput) (*payment.RefundPaymentOutput, error) {
+			return &payment.RefundPaymentOutput{
+				RefundReference: "pstk_ref_empty_req_1",
+				Status:          "pending",
+				AmountKobo:      input.AmountKobo,
+				Currency:        "NGN",
+			}, nil
+		},
+		verifyRefundFn: func(ctx context.Context, refundReference string) (*payment.VerifyRefundOutput, error) {
+			return nil, errors.New("provider refund pending reconciliation")
+		},
+	}
+	mktSvc, orderRes, _ := helperCreateOrderWithGateway(t, env, gw, 250000)
+	_, _ = mktSvc.ConfirmPayment(ctx, orderRes.Payment.Reference)
+
+	r, _, err := mktSvc.InitiateRefund(ctx, admin, orderRes.Order.ID, service.RefundOrderInput{
+		AmountKobo: 50000,
+		Reason:     "Goodwill refund",
+	})
+	if err != nil {
+		t.Fatalf("InitiateRefund failed: %v", err)
+	}
+
+	// Calling ConfirmRefund with empty input {} must NOT blindly succeed
+	_, _, err = mktSvc.ConfirmRefund(ctx, admin, r.ID, service.ConfirmRefundInput{})
+	if err == nil {
+		t.Fatal("expected empty confirmation request to be rejected without provider verification, got nil")
+	}
+}
+
+// 3. Forged provider refund reference
+func TestMarketplaceRefund_ForgedProviderRefundReference(t *testing.T) {
+	env := setupTestEnv(t)
+	defer env.Pool.Close()
+	ctx := context.Background()
+
+	admin := createRegisteredUser(t, env, fmt.Sprintf("admin_forge_%d", time.Now().UnixNano()), "super_admin")
+	gw := &mockCustomGateway{
+		providerName: "paystack",
+		refundFn: func(ctx context.Context, input payment.RefundPaymentInput) (*payment.RefundPaymentOutput, error) {
+			return &payment.RefundPaymentOutput{
+				RefundReference: "legit_provider_ref_123",
+				Status:          "pending",
+				AmountKobo:      input.AmountKobo,
+				Currency:        "NGN",
+			}, nil
+		},
+	}
+	mktSvc, orderRes, _ := helperCreateOrderWithGateway(t, env, gw, 200000)
+	_, _ = mktSvc.ConfirmPayment(ctx, orderRes.Payment.Reference)
+
+	r, _, err := mktSvc.InitiateRefund(ctx, admin, orderRes.Order.ID, service.RefundOrderInput{
+		AmountKobo: 50000,
+		Reason:     "Damaged goods",
+	})
+	if err != nil {
+		t.Fatalf("InitiateRefund failed: %v", err)
+	}
+
+	// Admin supplies a forged reference that does not match the authoritative provider reference
+	_, _, err = mktSvc.ConfirmRefund(ctx, admin, r.ID, service.ConfirmRefundInput{
+		ProviderRefundReference: "FORGED_PROVIDER_REF_999",
+	})
+	if err == nil {
+		t.Fatal("expected forged provider refund reference to be rejected, got nil")
+	}
+}
+
+// 4. Two pending refunds for one order
+func TestMarketplaceRefund_TwoPendingRefundsForOneOrder(t *testing.T) {
+	env := setupTestEnv(t)
+	defer env.Pool.Close()
+	ctx := context.Background()
+
+	admin := createRegisteredUser(t, env, fmt.Sprintf("admin_twopen_%d", time.Now().UnixNano()), "super_admin")
+	counter := 0
+	gw := &mockCustomGateway{
+		providerName: "paystack",
+		refundFn: func(ctx context.Context, input payment.RefundPaymentInput) (*payment.RefundPaymentOutput, error) {
+			counter++
+			return &payment.RefundPaymentOutput{
+				RefundReference: fmt.Sprintf("UNIQUE_PSTK_REF_%d", counter),
+				Status:          "pending",
+				AmountKobo:      input.AmountKobo,
+				Currency:        "NGN",
+			}, nil
+		},
+	}
+	mktSvc, orderRes, _ := helperCreateOrderWithGateway(t, env, gw, 1000000) // 1,000,000 kobo total
+	_, _ = mktSvc.ConfirmPayment(ctx, orderRes.Payment.Reference)
+
+	// Initiate Refund A (300,000 kobo -> UNIQUE_PSTK_REF_1)
+	rA, _, err := mktSvc.InitiateRefund(ctx, admin, orderRes.Order.ID, service.RefundOrderInput{
+		AmountKobo: 300000,
+		Reason:     "Refund A",
+	})
+	if err != nil {
+		t.Fatalf("InitiateRefund A failed: %v", err)
+	}
+
+	// Initiate Refund B (400,000 kobo -> UNIQUE_PSTK_REF_2)
+	rB, _, err := mktSvc.InitiateRefund(ctx, admin, orderRes.Order.ID, service.RefundOrderInput{
+		AmountKobo: 400000,
+		Reason:     "Refund B",
+	})
+	if err != nil {
+		t.Fatalf("InitiateRefund B failed: %v", err)
+	}
+
+	// Paystack sends webhook for Refund B ONLY (UNIQUE_PSTK_REF_2)
+	webhookPayloadB := []byte(fmt.Sprintf(`{
+		"event": "refund.processed",
+		"data": {
+			"reference": "UNIQUE_PSTK_REF_2",
+			"refund_reference": "UNIQUE_PSTK_REF_2",
+			"transaction_reference": "%s",
+			"status": "processed",
+			"amount": 400000,
+			"currency": "NGN"
+		}
+	}`, orderRes.Payment.Reference))
+
+	err = mktSvc.HandleWebhook(ctx, "valid-paystack-signature", webhookPayloadB)
+	if err != nil {
+		t.Fatalf("HandleWebhook for Refund B failed: %v", err)
+	}
+
+	// Assert Refund B is successful
+	rBCheck, err := mktSvc.GetRefundByID(ctx, admin, rB.ID)
+	if err != nil {
+		t.Fatalf("GetRefundByID B failed: %v", err)
+	}
+	if rBCheck.Status != "successful" {
+		t.Errorf("expected Refund B status to be 'successful', got '%s'", rBCheck.Status)
+	}
+
+	// Assert Refund A is STILL pending (NOT accidentally confirmed by ambiguous fallback)
+	rACheck, err := mktSvc.GetRefundByID(ctx, admin, rA.ID)
+	if err != nil {
+		t.Fatalf("GetRefundByID A failed: %v", err)
+	}
+	if rACheck.Status != "pending" {
+		t.Errorf("expected Refund A status to remain 'pending', got '%s'", rACheck.Status)
+	}
+}
+
+// 5. Webhook with missing refund identifier
+func TestMarketplaceRefund_WebhookMissingRefundIdentifier(t *testing.T) {
+	env := setupTestEnv(t)
+	defer env.Pool.Close()
+	ctx := context.Background()
+
+	admin := createRegisteredUser(t, env, fmt.Sprintf("admin_miss_%d", time.Now().UnixNano()), "super_admin")
+	gw := &mockCustomGateway{
+		providerName: "paystack",
+		refundFn: func(ctx context.Context, input payment.RefundPaymentInput) (*payment.RefundPaymentOutput, error) {
+			return &payment.RefundPaymentOutput{
+				RefundReference: "pstk_ref_exist_1",
+				Status:          "pending",
+				AmountKobo:      input.AmountKobo,
+				Currency:        "NGN",
+			}, nil
+		},
+	}
+	mktSvc, orderRes, _ := helperCreateOrderWithGateway(t, env, gw, 500000)
+	_, _ = mktSvc.ConfirmPayment(ctx, orderRes.Payment.Reference)
+
+	r, _, err := mktSvc.InitiateRefund(ctx, admin, orderRes.Order.ID, service.RefundOrderInput{
+		AmountKobo: 100000,
+		Reason:     "Test",
+	})
+	if err != nil {
+		t.Fatalf("InitiateRefund failed: %v", err)
+	}
+
+	// Webhook missing refund identifier (empty reference and refund_reference)
+	emptyPayload := []byte(`{
+		"event": "refund.processed",
+		"data": {
+			"reference": "",
+			"refund_reference": "",
+			"amount": 100000,
+			"currency": "NGN"
+		}
+	}`)
+
+	err = mktSvc.HandleWebhook(ctx, "valid-paystack-signature", emptyPayload)
+	if err != nil {
+		t.Fatalf("HandleWebhook with missing ref should be safely handled, got: %v", err)
+	}
+
+	// Assert existing refund remains pending
+	rCheck, _ := mktSvc.GetRefundByID(ctx, admin, r.ID)
+	if rCheck.Status != "pending" {
+		t.Errorf("expected refund to remain 'pending', got '%s'", rCheck.Status)
+	}
+}
+
+// 6. Webhook with mismatched refund identifier
+func TestMarketplaceRefund_WebhookMismatchedRefundIdentifier(t *testing.T) {
+	env := setupTestEnv(t)
+	defer env.Pool.Close()
+	ctx := context.Background()
+
+	admin := createRegisteredUser(t, env, fmt.Sprintf("admin_mismatch_%d", time.Now().UnixNano()), "super_admin")
+	gw := &mockCustomGateway{
+		providerName: "paystack",
+		refundFn: func(ctx context.Context, input payment.RefundPaymentInput) (*payment.RefundPaymentOutput, error) {
+			return &payment.RefundPaymentOutput{
+				RefundReference: "pstk_ref_real_1",
+				Status:          "pending",
+				AmountKobo:      input.AmountKobo,
+				Currency:        "NGN",
+			}, nil
+		},
+	}
+	mktSvc, orderRes, _ := helperCreateOrderWithGateway(t, env, gw, 500000)
+	_, _ = mktSvc.ConfirmPayment(ctx, orderRes.Payment.Reference)
+
+	r, _, err := mktSvc.InitiateRefund(ctx, admin, orderRes.Order.ID, service.RefundOrderInput{
+		AmountKobo: 100000,
+		Reason:     "Test",
+	})
+	if err != nil {
+		t.Fatalf("InitiateRefund failed: %v", err)
+	}
+
+	// Webhook with a reference that doesn't exist in our DB
+	unknownPayload := []byte(`{
+		"event": "refund.processed",
+		"data": {
+			"reference": "UNKNOWN_OR_FOREIGN_REF",
+			"refund_reference": "UNKNOWN_OR_FOREIGN_REF",
+			"amount": 100000,
+			"currency": "NGN"
+		}
+	}`)
+
+	err = mktSvc.HandleWebhook(ctx, "valid-paystack-signature", unknownPayload)
+	if err != nil {
+		t.Fatalf("HandleWebhook with unknown ref should be handled safely, got: %v", err)
+	}
+
+	// Assert real refund remains pending
+	rCheck, _ := mktSvc.GetRefundByID(ctx, admin, r.ID)
+	if rCheck.Status != "pending" {
+		t.Errorf("expected real refund to remain 'pending', got '%s'", rCheck.Status)
+	}
+}
+
+// 7. Incorrect refund amount
+func TestMarketplaceRefund_IncorrectRefundAmount(t *testing.T) {
+	env := setupTestEnv(t)
+	defer env.Pool.Close()
+	ctx := context.Background()
+
+	admin := createRegisteredUser(t, env, fmt.Sprintf("admin_incamt_%d", time.Now().UnixNano()), "super_admin")
+	gw := &mockCustomGateway{
+		providerName: "paystack",
+		refundFn: func(ctx context.Context, input payment.RefundPaymentInput) (*payment.RefundPaymentOutput, error) {
+			return &payment.RefundPaymentOutput{
+				RefundReference: "pstk_ref_amt_1",
+				Status:          "pending",
+				AmountKobo:      input.AmountKobo,
+				Currency:        "NGN",
+			}, nil
+		},
+	}
+	mktSvc, orderRes, _ := helperCreateOrderWithGateway(t, env, gw, 500000)
+	_, _ = mktSvc.ConfirmPayment(ctx, orderRes.Payment.Reference)
+
+	r, _, err := mktSvc.InitiateRefund(ctx, admin, orderRes.Order.ID, service.RefundOrderInput{
+		AmountKobo: 200000,
+		Reason:     "Test",
+	})
+	if err != nil {
+		t.Fatalf("InitiateRefund failed: %v", err)
+	}
+
+	// Webhook reports an incorrect amount (150,000 kobo instead of expected 200,000 kobo)
+	wrongAmtPayload := []byte(fmt.Sprintf(`{
+		"event": "refund.processed",
+		"data": {
+			"reference": "pstk_ref_amt_1",
+			"refund_reference": "pstk_ref_amt_1",
+			"transaction_reference": "%s",
+			"status": "processed",
+			"amount": 150000,
+			"currency": "NGN"
+		}
+	}`, orderRes.Payment.Reference))
+
+	err = mktSvc.HandleWebhook(ctx, "valid-paystack-signature", wrongAmtPayload)
+	if err == nil {
+		t.Fatal("expected error on mismatched webhook refund amount, got nil")
+	}
+
+	// Refund must remain pending
+	rCheck, _ := mktSvc.GetRefundByID(ctx, admin, r.ID)
+	if rCheck.Status != "pending" {
+		t.Errorf("expected refund to remain 'pending' after amount mismatch, got '%s'", rCheck.Status)
+	}
+}
+
+// 8. Pending provider status
+func TestMarketplaceRefund_PendingProviderStatus(t *testing.T) {
+	env := setupTestEnv(t)
+	defer env.Pool.Close()
+	ctx := context.Background()
+
+	admin := createRegisteredUser(t, env, fmt.Sprintf("admin_provpen_%d", time.Now().UnixNano()), "super_admin")
+	gw := &mockCustomGateway{
+		providerName: "paystack",
+		refundFn: func(ctx context.Context, input payment.RefundPaymentInput) (*payment.RefundPaymentOutput, error) {
+			return &payment.RefundPaymentOutput{
+				RefundReference: "pstk_ref_pen_1",
+				Status:          "pending",
+				AmountKobo:      input.AmountKobo,
+				Currency:        "NGN",
+			}, nil
+		},
+		verifyRefundFn: func(ctx context.Context, refundReference string) (*payment.VerifyRefundOutput, error) {
+			return &payment.VerifyRefundOutput{
+				RefundReference: refundReference,
+				Status:          "pending",
+				AmountKobo:      200000,
+				Currency:        "NGN",
+			}, nil
+		},
+	}
+	mktSvc, orderRes, _ := helperCreateOrderWithGateway(t, env, gw, 500000)
+	_, _ = mktSvc.ConfirmPayment(ctx, orderRes.Payment.Reference)
+
+	r, _, err := mktSvc.InitiateRefund(ctx, admin, orderRes.Order.ID, service.RefundOrderInput{
+		AmountKobo: 200000,
+		Reason:     "Test",
+	})
+	if err != nil {
+		t.Fatalf("InitiateRefund failed: %v", err)
+	}
+
+	// 1. Webhook reports pending/processing status
+	pendingWebhookPayload := []byte(fmt.Sprintf(`{
+		"event": "refund.processed",
+		"data": {
+			"reference": "pstk_ref_pen_1",
+			"refund_reference": "pstk_ref_pen_1",
+			"transaction_reference": "%s",
+			"status": "pending",
+			"amount": 200000,
+			"currency": "NGN"
+		}
+	}`, orderRes.Payment.Reference))
+
+	err = mktSvc.HandleWebhook(ctx, "valid-paystack-signature", pendingWebhookPayload)
+	if err != nil {
+		t.Fatalf("HandleWebhook failed: %v", err)
+	}
+
+	// Assert still pending
+	rCheck, _ := mktSvc.GetRefundByID(ctx, admin, r.ID)
+	if rCheck.Status != "pending" {
+		t.Errorf("expected refund to remain 'pending' on pending webhook, got '%s'", rCheck.Status)
+	}
+
+	// 2. Admin reconciliation checks against provider returning pending status
+	_, _, err = mktSvc.ConfirmRefund(ctx, admin, r.ID, service.ConfirmRefundInput{})
+	if err == nil {
+		t.Fatal("expected ConfirmRefund to reject pending provider status, got nil")
+	}
+
+	rCheck2, _ := mktSvc.GetRefundByID(ctx, admin, r.ID)
+	if rCheck2.Status != "pending" {
+		t.Errorf("expected refund to remain 'pending' after provider returned pending, got '%s'", rCheck2.Status)
+	}
+}
+
+// 9. Successful provider settlement
+func TestMarketplaceRefund_SuccessfulProviderSettlement(t *testing.T) {
+	env := setupTestEnv(t)
+	defer env.Pool.Close()
+	ctx := context.Background()
+
+	admin := createRegisteredUser(t, env, fmt.Sprintf("admin_provok_%d", time.Now().UnixNano()), "super_admin")
+	gw := &mockCustomGateway{
+		providerName: "paystack",
+		refundFn: func(ctx context.Context, input payment.RefundPaymentInput) (*payment.RefundPaymentOutput, error) {
+			return &payment.RefundPaymentOutput{
+				RefundReference: "pstk_ref_settled_1",
+				Status:          "pending",
+				AmountKobo:      input.AmountKobo,
+				Currency:        "NGN",
+			}, nil
+		},
+		verifyRefundFn: func(ctx context.Context, refundReference string) (*payment.VerifyRefundOutput, error) {
+			return &payment.VerifyRefundOutput{
+				RefundReference:      refundReference,
+				TransactionReference: "will_be_set_later",
+				Status:               "successful",
+				AmountKobo:           300000,
+				Currency:             "NGN",
+			}, nil
+		},
+	}
+	mktSvc, orderRes, _ := helperCreateOrderWithGateway(t, env, gw, 600000)
+	_, _ = mktSvc.ConfirmPayment(ctx, orderRes.Payment.Reference)
+
+	// Set matching transaction ref in mock
+	gw.verifyRefundFn = func(ctx context.Context, refundReference string) (*payment.VerifyRefundOutput, error) {
+		return &payment.VerifyRefundOutput{
+			RefundReference:      refundReference,
+			TransactionReference: orderRes.Payment.Reference,
+			Status:               "successful",
+			AmountKobo:           300000,
+			Currency:             "NGN",
+		}, nil
+	}
+
+	r, _, err := mktSvc.InitiateRefund(ctx, admin, orderRes.Order.ID, service.RefundOrderInput{
+		AmountKobo: 300000,
+		Reason:     "Goodwill",
+	})
+	if err != nil {
+		t.Fatalf("InitiateRefund failed: %v", err)
+	}
+
+	confirmedR, order, err := mktSvc.ConfirmRefund(ctx, admin, r.ID, service.ConfirmRefundInput{})
+	if err != nil {
+		t.Fatalf("ConfirmRefund failed: %v", err)
+	}
+	if confirmedR.Status != "successful" {
+		t.Errorf("expected confirmed refund status 'successful', got '%s'", confirmedR.Status)
+	}
+	if order.PaymentStatus != "partially_refunded" {
+		t.Errorf("expected order payment status 'partially_refunded', got '%s'", order.PaymentStatus)
+	}
+}
+
+// 10. Duplicate and out-of-order webhook delivery
+func TestMarketplaceRefund_DuplicateAndOutOfOrderWebhookDelivery(t *testing.T) {
+	env := setupTestEnv(t)
+	defer env.Pool.Close()
+	ctx := context.Background()
+
+	admin := createRegisteredUser(t, env, fmt.Sprintf("admin_dupout_%d", time.Now().UnixNano()), "super_admin")
+	gw := &mockCustomGateway{
+		providerName: "paystack",
+		refundFn: func(ctx context.Context, input payment.RefundPaymentInput) (*payment.RefundPaymentOutput, error) {
+			return &payment.RefundPaymentOutput{
+				RefundReference: "pstk_ref_dup_order_1",
+				Status:          "pending",
+				AmountKobo:      input.AmountKobo,
+				Currency:        "NGN",
+			}, nil
+		},
+	}
+	mktSvc, orderRes, _ := helperCreateOrderWithGateway(t, env, gw, 400000)
+	_, _ = mktSvc.ConfirmPayment(ctx, orderRes.Payment.Reference)
+
+	r, _, err := mktSvc.InitiateRefund(ctx, admin, orderRes.Order.ID, service.RefundOrderInput{
+		AmountKobo: 400000,
+		Reason:     "Return",
+	})
+	if err != nil {
+		t.Fatalf("InitiateRefund failed: %v", err)
+	}
+
+	successPayload := []byte(fmt.Sprintf(`{
+		"event": "refund.processed",
+		"data": {
+			"reference": "pstk_ref_dup_order_1",
+			"refund_reference": "pstk_ref_dup_order_1",
+			"transaction_reference": "%s",
+			"status": "processed",
+			"amount": 400000,
+			"currency": "NGN"
+		}
+	}`, orderRes.Payment.Reference))
+
+	// 1. Initial success delivery
+	err = mktSvc.HandleWebhook(ctx, "valid-paystack-signature", successPayload)
+	if err != nil {
+		t.Fatalf("HandleWebhook initial success failed: %v", err)
+	}
+	rCheck, _ := mktSvc.GetRefundByID(ctx, admin, r.ID)
+	if rCheck.Status != "successful" {
+		t.Fatalf("expected refund status 'successful', got '%s'", rCheck.Status)
+	}
+
+	// 2. Duplicate success delivery: must be idempotent no-op
+	err = mktSvc.HandleWebhook(ctx, "valid-paystack-signature", successPayload)
+	if err != nil {
+		t.Fatalf("HandleWebhook duplicate success failed: %v", err)
+	}
+	rCheck2, _ := mktSvc.GetRefundByID(ctx, admin, r.ID)
+	if rCheck2.Status != "successful" {
+		t.Errorf("expected refund to remain 'successful', got '%s'", rCheck2.Status)
+	}
+
+	// 3. Out-of-order failed webhook delivery: successful refund must NEVER be downgraded
+	failedPayload := []byte(fmt.Sprintf(`{
+		"event": "refund.failed",
+		"data": {
+			"reference": "pstk_ref_dup_order_1",
+			"refund_reference": "pstk_ref_dup_order_1",
+			"transaction_reference": "%s",
+			"status": "failed",
+			"amount": 400000,
+			"currency": "NGN"
+		}
+	}`, orderRes.Payment.Reference))
+
+	err = mktSvc.HandleWebhook(ctx, "valid-paystack-signature", failedPayload)
+	if err != nil {
+		t.Fatalf("HandleWebhook out-of-order failure should be safely ignored, got: %v", err)
+	}
+
+	rCheck3, _ := mktSvc.GetRefundByID(ctx, admin, r.ID)
+	if rCheck3.Status != "successful" {
+		t.Errorf("successful refund was downgraded to '%s'!", rCheck3.Status)
+	}
+}
+
+// 11. Unauthorized settlement attempts
+func TestMarketplaceRefund_UnauthorizedSettlementAttempts(t *testing.T) {
+	env := setupTestEnv(t)
+	defer env.Pool.Close()
+	ctx := context.Background()
+
+	member := createRegisteredUser(t, env, fmt.Sprintf("member_auth_%d", time.Now().UnixNano()), "member")
+	admin := createRegisteredUser(t, env, fmt.Sprintf("admin_auth_%d", time.Now().UnixNano()), "national_admin") // Not super_admin
+	superAdmin := createRegisteredUser(t, env, fmt.Sprintf("superadmin_auth_%d", time.Now().UnixNano()), "super_admin")
+
+	gw := &mockCustomGateway{
+		providerName: "manual",
+	}
+	mktSvc, orderRes, _ := helperCreateOrderWithGateway(t, env, gw, 200000)
+	_, _ = mktSvc.ConfirmPayment(ctx, orderRes.Payment.Reference)
+
+	r, _, err := mktSvc.InitiateRefund(ctx, superAdmin, orderRes.Order.ID, service.RefundOrderInput{
+		AmountKobo: 200000,
+		Reason:     "Offline cash refund",
+	})
+	if err != nil {
+		t.Fatalf("InitiateRefund failed: %v", err)
+	}
+
+	// 1. Regular member attempts manual settlement
+	_, _, err = mktSvc.ManualSettleRefund(ctx, member, r.ID, service.ManualSettlementInput{
+		Evidence: "Receipt 123",
+		Reason:   "Offline cash return",
+	})
+	if err == nil {
+		t.Fatal("expected unauthorized error for non-admin user, got nil")
+	}
+
+	// 2. Non-super_admin admin attempts manual settlement
+	_, _, err = mktSvc.ManualSettleRefund(ctx, admin, r.ID, service.ManualSettlementInput{
+		Evidence: "Receipt 123",
+		Reason:   "Offline cash return",
+	})
+	if err == nil {
+		t.Fatal("expected unauthorized error for non-super_admin, got nil")
+	}
+
+	// 3. Super Admin missing evidence
+	_, _, err = mktSvc.ManualSettleRefund(ctx, superAdmin, r.ID, service.ManualSettlementInput{
+		Evidence: "",
+		Reason:   "Offline cash return",
+	})
+	if err == nil {
+		t.Fatal("expected error when settlement evidence is empty, got nil")
+	}
+
+	// 4. Super Admin missing reason
+	_, _, err = mktSvc.ManualSettleRefund(ctx, superAdmin, r.ID, service.ManualSettlementInput{
+		Evidence: "Receipt 123",
+		Reason:   "",
+	})
+	if err == nil {
+		t.Fatal("expected error when settlement reason is empty, got nil")
+	}
+
+	// 5. Authorized Super Admin with valid evidence and reason succeeds
+	settledRefund, _, err := mktSvc.ManualSettleRefund(ctx, superAdmin, r.ID, service.ManualSettlementInput{
+		Evidence: "BANK_TRANSFER_SLIP_#998822",
+		Reason:   "Customer refunded via branch office cash transfer",
+		Notes:    "Authorized at Kaduna branch",
+	})
+	if err != nil {
+		t.Fatalf("ManualSettleRefund failed: %v", err)
+	}
+	if settledRefund.Status != "successful" {
+		t.Errorf("expected settled refund status 'successful', got '%s'", settledRefund.Status)
+	}
+}
+
+// 12. Stock restoration idempotency
+func TestMarketplaceRefund_StockRestorationIdempotency(t *testing.T) {
+	env := setupTestEnv(t)
+	defer env.Pool.Close()
+	ctx := context.Background()
+
+	admin := createRegisteredUser(t, env, fmt.Sprintf("admin_stock_%d", time.Now().UnixNano()), "super_admin")
+	gw := &mockCustomGateway{
+		providerName: "paystack",
+		refundFn: func(ctx context.Context, input payment.RefundPaymentInput) (*payment.RefundPaymentOutput, error) {
+			return &payment.RefundPaymentOutput{
+				RefundReference: "pstk_ref_stock_idem_1",
+				Status:          "pending",
+				AmountKobo:      input.AmountKobo,
+				Currency:        "NGN",
+			}, nil
+		},
+	}
+	// Initial stock is 100 in helperCreateOrderWithGateway, order purchases 1 item, so stock becomes 99
+	mktSvc, orderRes, _ := helperCreateOrderWithGateway(t, env, gw, 300000)
+	_, err := mktSvc.ConfirmPayment(ctx, orderRes.Payment.Reference)
+	if err != nil {
+		t.Fatalf("ConfirmPayment failed: %v", err)
+	}
+
+	productID := orderRes.Items[0].ProductID.String
+	pBefore, _ := mktSvc.GetProductByID(ctx, productID)
+	if pBefore.StockQuantity != 99 {
+		t.Fatalf("expected stock to be 99 after order creation, got %d", pBefore.StockQuantity)
+	}
+
+	_, _, err = mktSvc.InitiateRefund(ctx, admin, orderRes.Order.ID, service.RefundOrderInput{
+		AmountKobo: 300000,
+		Reason:     "Full return",
+	})
+	if err != nil {
+		t.Fatalf("InitiateRefund failed: %v", err)
+	}
+
+	successPayload := []byte(fmt.Sprintf(`{
+		"event": "refund.processed",
+		"data": {
+			"reference": "pstk_ref_stock_idem_1",
+			"refund_reference": "pstk_ref_stock_idem_1",
+			"transaction_reference": "%s",
+			"status": "processed",
+			"amount": 300000,
+			"currency": "NGN"
+		}
+	}`, orderRes.Payment.Reference))
+
+	// 1. Process full refund webhook
+	err = mktSvc.HandleWebhook(ctx, "valid-paystack-signature", successPayload)
+	if err != nil {
+		t.Fatalf("HandleWebhook failed: %v", err)
+	}
+
+	// Stock restored from 99 to 100
+	pAfter1, _ := mktSvc.GetProductByID(ctx, productID)
+	if pAfter1.StockQuantity != 100 {
+		t.Errorf("expected stock to be restored to 100, got %d", pAfter1.StockQuantity)
+	}
+
+	// 2. Deliver webhook a second time: stock must NOT be restored again
+	err = mktSvc.HandleWebhook(ctx, "valid-paystack-signature", successPayload)
+	if err != nil {
+		t.Fatalf("HandleWebhook duplicate delivery failed: %v", err)
+	}
+
+	pAfter2, _ := mktSvc.GetProductByID(ctx, productID)
+	if pAfter2.StockQuantity != 100 {
+		t.Errorf("stock was duplicated! Expected 100, got %d", pAfter2.StockQuantity)
 	}
 }

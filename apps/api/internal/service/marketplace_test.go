@@ -919,14 +919,21 @@ func TestMarketplaceService_AdminRefundAndOverpaymentRejection(t *testing.T) {
 		t.Fatal("Expected error when refund amount exceeds total order amount, got nil")
 	}
 
-	// 2. Partial refund processed via authorized manual settlement (300,000 kobo of 1,000,000 kobo)
-	refund1, partialOrder, err := env.MarketplaceService.InitiateRefund(ctx, admin, orderRes.Order.ID, service.RefundOrderInput{
-		AmountKobo:       300000,
-		Reason:           "Partial goodwill concession",
-		ManualSettlement: true,
+	// 2. Partial refund processed via provider confirmation (300,000 kobo of 1,000,000 kobo)
+	refInit1, _, err := env.MarketplaceService.InitiateRefund(ctx, admin, orderRes.Order.ID, service.RefundOrderInput{
+		AmountKobo: 300000,
+		Reason:     "Partial goodwill concession",
 	})
 	if err != nil {
 		t.Fatalf("InitiateRefund (partial) failed: %v", err)
+	}
+	if refInit1.Status != "pending" {
+		t.Errorf("Expected initial refund status 'pending', got %s", refInit1.Status)
+	}
+
+	refund1, partialOrder, err := env.MarketplaceService.ConfirmRefund(ctx, admin, refInit1.ID, service.ConfirmRefundInput{})
+	if err != nil {
+		t.Fatalf("ConfirmRefund (partial) failed: %v", err)
 	}
 	if refund1.Status != "successful" {
 		t.Errorf("Expected refund status 'successful', got %s", refund1.Status)
@@ -935,14 +942,18 @@ func TestMarketplaceService_AdminRefundAndOverpaymentRejection(t *testing.T) {
 		t.Errorf("Expected payment_status 'partially_refunded', got %s", partialOrder.PaymentStatus)
 	}
 
-	// 3. Full refund processed via authorized manual settlement
-	refund2, refundedOrder, err := env.MarketplaceService.InitiateRefund(ctx, admin, orderRes.Order.ID, service.RefundOrderInput{
-		AmountKobo:       1000000,
-		Reason:           "Defective batch recalled",
-		ManualSettlement: true,
+	// 3. Full refund processed via provider confirmation
+	refInit2, _, err := env.MarketplaceService.InitiateRefund(ctx, admin, orderRes.Order.ID, service.RefundOrderInput{
+		AmountKobo: 1000000,
+		Reason:     "Defective batch recalled",
 	})
 	if err != nil {
 		t.Fatalf("InitiateRefund failed: %v", err)
+	}
+
+	refund2, refundedOrder, err := env.MarketplaceService.ConfirmRefund(ctx, admin, refInit2.ID, service.ConfirmRefundInput{})
+	if err != nil {
+		t.Fatalf("ConfirmRefund failed: %v", err)
 	}
 	if refund2.Status != "successful" {
 		t.Errorf("Expected refund status 'successful', got %s", refund2.Status)

@@ -1018,3 +1018,29 @@ func (h *MarketplaceHandler) AdminConfirmRefund(w http.ResponseWriter, r *http.R
 		"order":  order,
 	})
 }
+
+func (h *MarketplaceHandler) AdminManualSettleRefund(w http.ResponseWriter, r *http.Request) {
+	admin := GetCurrentUser(r.Context())
+	refundID := chi.URLParam(r, "refundId")
+
+	var req service.ManualSettlementInput
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		ErrorJSON(w, http.StatusBadRequest, "INVALID_REQUEST", "Malformed JSON payload", nil)
+		return
+	}
+
+	refund, order, err := h.marketplaceService.ManualSettleRefund(r.Context(), admin, refundID, req)
+	if err != nil {
+		if strings.Contains(strings.ToLower(err.Error()), "unauthorized") {
+			ErrorJSON(w, http.StatusForbidden, "UNAUTHORIZED", err.Error(), nil)
+			return
+		}
+		ErrorJSON(w, http.StatusBadRequest, "SETTLEMENT_FAILED", err.Error(), nil)
+		return
+	}
+	JSON(w, http.StatusOK, map[string]interface{}{
+		"status": "refund_settled",
+		"refund": refund,
+		"order":  order,
+	})
+}

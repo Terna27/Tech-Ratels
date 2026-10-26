@@ -105,3 +105,27 @@ func (s *SandboxGateway) RefundPayment(ctx context.Context, input RefundPaymentI
 		RawResponse:     []byte(`{"status":true,"message":"Refund queued in sandbox"}`),
 	}, nil
 }
+
+func (s *SandboxGateway) VerifyRefund(ctx context.Context, refundReference string) (*VerifyRefundOutput, error) {
+	lowerRef := strings.ToLower(refundReference)
+	if strings.Contains(lowerRef, "fail") {
+		return &VerifyRefundOutput{
+			RefundReference: refundReference,
+			Status:          "failed",
+			RawResponse:     []byte(`{"status":"failed","message":"Simulated sandbox refund failure"}`),
+		}, nil
+	}
+	if strings.Contains(lowerRef, "pending") || strings.Contains(lowerRef, "processing") {
+		return &VerifyRefundOutput{
+			RefundReference: refundReference,
+			Status:          "pending",
+			RawResponse:     []byte(`{"status":"pending","message":"Simulated sandbox refund pending"}`),
+		}, nil
+	}
+
+	return &VerifyRefundOutput{
+		RefundReference: refundReference,
+		Status:          "successful",
+		RawResponse:     []byte(`{"status":"processed","message":"Simulated sandbox refund processed successfully"}`),
+	}, nil
+}

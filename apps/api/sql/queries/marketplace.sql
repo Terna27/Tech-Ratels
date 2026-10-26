@@ -602,7 +602,7 @@ WHERE order_id = $1
 ORDER BY created_at DESC;
 
 -- name: GetMarketplaceRefundSumsByOrder :one
-SELECT 
+SELECT
     COALESCE(SUM(CASE WHEN status = 'successful' THEN amount_kobo ELSE 0 END), 0)::bigint AS successful_amount_kobo,
     COALESCE(SUM(CASE WHEN status = 'pending' THEN amount_kobo ELSE 0 END), 0)::bigint AS pending_amount_kobo
 FROM marketplace_refunds

@@ -6,6 +6,7 @@ import (
 	"crypto/sha512"
 	"encoding/hex"
 	"errors"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -346,3 +347,124 @@ func TestPaystackGateway_RefundPayment_ValidationAndUnconfigured(t *testing.T) {
 	}
 }
 
+func TestPaystackGateway_VerifyRefund_Success(t *testing.T) {
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Header.Get("Authorization") != "Bearer sk_test_secret" {
+			w.WriteHeader(http.StatusUnauthorized)
+			return
+		}
+		if r.URL.Path != "/refund/REFUND_123" {
+			w.WriteHeader(http.StatusNotFound)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(`{
+			"status": true,
+			"message": "Refund retrieved",
+			"data": {
+				"status": "processed",
+				"reference": "REFUND_123",
+				"refund_reference": "REFUND_123",
+				"transaction_reference": "TXN_ORIG_456",
+				"amount": 75000,
+				"currency": "NGN"
+			}
+		}`))
+	}))
+	defer ts.Close()
+
+	gw := NewPaystackGateway("sk_test_secret", "pk_test")
+	gw.SetBaseURL(ts.URL)
+
+	out, err := gw.VerifyRefund(context.Background(), "REFUND_123")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if out.Status != "successful" {
+		t.Errorf("expected status 'successful', got %s", out.Status)
+	}
+	if out.RefundReference != "REFUND_123" {
+		t.Errorf("expected refund ref 'REFUND_123', got %s", out.RefundReference)
+	}
+	if out.TransactionReference != "TXN_ORIG_456" {
+		t.Errorf("expected txn ref 'TXN_ORIG_456', got %s", out.TransactionReference)
+	}
+	if out.AmountKobo != 75000 {
+		t.Errorf("expected amount 75000, got %d", out.AmountKobo)
+	}
+	if out.Currency != "NGN" {
+		t.Errorf("expected currency 'NGN', got %s", out.Currency)
+	}
+}
+
+func TestPaystackGateway_VerifyRefund_PendingAndFailed(t *testing.T) {
+	tests := []struct {
+		name           string
+		providerStatus string
+		expectedStatus string
+	}{
+		{name: "pending", providerStatus: "pending", expectedStatus: "pending"},
+		{name: "processing", providerStatus: "processing", expectedStatus: "pending"},
+		{name: "failed", providerStatus: "failed", expectedStatus: "failed"},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				w.Header().Set("Content-Type", "application/json")
+				w.WriteHeader(http.StatusOK)
+				_, _ = w.Write([]byte(fmt.Sprintf(`{
+					"status": true,
+					"message": "Refund status",
+					"data": {
+						"status": "%s",
+						"reference": "REF_TEST",
+						"amount": 5000
+					}
+				}`, tc.providerStatus)))
+			}))
+			defer ts.Close()
+
+			gw := NewPaystackGateway("sk_test", "pk_test")
+			gw.SetBaseURL(ts.URL)
+
+			out, err := gw.VerifyRefund(context.Background(), "REF_TEST")
+			if err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
+			if out.Status != tc.expectedStatus {
+				t.Errorf("expected status '%s', got '%s'", tc.expectedStatus, out.Status)
+			}
+		})
+	}
+}
+
+func TestPaystackGateway_VerifyRefund_ErrorsAndValidation(t *testing.T) {
+	// Unconfigured
+	unconf := NewPaystackGateway("", "")
+	_, err := unconf.VerifyRefund(context.Background(), "REF1")
+	if !errors.Is(err, ErrUnconfiguredProvider) {
+		t.Fatalf("expected ErrUnconfiguredProvider, got %v", err)
+	}
+
+	// Empty reference
+	gw := NewPaystackGateway("sk_test", "pk_test")
+	_, err = gw.VerifyRefund(context.Background(), "")
+	if err == nil {
+		t.Fatal("expected error for empty reference, got nil")
+	}
+
+	// HTTP 404
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusNotFound)
+		_, _ = w.Write([]byte(`{"status": false, "message": "Refund not found"}`))
+	}))
+	defer ts.Close()
+
+	gw.SetBaseURL(ts.URL)
+	_, err = gw.VerifyRefund(context.Background(), "REF_NOT_FOUND")
+	if err == nil {
+		t.Fatal("expected error for 404 response, got nil")
+	}
+}

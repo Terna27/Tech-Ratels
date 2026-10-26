@@ -37,3 +37,7 @@ func (u *UnconfiguredGateway) VerifyWebhookSignature(signatureHeader string, bod
 func (u *UnconfiguredGateway) RefundPayment(ctx context.Context, input RefundPaymentInput) (*RefundPaymentOutput, error) {
 	return nil, ErrPaymentProcessingUnavailable
 }
+
+func (u *UnconfiguredGateway) VerifyRefund(ctx context.Context, refundReference string) (*VerifyRefundOutput, error) {
+	return nil, ErrPaymentProcessingUnavailable
+}

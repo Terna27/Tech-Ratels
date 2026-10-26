@@ -1674,7 +1674,7 @@ func (q *Queries) GetMarketplaceRefundByProviderReferenceForUpdate(ctx context.C
 }
 
 const getMarketplaceRefundSumsByOrder = `-- name: GetMarketplaceRefundSumsByOrder :one
-SELECT 
+SELECT
     COALESCE(SUM(CASE WHEN status = 'successful' THEN amount_kobo ELSE 0 END), 0)::bigint AS successful_amount_kobo,
     COALESCE(SUM(CASE WHEN status = 'pending' THEN amount_kobo ELSE 0 END), 0)::bigint AS pending_amount_kobo
 FROM marketplace_refunds

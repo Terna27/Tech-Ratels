@@ -11,6 +11,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/url"
 	"strings"
 	"time"
 )
@@ -313,5 +314,82 @@ func (p *PaystackGateway) RefundPayment(ctx context.Context, input RefundPayment
 		AmountKobo:      psResp.Data.Amount,
 		Currency:        psResp.Data.Currency,
 		RawResponse:     bodyBytes,
+	}, nil
+}
+
+func (p *PaystackGateway) VerifyRefund(ctx context.Context, refundReference string) (*VerifyRefundOutput, error) {
+	if p.secretKey == "" {
+		return nil, ErrUnconfiguredProvider
+	}
+	ref := strings.TrimSpace(refundReference)
+	if ref == "" {
+		return nil, errors.New("refund reference is required for verification")
+	}
+
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, p.baseURL+"/refund/"+url.PathEscape(ref), nil)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create paystack refund verification request: %w", err)
+	}
+
+	req.Header.Set("Authorization", "Bearer "+p.secretKey)
+
+	resp, err := p.httpClient.Do(req)
+	if err != nil {
+		return nil, fmt.Errorf("paystack refund verification request failed: %w", err)
+	}
+	defer resp.Body.Close()
+
+	bodyBytes, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return nil, fmt.Errorf("failed to read paystack refund verification response: %w", err)
+	}
+
+	if resp.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("paystack refund verification returned unexpected HTTP status %d: %s", resp.StatusCode, string(bodyBytes))
+	}
+
+	var psResp struct {
+		Status  bool   `json:"status"`
+		Message string `json:"message"`
+		Data    struct {
+			Status               string `json:"status"` // "processed", "processing", "pending", "failed"
+			Reference            string `json:"reference"`
+			RefundReference      string `json:"refund_reference"`
+			TransactionReference string `json:"transaction_reference"`
+			Amount               int64  `json:"amount"`
+			Currency             string `json:"currency"`
+		} `json:"data"`
+	}
+
+	if err := json.Unmarshal(bodyBytes, &psResp); err != nil {
+		return nil, fmt.Errorf("%w: failed to parse refund verification response: %v", ErrMalformedResponse, err)
+	}
+
+	if !psResp.Status {
+		return nil, fmt.Errorf("paystack refund verification error: %s", psResp.Message)
+	}
+
+	retRef := psResp.Data.RefundReference
+	if retRef == "" {
+		retRef = psResp.Data.Reference
+	}
+
+	status := "pending"
+	switch psResp.Data.Status {
+	case "processed", "success", "successful":
+		status = "successful"
+	case "failed":
+		status = "failed"
+	default:
+		status = "pending"
+	}
+
+	return &VerifyRefundOutput{
+		RefundReference:      retRef,
+		TransactionReference: psResp.Data.TransactionReference,
+		Status:               status,
+		AmountKobo:           psResp.Data.Amount,
+		Currency:             psResp.Data.Currency,
+		RawResponse:          bodyBytes,
 	}, nil
 }
