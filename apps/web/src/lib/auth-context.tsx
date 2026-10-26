@@ -47,11 +47,30 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const logout = async () => {
     try {
       await apiRequest("/auth/logout", { method: "POST" });
-    } catch {
-      // Ignore network errors on logout
-    } finally {
-      clearCsrfToken();
-      setUser(null);
+    } catch (err: any) {
+      // If the session was already terminated (401 Unauthorized), proceed with local cleanup
+      const is401 =
+        err?.status === 401 ||
+        String(err?.message || "").includes("401") ||
+        String(err?.message || "").toLowerCase().includes("unauthorized");
+
+      if (!is401) {
+        // Secure error handling: do not silently treat an unconfirmed server-side logout as successful
+        // when the HttpOnly session cookie might still remain valid on the client.
+        console.error("Server-side logout request failed:", err);
+        throw new Error(
+          err?.message || "Server logout could not be confirmed. Session remains active."
+        );
+      }
+    }
+
+    // Confirmed server-side logout: purge local credentials and state
+    clearCsrfToken();
+    setUser(null);
+
+    // Global redirect to homepage regardless of user's current route
+    if (typeof window !== "undefined") {
+      window.location.href = "/";
     }
   };
 

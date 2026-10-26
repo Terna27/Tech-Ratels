@@ -14,9 +14,12 @@ import {
   Store,
 } from "lucide-react";
 import { useCart } from "@/lib/cart-context";
+import { useAuth } from "@/lib/auth-context";
 import { resolveImageUrl } from "@/lib/types";
+import { Spinner } from "@/components/ui/Spinner";
 
 export default function CartPage() {
+  const { user, isLoading: authLoading } = useAuth();
   const { items, updateQuantity, removeFromCart, clearCart, subtotalKobo, totalItems } = useCart();
 
   const deliveryFeeKobo = items.length > 0 ? 150000 : 0; // ₦1,500 flat standard
@@ -26,6 +29,38 @@ export default function CartPage() {
     const naira = kobo / 100;
     return `₦${naira.toLocaleString("en-NG", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
   };
+
+  if (authLoading) {
+    return (
+      <div className="min-h-screen bg-gray-50 py-16 flex items-center justify-center">
+        <Spinner text="Loading cart..." />
+      </div>
+    );
+  }
+
+  if (!user) {
+    return (
+      <div className="min-h-screen bg-gray-50 py-16">
+        <div className="max-w-md mx-auto px-4 text-center space-y-4">
+          <div className="w-16 h-16 rounded-full bg-emerald-50 text-emerald-800 flex items-center justify-center mx-auto">
+            <ShoppingBag className="w-8 h-8" />
+          </div>
+          <h2 className="text-xl font-bold text-gray-900">Sign In Required</h2>
+          <p className="text-xs text-gray-500 leading-relaxed">
+            Please sign in to your Ratels account to access your shopping cart, manage items, and proceed to checkout.
+          </p>
+          <div className="pt-2">
+            <Link
+              href="/login?redirect=/marketplace/cart"
+              className="inline-flex items-center gap-2 px-5 py-2.5 rounded-xl text-xs font-bold bg-emerald-900 hover:bg-emerald-950 text-white transition shadow-sm"
+            >
+              Sign In to View Cart
+            </Link>
+          </div>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="min-h-screen bg-gray-50 py-10">

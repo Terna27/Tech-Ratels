@@ -244,9 +244,13 @@ export function Header({
                     <div className="pt-1 border-t border-gray-100">
                       <button
                         type="button"
-                        onClick={() => {
+                        onClick={async () => {
                           setUserMenuOpen(false);
-                          logout();
+                          try {
+                            await logout();
+                          } catch (err: any) {
+                            alert("Sign out failed: " + (err?.message || "Please check your network connection."));
+                          }
                         }}
                         className="flex items-center gap-2.5 w-full text-left px-4 py-2 text-xs font-semibold text-rose-700 hover:bg-rose-50"
                         role="menuitem"

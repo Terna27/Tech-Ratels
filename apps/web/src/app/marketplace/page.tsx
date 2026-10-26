@@ -2,6 +2,7 @@
 
 import React, { useEffect, useState } from "react";
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import {
   Search,
   Store,
@@ -37,6 +38,7 @@ const CATEGORIES = [
 ];
 
 export default function MarketplaceStorefrontPage() {
+  const router = useRouter();
   const { user } = useAuth();
   const { addToCart } = useCart();
 
@@ -78,6 +80,11 @@ export default function MarketplaceStorefrontPage() {
     e.preventDefault();
     e.stopPropagation();
 
+    if (!user) {
+      router.push(`/login?redirect=${encodeURIComponent("/marketplace")}`);
+      return;
+    }
+
     const pImages = parseProductImages(p.images);
     const img = pImages.length > 0 ? pImages[0] : "";
 
@@ -101,7 +108,7 @@ export default function MarketplaceStorefrontPage() {
   };
 
   return (
-    <div className="min-h-screen bg-gray-50 pb-16">
+    <div className="min-h-screen bg-gray-50 pb-16 overflow-x-hidden">
       {/* Toast Notification when item added */}
       {addedPopup && (
         <div className="fixed bottom-6 right-6 z-50 bg-emerald-900 text-white px-5 py-3 rounded-xl shadow-lg flex items-center gap-3 animate-fade-in border border-emerald-700">
@@ -121,7 +128,7 @@ export default function MarketplaceStorefrontPage() {
       {/* Hero Header */}
       <div className="bg-emerald-950 text-white border-b border-emerald-900">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-10 sm:py-14">
-          <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-6">
+          <div className="flex flex-col lg:flex-row justify-between items-start lg:items-center gap-6">
             <div className="space-y-3 max-w-2xl">
               <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full text-xs font-bold tracking-wide uppercase bg-emerald-900/80 text-emerald-300 border border-emerald-800">
                 <Store className="w-3.5 h-3.5" />
@@ -197,20 +204,22 @@ export default function MarketplaceStorefrontPage() {
           </form>
 
           {/* Category Chips Scroll */}
-          <div className="flex items-center gap-2 overflow-x-auto pb-2 scrollbar-none">
-            {CATEGORIES.map((cat) => (
-              <button
-                key={cat.id}
-                onClick={() => setSelectedCategory(cat.id)}
-                className={`px-4 py-2 rounded-full text-xs font-semibold whitespace-nowrap transition border ${
-                  selectedCategory === cat.id
-                    ? "bg-emerald-900 text-white border-emerald-900 shadow-sm"
-                    : "bg-white text-gray-700 border-gray-200 hover:border-gray-300 hover:bg-gray-50"
-                }`}
-              >
-                {cat.label}
-              </button>
-            ))}
+          <div className="w-full max-w-full overflow-x-auto pb-2 scrollbar-none min-w-0">
+            <div className="flex items-center gap-2 min-w-max">
+              {CATEGORIES.map((cat) => (
+                <button
+                  key={cat.id}
+                  onClick={() => setSelectedCategory(cat.id)}
+                  className={`px-4 py-2 rounded-full text-xs font-semibold whitespace-nowrap transition border ${
+                    selectedCategory === cat.id
+                      ? "bg-emerald-900 text-white border-emerald-900 shadow-sm"
+                      : "bg-white text-gray-700 border-gray-200 hover:border-gray-300 hover:bg-gray-50"
+                  }`}
+                >
+                  {cat.label}
+                </button>
+              ))}
+            </div>
           </div>
         </div>
 
@@ -239,7 +248,7 @@ export default function MarketplaceStorefrontPage() {
             </div>
           </div>
         ) : (
-          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-6">
+          <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4 sm:gap-5">
             {products.map((product) => {
               const inStock = product.stock_quantity > 0;
               const prodImages = parseProductImages(product.images);
@@ -249,92 +258,92 @@ export default function MarketplaceStorefrontPage() {
                 <Link
                   key={product.id}
                   href={`/marketplace/products/${product.id}`}
-                  className="bg-white rounded-2xl border border-gray-200 overflow-hidden shadow-sm hover:shadow-md hover:border-emerald-500 transition group flex flex-col"
+                  className="bg-white rounded-xl border border-gray-200 overflow-hidden shadow-xs hover:shadow-md hover:border-emerald-600 transition group flex flex-col justify-between"
                 >
-                  {/* Image Container */}
-                  <div className="aspect-square bg-gray-100 relative overflow-hidden flex items-center justify-center">
-                    {firstImage ? (
-                      <img
-                        src={firstImage}
-                        alt={product.title}
-                        className="w-full h-full object-cover group-hover:scale-105 transition duration-300"
-                        onError={(e) => {
-                          (e.target as HTMLElement).style.display = "none";
-                        }}
-                      />
-                    ) : (
-                      <div className="flex flex-col items-center gap-2 text-gray-400">
-                        <Package className="w-12 h-12" />
-                        <span className="text-[10px] uppercase font-bold tracking-wider">Ratels Supply</span>
+                  <div>
+                    {/* Card Header: Category & Stock Status */}
+                    <div className="px-3 pt-2.5 pb-2 flex items-center justify-between gap-1.5 bg-white">
+                      <span className="bg-emerald-50 text-emerald-900 border border-emerald-100 text-[10px] font-bold uppercase tracking-wider px-2 py-0.5 rounded-md truncate max-w-[60%]">
+                        {product.category.replace(/_/g, " ")}
+                      </span>
+                      <div className="shrink-0">
+                        {inStock ? (
+                          <Badge variant="success" size="sm">
+                            {product.stock_quantity <= product.low_stock_threshold
+                              ? `${product.stock_quantity} left`
+                              : "In Stock"}
+                          </Badge>
+                        ) : (
+                          <Badge variant="danger" size="sm">Out of Stock</Badge>
+                        )}
                       </div>
-                    )}
+                    </div>
 
-                    {/* Category Pill */}
-                    <span className="absolute top-3 left-3 bg-white/95 backdrop-blur-sm text-gray-800 text-[10px] font-bold uppercase tracking-wider px-2.5 py-1 rounded-full shadow-sm">
-                      {product.category.replace(/_/g, " ")}
-                    </span>
-
-                    {/* Stock Status Badge */}
-                    <div className="absolute top-3 right-3">
-                      {inStock ? (
-                        <Badge variant="success" size="sm">
-                          {product.stock_quantity <= product.low_stock_threshold
-                            ? `Only ${product.stock_quantity} Left`
-                            : "In Stock"}
-                        </Badge>
+                    {/* Compact Image Container: Reduced ~70% from ~280px to h-24/h-28 (~80-100px, ~30% linear dimensions) */}
+                    <div className="h-24 sm:h-28 w-full bg-gray-50/80 flex items-center justify-center p-2 relative overflow-hidden border-y border-gray-100">
+                      {firstImage ? (
+                        <img
+                          src={firstImage}
+                          alt={product.title}
+                          className="max-h-full max-w-full object-contain group-hover:scale-105 transition duration-300"
+                          onError={(e) => {
+                            (e.target as HTMLElement).style.display = "none";
+                          }}
+                        />
                       ) : (
-                        <Badge variant="danger" size="sm">Out of Stock</Badge>
+                        <div className="flex flex-col items-center gap-1 text-gray-400">
+                          <Package className="w-7 h-7" />
+                          <span className="text-[9px] uppercase font-bold tracking-wider">Ratels Supply</span>
+                        </div>
+                      )}
+                    </div>
+
+                    {/* Content */}
+                    <div className="p-3 space-y-1.5">
+                      {product.business_name && (
+                        <div className="text-[11px] font-semibold text-emerald-800 flex items-center gap-1">
+                          <Store className="w-3 h-3 shrink-0" />
+                          <span className="truncate">{product.business_name}</span>
+                        </div>
+                      )}
+                      <h3 className="font-bold text-gray-900 text-xs sm:text-sm line-clamp-2 leading-snug group-hover:text-emerald-900 transition min-h-[2.25rem]">
+                        {product.title}
+                      </h3>
+                      {product.branch_state_name && (
+                        <div className="text-[10px] text-gray-500 flex items-center gap-1">
+                          <MapPin className="w-3 h-3 text-gray-400 shrink-0" />
+                          <span className="truncate">{product.branch_state_name}</span>
+                        </div>
                       )}
                     </div>
                   </div>
 
-                  {/* Content */}
-                  <div className="p-4 flex-1 flex flex-col justify-between space-y-3">
-                    <div className="space-y-1">
-                      {product.business_name && (
-                        <div className="text-[11px] font-semibold text-emerald-800 flex items-center gap-1">
-                          <Store className="w-3 h-3" />
-                          <span className="truncate">{product.business_name}</span>
-                        </div>
-                      )}
-                      <h3 className="font-bold text-gray-900 text-sm line-clamp-2 leading-snug group-hover:text-emerald-900 transition">
-                        {product.title}
-                      </h3>
-                      {product.branch_state_name && (
-                        <div className="text-[11px] text-gray-500 flex items-center gap-1">
-                          <MapPin className="w-3 h-3 text-gray-400" />
-                          <span>{product.branch_state_name}</span>
-                        </div>
-                      )}
-                    </div>
-
-                    {/* Price and Cart Action */}
-                    <div className="pt-2 border-t border-gray-100 flex items-center justify-between">
-                      <div>
-                        <div className="text-base font-black text-gray-900">
-                          {formatNaira(product.price_kobo)}
-                        </div>
-                        {product.compare_at_price_kobo && product.compare_at_price_kobo > product.price_kobo && (
-                          <div className="text-[11px] text-gray-400 line-through">
-                            {formatNaira(product.compare_at_price_kobo)}
-                          </div>
-                        )}
+                  {/* Price and Cart Action */}
+                  <div className="p-3 pt-2 border-t border-gray-100 flex items-center justify-between gap-2 bg-gray-50/30">
+                    <div className="min-w-0">
+                      <div className="text-sm sm:text-base font-black text-gray-900 truncate">
+                        {formatNaira(product.price_kobo)}
                       </div>
-
-                      <button
-                        type="button"
-                        onClick={(e) => handleAddToCart(product, e)}
-                        disabled={!inStock}
-                        title={inStock ? "Add to Cart" : "Out of Stock"}
-                        className={`p-2.5 rounded-xl font-bold transition flex items-center justify-center ${
-                          inStock
-                            ? "bg-emerald-900 hover:bg-emerald-950 text-white shadow-sm"
-                            : "bg-gray-100 text-gray-400 cursor-not-allowed"
-                        }`}
-                      >
-                        <ShoppingBag className="w-4 h-4" />
-                      </button>
+                      {product.compare_at_price_kobo && product.compare_at_price_kobo > product.price_kobo && (
+                        <div className="text-[10px] text-gray-400 line-through truncate">
+                          {formatNaira(product.compare_at_price_kobo)}
+                        </div>
+                      )}
                     </div>
+
+                    <button
+                      type="button"
+                      onClick={(e) => handleAddToCart(product, e)}
+                      disabled={!inStock}
+                      title={inStock ? (user ? "Add to Cart" : "Sign In to Add to Cart") : "Out of Stock"}
+                      className={`p-2 rounded-lg font-bold transition flex items-center justify-center shrink-0 ${
+                        inStock
+                          ? "bg-emerald-900 hover:bg-emerald-950 text-white shadow-xs"
+                          : "bg-gray-100 text-gray-400 cursor-not-allowed"
+                      }`}
+                    >
+                      <ShoppingBag className="w-4 h-4" />
+                    </button>
                   </div>
                 </Link>
               );
