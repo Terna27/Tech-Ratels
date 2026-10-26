@@ -11,6 +11,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/jackc/pgx/v5/pgtype"
+	"ratels-api/internal/db"
 	"ratels-api/internal/security"
 	"ratels-api/internal/service"
 	"ratels-api/internal/worker"
@@ -614,5 +616,201 @@ func TestAdminDashboard_SpoofedProxyHeaders(t *testing.T) {
 
 	if rr3.Code != http.StatusTooManyRequests {
 		t.Fatalf("expected 429 Too Many Requests: spoofed headers must NOT bypass rate limiter on untrusted connection! Got %d", rr3.Code)
+	}
+}
+
+// 15. Task G: Snapshot detail inspection, aggregated data return, integrity hash, and exports
+func TestAdminDashboard_SnapshotDetailRetrievalAndIntegrity(t *testing.T) {
+	h := setupTestHarness(t)
+	defer h.Cleanup()
+
+	uid := time.Now().UnixNano()
+	creator, _ := createHandlerTestUser(t, h, "national_admin", fmt.Sprintf("na_dtl_%d@test.com", uid))
+	approver, adminToken := createHandlerTestUser(t, h, "super_admin", fmt.Sprintf("sa_dtl_%d@test.com", uid))
+	period := fmt.Sprintf("202%d-11", uid%3)
+
+	defer func() {
+		_, _ = h.Pool.Exec(context.Background(), "DELETE FROM public_report_snapshots WHERE reporting_period = $1", period)
+	}()
+
+	snap, _ := createAndPublishTestReport(t, h, creator, approver, "cleanups", period)
+
+	// Explicitly generate a PDF export
+	_, err := h.ReportService.GenerateAndStoreExport(context.Background(), approver, snap.SnapshotID, "pdf", nil)
+	if err != nil {
+		t.Fatalf("failed generating test export: %v", err)
+	}
+
+	// Fetch detail as Super Admin
+	req, _ := http.NewRequest("GET", fmt.Sprintf("/api/v1/admin/reports/%s", snap.SnapshotID), nil)
+	req.Header.Set("Authorization", "Bearer "+adminToken)
+	rr := httptest.NewRecorder()
+	h.Router.ServeHTTP(rr, req)
+
+	if rr.Code != http.StatusOK {
+		t.Fatalf("expected 200 OK for snapshot detail, got %d: %s", rr.Code, rr.Body.String())
+	}
+
+	var detail service.AdminSnapshotDetailDTO
+	if err := json.Unmarshal(rr.Body.Bytes(), &detail); err != nil {
+		t.Fatalf("failed unmarshaling snapshot detail: %v", err)
+	}
+
+	// 1. Verify identification and status
+	if detail.SnapshotID != snap.SnapshotID {
+		t.Errorf("expected snapshot ID %s, got %s", snap.SnapshotID, detail.SnapshotID)
+	}
+	if detail.Status != "published" {
+		t.Errorf("expected status published, got %s", detail.Status)
+	}
+	if detail.ReportType != "cleanups" {
+		t.Errorf("expected cleanups report type, got %s", detail.ReportType)
+	}
+
+	// 2. Verify cryptographic hash
+	if len(detail.DataHash) != 64 {
+		t.Errorf("expected 64-char SHA-256 data hash, got %q", detail.DataHash)
+	}
+
+	// 3. Verify aggregated data
+	if len(detail.AggregatedData) == 0 {
+		t.Errorf("expected non-empty aggregated data")
+	}
+	var cleanupsData service.PublicCleanupsData
+	if err := json.Unmarshal(detail.AggregatedData, &cleanupsData); err != nil {
+		t.Errorf("failed parsing aggregated cleanups data: %v", err)
+	}
+	if cleanupsData.ReportingPeriod != period {
+		t.Errorf("expected period %s, got %s", period, cleanupsData.ReportingPeriod)
+	}
+
+	// 4. Verify approvals history
+	if len(detail.Approvals) == 0 {
+		t.Errorf("expected approvals history to be populated")
+	} else if detail.Approvals[0].Decision != "approved" {
+		t.Errorf("expected approved decision, got %s", detail.Approvals[0].Decision)
+	}
+
+	// 5. Verify audit logs & IP address visibility for Super Admin
+	if len(detail.AuditLogs) == 0 {
+		t.Errorf("expected audit logs to be populated")
+	}
+
+	// 6. Verify exports list
+	if len(detail.Exports) == 0 {
+		t.Errorf("expected export artifacts to be populated for published report")
+	}
+}
+
+// 16. Task G: Geographic scope enforcement on snapshot inspection
+func TestAdminDashboard_SnapshotGeographicAuthorityRestriction(t *testing.T) {
+	h := setupTestHarness(t)
+	defer h.Cleanup()
+	ctx := context.Background()
+
+	uid := time.Now().UnixNano()
+	superAdmin, _ := createHandlerTestUser(t, h, "super_admin", fmt.Sprintf("sa_geo_%d@test.com", uid))
+	states, err := h.GeoService.ListStates(ctx)
+	if err != nil || len(states) < 2 {
+		t.Fatalf("failed fetching test states: %v", err)
+	}
+	lagosState := states[0]
+	kanoState := states[1]
+
+	// Create a state coordinator user for Lagos
+	lagosCoord, lagosToken := createHandlerTestUser(t, h, "state_coordinator", fmt.Sprintf("sc_lagos_%d@test.com", uid))
+	_, err = h.Repo.Queries().CreateAppointment(ctx, db.CreateAppointmentParams{
+		ID:               security.GenerateUUID(),
+		UserID:           lagosCoord.ID,
+		RoleTitle:        "State Coordinator (Lagos)",
+		RoleType:         "state_coordinator",
+		JurisdictionType: "state",
+		JurisdictionID:   pgtype.Text{String: lagosState.ID, Valid: true},
+		StartDate:        pgtype.Timestamptz{Time: time.Now().Add(-1 * time.Hour), Valid: true},
+		Status:           "active",
+	})
+	if err != nil {
+		t.Fatalf("failed appointing lagos coordinator: %v", err)
+	}
+
+	period := fmt.Sprintf("202%d-12", uid%3)
+	defer func() {
+		_, _ = h.Pool.Exec(ctx, "DELETE FROM public_report_snapshots WHERE reporting_period = $1", period)
+	}()
+
+	// 1. Create a draft snapshot for Lagos State
+	lagosSnap, err := h.ReportService.GenerateSnapshot(ctx, superAdmin, service.GenerateReportRequest{
+		ReportType:      "cleanups",
+		Title:           "Lagos Environmental Cleanup Report - " + period,
+		ReportingPeriod: period,
+		PeriodStart:     period + "-01",
+		PeriodEnd:       period + "-28",
+		ScopeType:       "state",
+		StateID:         &lagosState.ID,
+		TriggerSource:   "admin_manual",
+	}, nil)
+	if err != nil {
+		t.Fatalf("failed generating lagos draft snapshot: %v", err)
+	}
+
+	// 2. Create a draft snapshot for Kano State
+	kanoSnap, err := h.ReportService.GenerateSnapshot(ctx, superAdmin, service.GenerateReportRequest{
+		ReportType:      "cleanups",
+		Title:           "Kano Environmental Cleanup Report - " + period,
+		ReportingPeriod: period,
+		PeriodStart:     period + "-01",
+		PeriodEnd:       period + "-28",
+		ScopeType:       "state",
+		StateID:         &kanoState.ID,
+		TriggerSource:   "admin_manual",
+	}, nil)
+	if err != nil {
+		t.Fatalf("failed generating kano draft snapshot: %v", err)
+	}
+
+	// 3. Lagos coordinator accesses Lagos draft -> 200 OK
+	reqLagos, _ := http.NewRequest("GET", fmt.Sprintf("/api/v1/admin/reports/%s", lagosSnap.SnapshotID), nil)
+	reqLagos.Header.Set("Authorization", "Bearer "+lagosToken)
+	rrLagos := httptest.NewRecorder()
+	h.Router.ServeHTTP(rrLagos, reqLagos)
+	if rrLagos.Code != http.StatusOK {
+		t.Fatalf("expected 200 OK for authorized Lagos coordinator inspecting Lagos draft, got %d: %s", rrLagos.Code, rrLagos.Body.String())
+	}
+
+	// Non-super-admin audit logs must omit raw IP address for privacy
+	var lagosDetail service.AdminSnapshotDetailDTO
+	_ = json.Unmarshal(rrLagos.Body.Bytes(), &lagosDetail)
+	for _, audit := range lagosDetail.AuditLogs {
+		if audit.IPAddress != nil {
+			t.Errorf("IP address must be redacted/omitted for non-super-admin inspection, got: %s", *audit.IPAddress)
+		}
+	}
+
+	// 4. Lagos coordinator accesses Kano draft -> 403 Forbidden (SCOPE_UNAUTHORIZED)
+	reqKano, _ := http.NewRequest("GET", fmt.Sprintf("/api/v1/admin/reports/%s", kanoSnap.SnapshotID), nil)
+	reqKano.Header.Set("Authorization", "Bearer "+lagosToken)
+	rrKano := httptest.NewRecorder()
+	h.Router.ServeHTTP(rrKano, reqKano)
+	if rrKano.Code != http.StatusForbidden {
+		t.Fatalf("expected 403 Forbidden for Lagos coordinator inspecting Kano draft, got %d: %s", rrKano.Code, rrKano.Body.String())
+	}
+	if !strings.Contains(rrKano.Body.String(), "SCOPE_UNAUTHORIZED") {
+		t.Errorf("expected SCOPE_UNAUTHORIZED error code, got: %s", rrKano.Body.String())
+	}
+
+	// 5. Unauthenticated request to draft -> 401 Unauthorized
+	reqUnauth, _ := http.NewRequest("GET", fmt.Sprintf("/api/v1/admin/reports/%s", lagosSnap.SnapshotID), nil)
+	rrUnauth := httptest.NewRecorder()
+	h.Router.ServeHTTP(rrUnauth, reqUnauth)
+	if rrUnauth.Code != http.StatusUnauthorized {
+		t.Fatalf("expected 401 for unauthenticated inspection, got %d", rrUnauth.Code)
+	}
+
+	// 6. Public endpoint cannot view draft snapshot -> 404 Not Found
+	reqPub, _ := http.NewRequest("GET", fmt.Sprintf("/api/v1/public/reports/publications/%s", lagosSnap.SnapshotID), nil)
+	rrPub := httptest.NewRecorder()
+	h.Router.ServeHTTP(rrPub, reqPub)
+	if rrPub.Code != http.StatusNotFound {
+		t.Fatalf("expected 404 for public access to unpublished draft, got %d", rrPub.Code)
 	}
 }

@@ -56,6 +56,7 @@ import {
 import { Badge } from "@/components/ui/Badge";
 import { Alert } from "@/components/ui/Alert";
 import { EmptyState, Spinner } from "@/components/ui/EmptyState";
+import { ReportInspectionDrawer } from "@/components/admin/ReportInspectionDrawer";
 
 type TabKey = "overview" | "snapshots" | "scheduler" | "exports" | "audit";
 
@@ -125,6 +126,7 @@ export default function AdminReportsDashboardPage() {
 
   // Governance / Snapshot Action State
   const [selectedSnapshot, setSelectedSnapshot] = useState<AdminSnapshotDetailDTO | null>(null);
+  const [inspectingSnapshotId, setInspectingSnapshotId] = useState<string | null>(null);
   const [governanceAction, setGovernanceAction] = useState<
     "submit" | "approve" | "publish" | "revise" | "withdraw" | null
   >(null);
@@ -1017,6 +1019,7 @@ export default function AdminReportsDashboardPage() {
                         <button
                           type="button"
                           onClick={() => {
+                            setInspectingSnapshotId(s.snapshot_id);
                             setSelectedSnapshot(s);
                             setGovernanceAction(null);
                             setGovernanceReason("");
@@ -1929,223 +1932,26 @@ export default function AdminReportsDashboardPage() {
       )}
 
       {/* =========================================================================
-          MODAL / DRAWER: INSPECT SNAPSHOT & GOVERNANCE ACTIONS
+          REPORT CONTENT PREVIEW, INTEGRITY & GOVERNANCE INSPECTION DRAWER
           ========================================================================= */}
-      {selectedSnapshot && (
-        <div
-          role="dialog"
-          aria-modal="true"
-          aria-labelledby="snapshot-detail-title"
-          className="fixed inset-0 z-50 overflow-y-auto bg-gray-900/60 backdrop-blur-xs flex items-center justify-center p-4"
-        >
-          <div className="bg-white rounded-2xl max-w-2xl w-full p-6 shadow-2xl border border-gray-200 space-y-6">
-            <div className="flex items-center justify-between border-b border-gray-200 pb-3">
-              <div>
-                <div className="flex items-center gap-2">
-                  <span className="font-mono text-xs font-bold text-emerald-900">
-                    {selectedSnapshot.public_reference}
-                  </span>
-                  {getStatusBadge(selectedSnapshot.status)}
-                </div>
-                <h3 id="snapshot-detail-title" className="text-lg font-bold text-gray-900 mt-0.5">
-                  {selectedSnapshot.title}
-                </h3>
-              </div>
-              <button
-                type="button"
-                onClick={() => {
-                  setSelectedSnapshot(null);
-                  setGovernanceAction(null);
-                  setGovernanceReason("");
-                  setGovernanceError(null);
-                }}
-                className="text-gray-400 hover:text-gray-600"
-              >
-                <XCircle className="w-5 h-5" />
-              </button>
-            </div>
-
-            {/* Snapshot metadata */}
-            <div className="grid grid-cols-2 sm:grid-cols-3 gap-3 text-xs">
-              <div className="p-2.5 rounded bg-gray-50 border border-gray-200">
-                <span className="text-gray-500">Category</span>
-                <p className="font-semibold text-gray-900 capitalize mt-0.5">
-                  {selectedSnapshot.report_type.replace("_", " ")}
-                </p>
-              </div>
-              <div className="p-2.5 rounded bg-gray-50 border border-gray-200">
-                <span className="text-gray-500">Reporting Period</span>
-                <p className="font-semibold text-gray-900 mt-0.5">
-                  {selectedSnapshot.reporting_period}
-                </p>
-              </div>
-              <div className="p-2.5 rounded bg-gray-50 border border-gray-200">
-                <span className="text-gray-500">Scope</span>
-                <p className="font-semibold text-gray-900 capitalize mt-0.5">
-                  {selectedSnapshot.scope_type}
-                </p>
-              </div>
-              <div className="p-2.5 rounded bg-gray-50 border border-gray-200">
-                <span className="text-gray-500">Created At</span>
-                <p className="text-gray-800 mt-0.5">
-                  {formatDate(selectedSnapshot.created_at)}
-                </p>
-              </div>
-              <div className="p-2.5 rounded bg-gray-50 border border-gray-200">
-                <span className="text-gray-500">Last Modified</span>
-                <p className="text-gray-800 mt-0.5">
-                  {formatDate(selectedSnapshot.updated_at)}
-                </p>
-              </div>
-              <div className="p-2.5 rounded bg-gray-50 border border-gray-200">
-                <span className="text-gray-500">Publication Version</span>
-                <p className="text-gray-800 mt-0.5 font-bold">
-                  v{selectedSnapshot.publication_version}
-                </p>
-              </div>
-            </div>
-
-            {/* Governance Action Form */}
-            {governanceAction ? (
-              <form onSubmit={handleExecuteGovernance} className="space-y-4 pt-2 border-t border-gray-200">
-                <div className="flex items-center justify-between">
-                  <h4 className="text-sm font-bold text-gray-900 capitalize">
-                    Confirm Action: {governanceAction.replace("_", " ")}
-                  </h4>
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setGovernanceAction(null);
-                      setGovernanceError(null);
-                    }}
-                    className="text-xs text-gray-500 hover:text-gray-700 underline"
-                  >
-                    Back to Options
-                  </button>
-                </div>
-
-                {governanceError && (
-                  <Alert type="error" title="Governance Action Failed">
-                    {governanceError}
-                  </Alert>
-                )}
-
-                {governanceSuccess && (
-                  <Alert type="success" title="Success">
-                    {governanceSuccess}
-                  </Alert>
-                )}
-
-                <div>
-                  <label htmlFor="governance-reason" className="block text-xs font-bold uppercase tracking-wider text-gray-700 mb-1">
-                    {governanceAction === "withdraw" ? (
-                      <span className="text-rose-700">Withdrawal Reason (Mandatory)*</span>
-                    ) : (
-                      "Administrative Review Notes / Justification"
-                    )}
-                  </label>
-                  <textarea
-                    id="governance-reason"
-                    rows={3}
-                    required={governanceAction === "withdraw"}
-                    value={governanceReason}
-                    onChange={(e) => setGovernanceReason(e.target.value)}
-                    placeholder={
-                      governanceAction === "withdraw"
-                        ? "State the regulatory, audit, or factual justification for withdrawing this report..."
-                        : "Enter optional governance verification remarks..."
-                    }
-                    className="w-full text-xs p-2.5 border border-gray-300 rounded-lg shadow-xs focus:ring-emerald-700 focus:border-emerald-700"
-                  />
-                </div>
-
-                <div className="flex justify-end gap-3 pt-2">
-                  <button
-                    type="button"
-                    onClick={() => setGovernanceAction(null)}
-                    className="px-4 py-2 rounded-lg border border-gray-300 text-xs font-semibold text-gray-700 hover:bg-gray-50"
-                  >
-                    Cancel
-                  </button>
-                  <button
-                    type="submit"
-                    disabled={isGovernanceSubmitting}
-                    className={`inline-flex items-center gap-2 px-5 py-2 rounded-lg text-xs font-semibold text-white shadow-xs ${
-                      governanceAction === "withdraw"
-                        ? "bg-rose-700 hover:bg-rose-800"
-                        : "bg-emerald-800 hover:bg-emerald-900"
-                    } disabled:opacity-50`}
-                  >
-                    {isGovernanceSubmitting && <Spinner size="sm" />}
-                    <span>Confirm {governanceAction.toUpperCase()}</span>
-                  </button>
-                </div>
-              </form>
-            ) : (
-              /* Available Governance Actions */
-              <div className="pt-2 border-t border-gray-200 space-y-3">
-                <h4 className="text-xs font-bold uppercase tracking-wider text-gray-700">
-                  Governance Lifecycle Transitions
-                </h4>
-                <div className="flex flex-wrap items-center gap-2">
-                  {selectedSnapshot.status === "draft" && (
-                    <button
-                      type="button"
-                      onClick={() => setGovernanceAction("submit")}
-                      className="px-3 py-1.5 rounded-lg bg-sky-800 text-white text-xs font-semibold hover:bg-sky-900 transition"
-                    >
-                      Submit for Review
-                    </button>
-                  )}
-
-                  {selectedSnapshot.status === "pending_review" && (
-                    <button
-                      type="button"
-                      onClick={() => setGovernanceAction("approve")}
-                      className="px-3 py-1.5 rounded-lg bg-emerald-800 text-white text-xs font-semibold hover:bg-emerald-900 transition"
-                    >
-                      Approve Report
-                    </button>
-                  )}
-
-                  {selectedSnapshot.status === "approved" && (
-                    <button
-                      type="button"
-                      onClick={() => setGovernanceAction("publish")}
-                      className="px-3 py-1.5 rounded-lg bg-emerald-900 text-white text-xs font-semibold hover:bg-black transition"
-                    >
-                      Publish to Transparency Portal
-                    </button>
-                  )}
-
-                  {(selectedSnapshot.status === "approved" || selectedSnapshot.status === "published") && (
-                    <button
-                      type="button"
-                      onClick={() => setGovernanceAction("revise")}
-                      className="px-3 py-1.5 rounded-lg border border-amber-600 text-amber-900 text-xs font-semibold hover:bg-amber-50 transition"
-                    >
-                      Request Revision
-                    </button>
-                  )}
-
-                  {selectedSnapshot.status !== "withdrawn" && selectedSnapshot.status !== "draft" && (
-                    <button
-                      type="button"
-                      onClick={() => setGovernanceAction("withdraw")}
-                      className="px-3 py-1.5 rounded-lg border border-rose-300 bg-rose-50 text-rose-800 text-xs font-semibold hover:bg-rose-100 transition"
-                    >
-                      Withdraw Report
-                    </button>
-                  )}
-                </div>
-
-                <p className="text-[11px] text-gray-500 italic">
-                  Note: Governance rules prohibit self-approval. Reports can only be approved by a distinct administrative officer with designated authorization.
-                </p>
-              </div>
-            )}
-          </div>
-        </div>
+      {(inspectingSnapshotId || selectedSnapshot) && (
+        <ReportInspectionDrawer
+          snapshotId={inspectingSnapshotId || selectedSnapshot?.snapshot_id || ""}
+          currentUser={user}
+          isSuperAdmin={Boolean(isSuperAdmin)}
+          isNationalAdmin={Boolean(isNationalAdmin)}
+          onClose={() => {
+            setInspectingSnapshotId(null);
+            setSelectedSnapshot(null);
+            setGovernanceAction(null);
+            setGovernanceReason("");
+            setGovernanceError(null);
+          }}
+          onGovernanceActionExecuted={() => {
+            fetchSnapshots();
+            fetchStats();
+          }}
+        />
       )}
     </div>
   );

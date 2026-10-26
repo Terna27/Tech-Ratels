@@ -549,19 +549,32 @@ func (h *ReportHandler) GenerateSnapshotAdmin(w http.ResponseWriter, r *http.Req
 
 func (h *ReportHandler) GetSnapshotDetailAdmin(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
+	user := GetCurrentUser(ctx)
+	if user == nil {
+		ErrorJSON(w, http.StatusUnauthorized, "UNAUTHORIZED", "Authentication required", nil)
+		return
+	}
+
 	id := chi.URLParam(r, "id")
 	if id == "" {
 		ErrorJSON(w, http.StatusBadRequest, "INVALID_REQUEST", "Snapshot ID is required", nil)
 		return
 	}
 
-	res, err := h.reportService.GetSnapshotDetailAdmin(ctx, id)
+	res, err := h.reportService.GetSnapshotDetailAdmin(ctx, id, user)
 	if err != nil {
 		if err == service.ErrReportSnapshotNotFound {
 			ErrorJSON(w, http.StatusNotFound, "NOT_FOUND", "Snapshot not found", nil)
 			return
 		}
 		ErrorJSON(w, http.StatusInternalServerError, "INTERNAL_ERROR", "Failed retrieving snapshot detail", err.Error())
+		return
+	}
+
+	// Non-published snapshots are restricted to administrators with geographic authority
+	apps := GetCurrentAppointments(ctx)
+	if res.Status != "published" && !h.reportService.HasSnapshotGeographicAuthority(ctx, user, apps, res) {
+		ErrorJSON(w, http.StatusForbidden, "SCOPE_UNAUTHORIZED", "Administrator lacks geographic authority over this report snapshot", nil)
 		return
 	}
 

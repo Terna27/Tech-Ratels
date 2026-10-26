@@ -2142,6 +2142,21 @@ export interface ReportAuditItem {
   created_at: string;
 }
 
+export interface AdminReportExportDTO {
+  id: string;
+  snapshot_id: string;
+  export_format: "pdf" | "csv";
+  file_name: string;
+  file_size_bytes: number;
+  mime_type: string;
+  checksum_algorithm: string;
+  content_hash: string;
+  storage_reference?: string;
+  export_status: string;
+  created_at: string;
+  updated_at: string;
+}
+
 export interface AdminSnapshotDetailDTO {
   snapshot_id: string;
   public_reference: string;
@@ -2161,7 +2176,8 @@ export interface AdminSnapshotDetailDTO {
   status: string;
   publication_version: number;
   data_hash: string;
-  created_by_user_id: string;
+  created_by_user_id?: string;
+  created_by_type?: string;
   creator_name: string;
   correction_notes?: string;
   aggregated_data: any;
@@ -2169,6 +2185,7 @@ export interface AdminSnapshotDetailDTO {
   updated_at: string;
   approvals: ReportApprovalItem[];
   audit_logs: ReportAuditItem[];
+  exports?: AdminReportExportDTO[];
 }
 
 export interface PaginatedSnapshotsResponse {

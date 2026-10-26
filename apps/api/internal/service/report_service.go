@@ -233,8 +233,9 @@ type AdminSnapshotDetailDTO struct {
 	AggregatedData     json.RawMessage      `json:"aggregated_data"`
 	CreatedAt          time.Time            `json:"created_at"`
 	UpdatedAt          time.Time            `json:"updated_at"`
-	Approvals          []ReportApprovalItem `json:"approvals"`
-	AuditLogs          []ReportAuditItem    `json:"audit_logs"`
+	Approvals          []ReportApprovalItem   `json:"approvals"`
+	AuditLogs          []ReportAuditItem      `json:"audit_logs"`
+	Exports            []AdminReportExportDTO `json:"exports,omitempty"`
 }
 
 type AdminReportExportDTO struct {
@@ -2266,7 +2267,7 @@ func (s *ReportService) ListSnapshotsAdmin(ctx context.Context, status, reportTy
 	}, nil
 }
 
-func (s *ReportService) GetSnapshotDetailAdmin(ctx context.Context, snapshotID string) (*AdminSnapshotDetailDTO, error) {
+func (s *ReportService) GetSnapshotDetailAdmin(ctx context.Context, snapshotID string, requestingUser ...*db.User) (*AdminSnapshotDetailDTO, error) {
 	r, err := s.repo.Queries().GetReportSnapshotByID(ctx, snapshotID)
 	if err != nil {
 		return nil, ErrReportSnapshotNotFound
@@ -2293,6 +2294,7 @@ func (s *ReportService) GetSnapshotDetailAdmin(ctx context.Context, snapshotID s
 		OffsetCount: 0,
 	})
 	var auditItems []ReportAuditItem
+	isSuperAdminRequester := len(requestingUser) > 0 && requestingUser[0] != nil && requestingUser[0].PrimaryRole == "super_admin"
 	for _, a := range audits {
 		ai := ReportAuditItem{
 			ID:        a.ID,
@@ -2312,10 +2314,29 @@ func (s *ReportService) GetSnapshotDetailAdmin(ctx context.Context, snapshotID s
 		if a.ActorEmail.Valid {
 			ai.ActorEmail = &a.ActorEmail.String
 		}
-		if a.IpAddress.Valid {
+		// Privacy protection: only expose raw IP addresses to Super Administrators
+		if a.IpAddress.Valid && isSuperAdminRequester {
 			ai.IPAddress = &a.IpAddress.String
 		}
 		auditItems = append(auditItems, ai)
+	}
+
+	exports, _ := s.repo.Queries().ListReportExportsBySnapshot(ctx, snapshotID)
+	var exportItems []AdminReportExportDTO
+	for _, exp := range exports {
+		exportItems = append(exportItems, AdminReportExportDTO{
+			ID:                exp.ID,
+			SnapshotID:        exp.SnapshotID,
+			ExportFormat:      exp.ExportFormat,
+			FileName:          exp.FileName,
+			FileSizeBytes:     exp.FileSizeBytes,
+			MimeType:          exp.MimeType,
+			ChecksumAlgorithm: exp.ChecksumAlgorithm,
+			ContentHash:       exp.ContentHash,
+			ExportStatus:      exp.ExportStatus,
+			CreatedAt:         exp.CreatedAt.Time,
+			UpdatedAt:         exp.UpdatedAt.Time,
+		})
 	}
 
 	dto := &AdminSnapshotDetailDTO{
@@ -2337,6 +2358,7 @@ func (s *ReportService) GetSnapshotDetailAdmin(ctx context.Context, snapshotID s
 		UpdatedAt:          r.UpdatedAt.Time,
 		Approvals:          approvalItems,
 		AuditLogs:          auditItems,
+		Exports:            exportItems,
 	}
 	if r.CreatedByUserID.Valid {
 		dto.CreatedByUserID = &r.CreatedByUserID.String
@@ -2367,6 +2389,103 @@ func (s *ReportService) GetSnapshotDetailAdmin(ctx context.Context, snapshotID s
 	}
 
 	return dto, nil
+}
+
+// HasSnapshotGeographicAuthority evaluates whether an administrative actor has jurisdictional authority
+// over the geographic scope of a report snapshot.
+func (s *ReportService) HasSnapshotGeographicAuthority(ctx context.Context, user *db.User, appointments []db.Appointment, snap *AdminSnapshotDetailDTO) bool {
+	if user == nil || snap == nil {
+		return false
+	}
+
+	// Super Admin and National Admin have national jurisdiction covering all operations and scopes
+	if user.PrimaryRole == "super_admin" || user.PrimaryRole == "national_admin" {
+		return true
+	}
+	for _, a := range appointments {
+		if a.Status != "active" {
+			continue
+		}
+		if a.RoleType == "super_admin" || a.RoleType == "national_admin" || strings.ToLower(a.JurisdictionType) == "national" {
+			return true
+		}
+	}
+
+	scope := strings.ToLower(snap.ScopeType)
+	// If the snapshot has national scope, only national administrators can inspect unpublished governance snapshots
+	if scope == "national" {
+		return false
+	}
+
+	for _, a := range appointments {
+		if a.Status != "active" {
+			continue
+		}
+		appType := strings.ToLower(a.JurisdictionType)
+		appID := ""
+		if a.JurisdictionID.Valid {
+			appID = a.JurisdictionID.String
+		}
+		if appID == "" {
+			continue
+		}
+
+		// Zonal Coordinator
+		if (appType == "zone" || appType == "zonal") && (a.RoleType == "zonal_coordinator" || a.RoleType == "zonal_admin") {
+			if scope == "zone" && snap.ZoneID != nil && *snap.ZoneID == appID {
+				return true
+			}
+			if scope == "state" && snap.StateID != nil && *snap.StateID != "" {
+				st, err := s.repo.Queries().GetStateByID(ctx, *snap.StateID)
+				if err == nil && st.ZoneID == appID {
+					return true
+				}
+			}
+			if scope == "lga" {
+				if snap.StateID != nil && *snap.StateID != "" {
+					st, err := s.repo.Queries().GetStateByID(ctx, *snap.StateID)
+					if err == nil && st.ZoneID == appID {
+						return true
+					}
+				} else if snap.LGAID != nil && *snap.LGAID != "" {
+					lga, err := s.repo.Queries().GetLGAByID(ctx, *snap.LGAID)
+					if err == nil && lga.StateID != "" {
+						st, errSt := s.repo.Queries().GetStateByID(ctx, lga.StateID)
+						if errSt == nil && st.ZoneID == appID {
+							return true
+						}
+					}
+				}
+			}
+		}
+
+		// State Coordinator
+		if appType == "state" && (a.RoleType == "state_coordinator" || a.RoleType == "state_admin") {
+			if scope == "state" && snap.StateID != nil && *snap.StateID == appID {
+				return true
+			}
+			if scope == "lga" {
+				if snap.StateID != nil && *snap.StateID == appID {
+					return true
+				}
+				if snap.LGAID != nil && *snap.LGAID != "" {
+					lga, err := s.repo.Queries().GetLGAByID(ctx, *snap.LGAID)
+					if err == nil && lga.StateID == appID {
+						return true
+					}
+				}
+			}
+		}
+
+		// LGA Representative / Coordinator
+		if appType == "lga" && (a.RoleType == "lga_representative" || a.RoleType == "lga_coordinator") {
+			if scope == "lga" && snap.LGAID != nil && *snap.LGAID == appID {
+				return true
+			}
+		}
+	}
+
+	return false
 }
 
 func (s *ReportService) ListReportAudits(ctx context.Context, snapshotID *string, page, pageSize int32) ([]ReportAuditItem, error) {
