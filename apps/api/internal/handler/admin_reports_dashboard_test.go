@@ -272,7 +272,7 @@ func TestAdminDashboard_ConcurrentManualRequests(t *testing.T) {
 	defer tx.Rollback(ctx)
 
 	var acquired bool
-	err = tx.QueryRow(ctx, "SELECT pg_try_advisory_xact_lock($1)", worker.DefaultSchedulerLockKey).Scan(&acquired)
+	err = tx.QueryRow(ctx, "SELECT pg_try_advisory_xact_lock($1)", worker.DefaultSchedulerLockKey+100).Scan(&acquired)
 	if err != nil || !acquired {
 		t.Fatalf("failed acquiring advisory lock for test: %v", err)
 	}

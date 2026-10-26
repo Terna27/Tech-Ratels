@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log"
 	"strings"
 	"time"
 
@@ -2025,10 +2026,12 @@ func (s *ReportService) GetExportPrivateStream(
 		// If export exists and is generated, read from private storage
 		if exp.ExportStatus == "generated" && exp.StorageReference.Valid {
 			bytes, err := s.exportStorage.ReadExport(ctx, exp.StorageReference.String)
-			if err != nil {
-				return nil, "", "", fmt.Errorf("failed reading export from private storage: %w", err)
+			if err == nil {
+				return bytes, exp.FileName, exp.MimeType, nil
 			}
-			return bytes, exp.FileName, exp.MimeType, nil
+			// If reading from storage failed (e.g. dev in-memory restart or storage cache miss),
+			// fall through to regenerate and store on demand.
+			log.Printf("[REPORT_EXPORT] Stored export file missing (%s), regenerating: %v", exp.StorageReference.String, err)
 		}
 	}
 

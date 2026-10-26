@@ -101,7 +101,9 @@ func setupTestHarness(t *testing.T) *TestHarness {
 	commProjectH := handler.NewCommunityProjectHandler(commProjectSvc)
 	galleryH := handler.NewGalleryHandler(gallerySvc)
 	reportH := handler.NewReportHandler(reportSvc)
-	reportScheduler := worker.NewReportScheduler(repo, reportSvc, nil)
+	schedCfg := worker.DefaultReportSchedulerConfig()
+	schedCfg.LockKey = worker.DefaultSchedulerLockKey + 100
+	reportScheduler := worker.NewReportScheduler(repo, reportSvc, &schedCfg)
 	reportH.SetScheduler(reportScheduler, "test_cron_secret_32_chars_long_123")
 
 	router := handler.NewRouter(handler.RouterParams{

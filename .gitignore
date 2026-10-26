@@ -57,3 +57,4 @@ apps/api/admin
 # Include frontend source libraries
 !apps/web/src/lib/
 !apps/web/src/lib/**
+*.tsbuildinfo
