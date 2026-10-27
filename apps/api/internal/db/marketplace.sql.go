@@ -12,6 +12,36 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 )
 
+const cancelMarketplaceShipmentByID = `-- name: CancelMarketplaceShipmentByID :one
+UPDATE marketplace_shipments
+SET status = 'cancelled',
+    updated_at = CURRENT_TIMESTAMP
+WHERE id = $1
+RETURNING id, order_id, carrier_name, tracking_number, tracking_url, status, dispatched_at, estimated_delivery_at, delivered_at, delivery_notes, proof_of_delivery_url, created_at, updated_at, business_id
+`
+
+func (q *Queries) CancelMarketplaceShipmentByID(ctx context.Context, id string) (MarketplaceShipment, error) {
+	row := q.db.QueryRow(ctx, cancelMarketplaceShipmentByID, id)
+	var i MarketplaceShipment
+	err := row.Scan(
+		&i.ID,
+		&i.OrderID,
+		&i.CarrierName,
+		&i.TrackingNumber,
+		&i.TrackingUrl,
+		&i.Status,
+		&i.DispatchedAt,
+		&i.EstimatedDeliveryAt,
+		&i.DeliveredAt,
+		&i.DeliveryNotes,
+		&i.ProofOfDeliveryUrl,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+		&i.BusinessID,
+	)
+	return i, err
+}
+
 const cancelMarketplaceShipmentsByOrder = `-- name: CancelMarketplaceShipmentsByOrder :exec
 UPDATE marketplace_shipments
 SET status = 'cancelled',
@@ -664,13 +694,15 @@ INSERT INTO marketplace_refunds (
     id, order_id, payment_id, amount_kobo, status,
     provider, provider_refund_reference, initiated_by_user_id,
     confirmed_by_user_id, reason, settlement_notes, metadata,
+    shipment_id, business_id, order_item_id,
     created_at, updated_at
 ) VALUES (
     $1, $2, $3, $4, $5,
     $6, $7, $8,
     $9, $10, $11, $12,
+    $13, $14, $15,
     CURRENT_TIMESTAMP, CURRENT_TIMESTAMP
-) RETURNING id, order_id, payment_id, amount_kobo, status, provider, provider_refund_reference, initiated_by_user_id, confirmed_by_user_id, reason, settlement_notes, metadata, created_at, updated_at
+) RETURNING id, order_id, payment_id, amount_kobo, status, provider, provider_refund_reference, initiated_by_user_id, confirmed_by_user_id, reason, settlement_notes, metadata, created_at, updated_at, shipment_id, business_id, order_item_id
 `
 
 type CreateMarketplaceRefundParams struct {
@@ -686,6 +718,9 @@ type CreateMarketplaceRefundParams struct {
 	Reason                  string          `json:"reason"`
 	SettlementNotes         string          `json:"settlement_notes"`
 	Metadata                json.RawMessage `json:"metadata"`
+	ShipmentID              pgtype.Text     `json:"shipment_id"`
+	BusinessID              pgtype.Text     `json:"business_id"`
+	OrderItemID             pgtype.Text     `json:"order_item_id"`
 }
 
 // -------------------------------------------------------------
@@ -705,6 +740,9 @@ func (q *Queries) CreateMarketplaceRefund(ctx context.Context, arg CreateMarketp
 		arg.Reason,
 		arg.SettlementNotes,
 		arg.Metadata,
+		arg.ShipmentID,
+		arg.BusinessID,
+		arg.OrderItemID,
 	)
 	var i MarketplaceRefund
 	err := row.Scan(
@@ -722,6 +760,9 @@ func (q *Queries) CreateMarketplaceRefund(ctx context.Context, arg CreateMarketp
 		&i.Metadata,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.ShipmentID,
+		&i.BusinessID,
+		&i.OrderItemID,
 	)
 	return i, err
 }
@@ -798,7 +839,7 @@ INSERT INTO marketplace_shipment_items (
 ) VALUES (
     $1, $2, $3, $4, CURRENT_TIMESTAMP
 ) ON CONFLICT (shipment_id, order_item_id) DO NOTHING
-RETURNING id, shipment_id, order_item_id, quantity, created_at
+RETURNING id, shipment_id, order_item_id, quantity, created_at, refunded_quantity, refund_id
 `
 
 type CreateMarketplaceShipmentItemParams struct {
@@ -822,6 +863,8 @@ func (q *Queries) CreateMarketplaceShipmentItem(ctx context.Context, arg CreateM
 		&i.OrderItemID,
 		&i.Quantity,
 		&i.CreatedAt,
+		&i.RefundedQuantity,
+		&i.RefundID,
 	)
 	return i, err
 }
@@ -1559,6 +1602,31 @@ func (q *Queries) GetMarketplaceOrderForUpdate(ctx context.Context, id string) (
 	return i, err
 }
 
+const getMarketplaceOrderItemByID = `-- name: GetMarketplaceOrderItemByID :one
+SELECT id, order_id, product_id, business_id, title_snapshot, sku_snapshot, price_kobo_snapshot, quantity, subtotal_kobo, image_url_snapshot, created_at, shipment_id FROM marketplace_order_items
+WHERE id = $1
+`
+
+func (q *Queries) GetMarketplaceOrderItemByID(ctx context.Context, id string) (MarketplaceOrderItem, error) {
+	row := q.db.QueryRow(ctx, getMarketplaceOrderItemByID, id)
+	var i MarketplaceOrderItem
+	err := row.Scan(
+		&i.ID,
+		&i.OrderID,
+		&i.ProductID,
+		&i.BusinessID,
+		&i.TitleSnapshot,
+		&i.SkuSnapshot,
+		&i.PriceKoboSnapshot,
+		&i.Quantity,
+		&i.SubtotalKobo,
+		&i.ImageUrlSnapshot,
+		&i.CreatedAt,
+		&i.ShipmentID,
+	)
+	return i, err
+}
+
 const getMarketplacePaymentByOrder = `-- name: GetMarketplacePaymentByOrder :one
 SELECT id, order_id, reference, provider, provider_reference, channel, amount_kobo, currency, status, paid_at, raw_webhook_payload, error_message, created_at, updated_at FROM marketplace_payments
 WHERE order_id = $1
@@ -1923,7 +1991,7 @@ func (q *Queries) GetMarketplaceProductBySlug(ctx context.Context, slug string) 
 }
 
 const getMarketplaceRefundByID = `-- name: GetMarketplaceRefundByID :one
-SELECT id, order_id, payment_id, amount_kobo, status, provider, provider_refund_reference, initiated_by_user_id, confirmed_by_user_id, reason, settlement_notes, metadata, created_at, updated_at FROM marketplace_refunds
+SELECT id, order_id, payment_id, amount_kobo, status, provider, provider_refund_reference, initiated_by_user_id, confirmed_by_user_id, reason, settlement_notes, metadata, created_at, updated_at, shipment_id, business_id, order_item_id FROM marketplace_refunds
 WHERE id = $1
 `
 
@@ -1945,12 +2013,15 @@ func (q *Queries) GetMarketplaceRefundByID(ctx context.Context, id string) (Mark
 		&i.Metadata,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.ShipmentID,
+		&i.BusinessID,
+		&i.OrderItemID,
 	)
 	return i, err
 }
 
 const getMarketplaceRefundByIDForUpdate = `-- name: GetMarketplaceRefundByIDForUpdate :one
-SELECT id, order_id, payment_id, amount_kobo, status, provider, provider_refund_reference, initiated_by_user_id, confirmed_by_user_id, reason, settlement_notes, metadata, created_at, updated_at FROM marketplace_refunds
+SELECT id, order_id, payment_id, amount_kobo, status, provider, provider_refund_reference, initiated_by_user_id, confirmed_by_user_id, reason, settlement_notes, metadata, created_at, updated_at, shipment_id, business_id, order_item_id FROM marketplace_refunds
 WHERE id = $1
 FOR UPDATE
 `
@@ -1973,12 +2044,15 @@ func (q *Queries) GetMarketplaceRefundByIDForUpdate(ctx context.Context, id stri
 		&i.Metadata,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.ShipmentID,
+		&i.BusinessID,
+		&i.OrderItemID,
 	)
 	return i, err
 }
 
 const getMarketplaceRefundByProviderReference = `-- name: GetMarketplaceRefundByProviderReference :one
-SELECT id, order_id, payment_id, amount_kobo, status, provider, provider_refund_reference, initiated_by_user_id, confirmed_by_user_id, reason, settlement_notes, metadata, created_at, updated_at FROM marketplace_refunds
+SELECT id, order_id, payment_id, amount_kobo, status, provider, provider_refund_reference, initiated_by_user_id, confirmed_by_user_id, reason, settlement_notes, metadata, created_at, updated_at, shipment_id, business_id, order_item_id FROM marketplace_refunds
 WHERE provider_refund_reference = $1
 ORDER BY created_at DESC
 LIMIT 1
@@ -2002,12 +2076,15 @@ func (q *Queries) GetMarketplaceRefundByProviderReference(ctx context.Context, p
 		&i.Metadata,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.ShipmentID,
+		&i.BusinessID,
+		&i.OrderItemID,
 	)
 	return i, err
 }
 
 const getMarketplaceRefundByProviderReferenceForUpdate = `-- name: GetMarketplaceRefundByProviderReferenceForUpdate :one
-SELECT id, order_id, payment_id, amount_kobo, status, provider, provider_refund_reference, initiated_by_user_id, confirmed_by_user_id, reason, settlement_notes, metadata, created_at, updated_at FROM marketplace_refunds
+SELECT id, order_id, payment_id, amount_kobo, status, provider, provider_refund_reference, initiated_by_user_id, confirmed_by_user_id, reason, settlement_notes, metadata, created_at, updated_at, shipment_id, business_id, order_item_id FROM marketplace_refunds
 WHERE provider_refund_reference = $1
 ORDER BY created_at DESC
 LIMIT 1
@@ -2032,6 +2109,9 @@ func (q *Queries) GetMarketplaceRefundByProviderReferenceForUpdate(ctx context.C
 		&i.Metadata,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.ShipmentID,
+		&i.BusinessID,
+		&i.OrderItemID,
 	)
 	return i, err
 }
@@ -2201,6 +2281,70 @@ func (q *Queries) GetMarketplaceShipmentByOrderAndBusiness(ctx context.Context, 
 		&i.BusinessID,
 	)
 	return i, err
+}
+
+const getPendingRefundByOrder = `-- name: GetPendingRefundByOrder :one
+SELECT id, order_id, payment_id, amount_kobo, status, provider, provider_refund_reference, initiated_by_user_id, confirmed_by_user_id, reason, settlement_notes, metadata, created_at, updated_at, shipment_id, business_id, order_item_id FROM marketplace_refunds
+WHERE order_id = $1
+  AND status = 'pending'
+ORDER BY created_at DESC
+LIMIT 1
+`
+
+func (q *Queries) GetPendingRefundByOrder(ctx context.Context, orderID string) (MarketplaceRefund, error) {
+	row := q.db.QueryRow(ctx, getPendingRefundByOrder, orderID)
+	var i MarketplaceRefund
+	err := row.Scan(
+		&i.ID,
+		&i.OrderID,
+		&i.PaymentID,
+		&i.AmountKobo,
+		&i.Status,
+		&i.Provider,
+		&i.ProviderRefundReference,
+		&i.InitiatedByUserID,
+		&i.ConfirmedByUserID,
+		&i.Reason,
+		&i.SettlementNotes,
+		&i.Metadata,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+		&i.ShipmentID,
+		&i.BusinessID,
+		&i.OrderItemID,
+	)
+	return i, err
+}
+
+const hasActiveRefundForShipment = `-- name: HasActiveRefundForShipment :one
+SELECT EXISTS (
+    SELECT 1 FROM marketplace_refunds
+    WHERE shipment_id = $1
+      AND status IN ('pending', 'successful')
+) AS has_active_refund
+`
+
+func (q *Queries) HasActiveRefundForShipment(ctx context.Context, shipmentID pgtype.Text) (bool, error) {
+	row := q.db.QueryRow(ctx, hasActiveRefundForShipment, shipmentID)
+	var has_active_refund bool
+	err := row.Scan(&has_active_refund)
+	return has_active_refund, err
+}
+
+const hasUnattributedSuccessfulOrPendingRefunds = `-- name: HasUnattributedSuccessfulOrPendingRefunds :one
+SELECT EXISTS (
+    SELECT 1 FROM marketplace_refunds
+    WHERE order_id = $1
+      AND shipment_id IS NULL
+      AND status IN ('pending', 'successful')
+) AS has_unattributed
+`
+
+func (q *Queries) HasUnattributedSuccessfulOrPendingRefunds(ctx context.Context, orderID string) (bool, error) {
+	row := q.db.QueryRow(ctx, hasUnattributedSuccessfulOrPendingRefunds, orderID)
+	var has_unattributed bool
+	err := row.Scan(&has_unattributed)
+	return has_unattributed, err
 }
 
 const incrementProductStock = `-- name: IncrementProductStock :one
@@ -3304,7 +3448,7 @@ func (q *Queries) ListMarketplaceProducts(ctx context.Context, arg ListMarketpla
 }
 
 const listMarketplaceRefundsByOrder = `-- name: ListMarketplaceRefundsByOrder :many
-SELECT id, order_id, payment_id, amount_kobo, status, provider, provider_refund_reference, initiated_by_user_id, confirmed_by_user_id, reason, settlement_notes, metadata, created_at, updated_at FROM marketplace_refunds
+SELECT id, order_id, payment_id, amount_kobo, status, provider, provider_refund_reference, initiated_by_user_id, confirmed_by_user_id, reason, settlement_notes, metadata, created_at, updated_at, shipment_id, business_id, order_item_id FROM marketplace_refunds
 WHERE order_id = $1
 ORDER BY created_at DESC
 `
@@ -3333,6 +3477,53 @@ func (q *Queries) ListMarketplaceRefundsByOrder(ctx context.Context, orderID str
 			&i.Metadata,
 			&i.CreatedAt,
 			&i.UpdatedAt,
+			&i.ShipmentID,
+			&i.BusinessID,
+			&i.OrderItemID,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listMarketplaceRefundsByShipment = `-- name: ListMarketplaceRefundsByShipment :many
+SELECT id, order_id, payment_id, amount_kobo, status, provider, provider_refund_reference, initiated_by_user_id, confirmed_by_user_id, reason, settlement_notes, metadata, created_at, updated_at, shipment_id, business_id, order_item_id FROM marketplace_refunds
+WHERE shipment_id = $1
+ORDER BY created_at DESC
+`
+
+func (q *Queries) ListMarketplaceRefundsByShipment(ctx context.Context, shipmentID pgtype.Text) ([]MarketplaceRefund, error) {
+	rows, err := q.db.Query(ctx, listMarketplaceRefundsByShipment, shipmentID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []MarketplaceRefund
+	for rows.Next() {
+		var i MarketplaceRefund
+		if err := rows.Scan(
+			&i.ID,
+			&i.OrderID,
+			&i.PaymentID,
+			&i.AmountKobo,
+			&i.Status,
+			&i.Provider,
+			&i.ProviderRefundReference,
+			&i.InitiatedByUserID,
+			&i.ConfirmedByUserID,
+			&i.Reason,
+			&i.SettlementNotes,
+			&i.Metadata,
+			&i.CreatedAt,
+			&i.UpdatedAt,
+			&i.ShipmentID,
+			&i.BusinessID,
+			&i.OrderItemID,
 		); err != nil {
 			return nil, err
 		}
@@ -3345,7 +3536,7 @@ func (q *Queries) ListMarketplaceRefundsByOrder(ctx context.Context, orderID str
 }
 
 const listMarketplaceShipmentItemsByShipment = `-- name: ListMarketplaceShipmentItemsByShipment :many
-SELECT msi.id, msi.shipment_id, msi.order_item_id, msi.quantity, msi.created_at,
+SELECT msi.id, msi.shipment_id, msi.order_item_id, msi.quantity, msi.created_at, msi.refunded_quantity, msi.refund_id,
        oi.product_id,
        oi.title_snapshot,
        oi.sku_snapshot,
@@ -3364,6 +3555,8 @@ type ListMarketplaceShipmentItemsByShipmentRow struct {
 	OrderItemID       string             `json:"order_item_id"`
 	Quantity          int32              `json:"quantity"`
 	CreatedAt         pgtype.Timestamptz `json:"created_at"`
+	RefundedQuantity  int32              `json:"refunded_quantity"`
+	RefundID          pgtype.Text        `json:"refund_id"`
 	ProductID         pgtype.Text        `json:"product_id"`
 	TitleSnapshot     string             `json:"title_snapshot"`
 	SkuSnapshot       string             `json:"sku_snapshot"`
@@ -3387,6 +3580,8 @@ func (q *Queries) ListMarketplaceShipmentItemsByShipment(ctx context.Context, sh
 			&i.OrderItemID,
 			&i.Quantity,
 			&i.CreatedAt,
+			&i.RefundedQuantity,
+			&i.RefundID,
 			&i.ProductID,
 			&i.TitleSnapshot,
 			&i.SkuSnapshot,
@@ -4289,7 +4484,7 @@ SET status = $2,
     metadata = $6,
     updated_at = CURRENT_TIMESTAMP
 WHERE id = $1
-RETURNING id, order_id, payment_id, amount_kobo, status, provider, provider_refund_reference, initiated_by_user_id, confirmed_by_user_id, reason, settlement_notes, metadata, created_at, updated_at
+RETURNING id, order_id, payment_id, amount_kobo, status, provider, provider_refund_reference, initiated_by_user_id, confirmed_by_user_id, reason, settlement_notes, metadata, created_at, updated_at, shipment_id, business_id, order_item_id
 `
 
 type UpdateMarketplaceRefundStatusParams struct {
@@ -4326,6 +4521,9 @@ func (q *Queries) UpdateMarketplaceRefundStatus(ctx context.Context, arg UpdateM
 		&i.Metadata,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.ShipmentID,
+		&i.BusinessID,
+		&i.OrderItemID,
 	)
 	return i, err
 }

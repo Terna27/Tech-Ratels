@@ -454,6 +454,7 @@ export default function SellerPortalPage() {
         body: JSON.stringify({
           carrier_name: carrierName.trim(),
           tracking_number: trackingNumber.trim(),
+          delivery_notes: dispatchNotes.trim(),
           notes: dispatchNotes.trim(),
         }),
       });

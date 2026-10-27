@@ -329,6 +329,7 @@ func NewRouter(p RouterParams) http.Handler {
 				mktAdm.Get("/shipments", p.MarketplaceHandler.ListAdminShipments)
 				mktAdm.Get("/shipments/{id}", p.MarketplaceHandler.GetShipment)
 				mktAdm.Post("/shipments/{id}/dispatch", p.MarketplaceHandler.DispatchShipment)
+				mktAdm.Put("/shipments/{id}/tracking", p.MarketplaceHandler.UpdateShipmentTracking)
 				mktAdm.Post("/shipments/{id}/delivered", p.MarketplaceHandler.ConfirmShipmentDelivery)
 				mktAdm.Get("/disputes", p.MarketplaceHandler.ListDisputesAdmin)
 				mktAdm.Post("/disputes/{id}/resolve", p.MarketplaceHandler.ResolveDispute)

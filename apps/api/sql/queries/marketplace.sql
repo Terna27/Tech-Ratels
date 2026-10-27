@@ -564,6 +564,13 @@ SET status = 'cancelled',
 WHERE order_id = $1
   AND status IN ('pending', 'processing');
 
+-- name: CancelMarketplaceShipmentByID :one
+UPDATE marketplace_shipments
+SET status = 'cancelled',
+    updated_at = CURRENT_TIMESTAMP
+WHERE id = $1
+RETURNING *;
+
 -- name: UpdateMarketplaceShipmentStatus :one
 UPDATE marketplace_shipments
 SET status = $2,
@@ -598,6 +605,10 @@ ORDER BY msi.created_at ASC;
 -- name: UpdateOrderItemShipmentID :exec
 UPDATE marketplace_order_items
 SET shipment_id = $2
+WHERE id = $1;
+
+-- name: GetMarketplaceOrderItemByID :one
+SELECT * FROM marketplace_order_items
 WHERE id = $1;
 
 -- -------------------------------------------------------------
@@ -689,11 +700,13 @@ INSERT INTO marketplace_refunds (
     id, order_id, payment_id, amount_kobo, status,
     provider, provider_refund_reference, initiated_by_user_id,
     confirmed_by_user_id, reason, settlement_notes, metadata,
+    shipment_id, business_id, order_item_id,
     created_at, updated_at
 ) VALUES (
     $1, $2, $3, $4, $5,
     $6, $7, $8,
     $9, $10, $11, $12,
+    $13, $14, $15,
     CURRENT_TIMESTAMP, CURRENT_TIMESTAMP
 ) RETURNING *;
 
@@ -723,6 +736,33 @@ FOR UPDATE;
 SELECT * FROM marketplace_refunds
 WHERE order_id = $1
 ORDER BY created_at DESC;
+
+-- name: GetPendingRefundByOrder :one
+SELECT * FROM marketplace_refunds
+WHERE order_id = $1
+  AND status = 'pending'
+ORDER BY created_at DESC
+LIMIT 1;
+
+-- name: ListMarketplaceRefundsByShipment :many
+SELECT * FROM marketplace_refunds
+WHERE shipment_id = $1
+ORDER BY created_at DESC;
+
+-- name: HasActiveRefundForShipment :one
+SELECT EXISTS (
+    SELECT 1 FROM marketplace_refunds
+    WHERE shipment_id = $1
+      AND status IN ('pending', 'successful')
+) AS has_active_refund;
+
+-- name: HasUnattributedSuccessfulOrPendingRefunds :one
+SELECT EXISTS (
+    SELECT 1 FROM marketplace_refunds
+    WHERE order_id = $1
+      AND shipment_id IS NULL
+      AND status IN ('pending', 'successful')
+) AS has_unattributed;
 
 -- name: GetMarketplaceRefundSumsByOrder :one
 SELECT

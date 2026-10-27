@@ -967,6 +967,9 @@ type MarketplaceRefund struct {
 	Metadata                json.RawMessage    `json:"metadata"`
 	CreatedAt               pgtype.Timestamptz `json:"created_at"`
 	UpdatedAt               pgtype.Timestamptz `json:"updated_at"`
+	ShipmentID              pgtype.Text        `json:"shipment_id"`
+	BusinessID              pgtype.Text        `json:"business_id"`
+	OrderItemID             pgtype.Text        `json:"order_item_id"`
 }
 
 type MarketplaceShipment struct {
@@ -987,11 +990,13 @@ type MarketplaceShipment struct {
 }
 
 type MarketplaceShipmentItem struct {
-	ID          string             `json:"id"`
-	ShipmentID  string             `json:"shipment_id"`
-	OrderItemID string             `json:"order_item_id"`
-	Quantity    int32              `json:"quantity"`
-	CreatedAt   pgtype.Timestamptz `json:"created_at"`
+	ID               string             `json:"id"`
+	ShipmentID       string             `json:"shipment_id"`
+	OrderItemID      string             `json:"order_item_id"`
+	Quantity         int32              `json:"quantity"`
+	CreatedAt        pgtype.Timestamptz `json:"created_at"`
+	RefundedQuantity int32              `json:"refunded_quantity"`
+	RefundID         pgtype.Text        `json:"refund_id"`
 }
 
 type MaterialRequest struct {

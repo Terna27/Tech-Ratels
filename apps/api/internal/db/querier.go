@@ -28,6 +28,7 @@ type Querier interface {
 	ApproveEventMedia(ctx context.Context, arg ApproveEventMediaParams) (EventMedium, error)
 	CalculateExternalInflowsAndOutflows(ctx context.Context, arg CalculateExternalInflowsAndOutflowsParams) (CalculateExternalInflowsAndOutflowsRow, error)
 	CalculateFundBalanceBeforeDate(ctx context.Context, arg CalculateFundBalanceBeforeDateParams) (int64, error)
+	CancelMarketplaceShipmentByID(ctx context.Context, id string) (MarketplaceShipment, error)
 	CancelMarketplaceShipmentsByOrder(ctx context.Context, orderID string) error
 	CancelPendingSchedulesForEvent(ctx context.Context, eventID string) error
 	CheckReportSnapshotExists(ctx context.Context, arg CheckReportSnapshotExistsParams) (int64, error)
@@ -339,6 +340,7 @@ type Querier interface {
 	GetMarketplaceOrderByIdempotencyKey(ctx context.Context, idempotencyKey pgtype.Text) (MarketplaceOrder, error)
 	GetMarketplaceOrderByOrderNumber(ctx context.Context, orderNumber string) (GetMarketplaceOrderByOrderNumberRow, error)
 	GetMarketplaceOrderForUpdate(ctx context.Context, id string) (MarketplaceOrder, error)
+	GetMarketplaceOrderItemByID(ctx context.Context, id string) (MarketplaceOrderItem, error)
 	GetMarketplacePaymentByOrder(ctx context.Context, orderID string) (MarketplacePayment, error)
 	GetMarketplacePaymentByOrderForUpdate(ctx context.Context, orderID string) (MarketplacePayment, error)
 	GetMarketplacePaymentByReference(ctx context.Context, reference string) (MarketplacePayment, error)
@@ -377,6 +379,7 @@ type Querier interface {
 	GetParticipationAppealByID(ctx context.Context, id string) (ParticipationAppeal, error)
 	GetParticipationClaimByEventAndUser(ctx context.Context, arg GetParticipationClaimByEventAndUserParams) (ParticipationClaim, error)
 	GetParticipationClaimByID(ctx context.Context, id string) (ParticipationClaim, error)
+	GetPendingRefundByOrder(ctx context.Context, orderID string) (MarketplaceRefund, error)
 	GetProjectMilestoneByID(ctx context.Context, id string) (GetProjectMilestoneByIDRow, error)
 	GetPublishedOverviewByScope(ctx context.Context, arg GetPublishedOverviewByScopeParams) (json.RawMessage, error)
 	GetPublishedReportByID(ctx context.Context, id string) (GetPublishedReportByIDRow, error)
@@ -416,6 +419,8 @@ type Querier interface {
 	GetVerificationRateLimit(ctx context.Context, arg GetVerificationRateLimitParams) (EmailVerificationRateLimit, error)
 	GetZoneByCode(ctx context.Context, code string) (Zone, error)
 	GetZoneByID(ctx context.Context, id string) (Zone, error)
+	HasActiveRefundForShipment(ctx context.Context, shipmentID pgtype.Text) (bool, error)
+	HasUnattributedSuccessfulOrPendingRefunds(ctx context.Context, orderID string) (bool, error)
 	IncrementCareersJobApplications(ctx context.Context, id string) error
 	IncrementCareersJobViews(ctx context.Context, id string) error
 	IncrementProductStock(ctx context.Context, arg IncrementProductStockParams) (MarketplaceProduct, error)
@@ -490,6 +495,7 @@ type Querier interface {
 	ListMarketplacePayments(ctx context.Context, arg ListMarketplacePaymentsParams) ([]ListMarketplacePaymentsRow, error)
 	ListMarketplaceProducts(ctx context.Context, arg ListMarketplaceProductsParams) ([]ListMarketplaceProductsRow, error)
 	ListMarketplaceRefundsByOrder(ctx context.Context, orderID string) ([]MarketplaceRefund, error)
+	ListMarketplaceRefundsByShipment(ctx context.Context, shipmentID pgtype.Text) ([]MarketplaceRefund, error)
 	ListMarketplaceShipmentItemsByShipment(ctx context.Context, shipmentID string) ([]ListMarketplaceShipmentItemsByShipmentRow, error)
 	ListMarketplaceShipmentsByBusiness(ctx context.Context, arg ListMarketplaceShipmentsByBusinessParams) ([]ListMarketplaceShipmentsByBusinessRow, error)
 	ListMarketplaceShipmentsByOrder(ctx context.Context, orderID string) ([]MarketplaceShipment, error)

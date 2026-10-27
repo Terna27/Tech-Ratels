@@ -871,3 +871,549 @@ func TestMultiVendor_ShipmentCreationAndDispatchTransactionRollback(t *testing.T
 		t.Errorf("Expected order status 'processing', got '%s'", ord.OrderStatus)
 	}
 }
+
+// 19. Partial refund allows remaining sellers to fulfill non-refunded items (VULN-01)
+func TestMultiVendor_PartialRefundAllowsRemainingSellerDispatch(t *testing.T) {
+	env := setupTestEnv(t)
+	defer env.Pool.Close()
+	ctx := context.Background()
+
+	admin, sellerA, _, prodA, prodB, orderRes := helperCreateMultiVendorOrder(t, env, ctx)
+	_, err := env.MarketplaceService.ConfirmPayment(ctx, orderRes.Payment.Reference)
+	if err != nil {
+		t.Fatalf("ConfirmPayment failed: %v", err)
+	}
+
+	shipments, err := env.MarketplaceService.ListOrderShipments(ctx, admin, orderRes.Order.ID)
+	if err != nil {
+		t.Fatalf("ListOrderShipments failed: %v", err)
+	}
+	var shipAId, shipBId string
+	for _, s := range shipments {
+		if s.Shipment.BusinessID.String == prodA.BusinessID {
+			shipAId = s.Shipment.ID
+		} else if s.Shipment.BusinessID.String == prodB.BusinessID {
+			shipBId = s.Shipment.ID
+		}
+	}
+	if shipAId == "" || shipBId == "" {
+		t.Fatalf("Expected both shipments found, got A: %s, B: %s", shipAId, shipBId)
+	}
+
+	// Refund Seller B's shipment specifically (amount = prodB price * 3)
+	refundBPrice := prodB.PriceKobo * 3
+	refB, _, err := env.MarketplaceService.InitiateRefund(ctx, admin, orderRes.Order.ID, service.RefundOrderInput{
+		AmountKobo: refundBPrice,
+		Reason:     "Seller B consignment damaged in warehouse",
+		ShipmentID: shipBId,
+	})
+	if err != nil {
+		t.Fatalf("InitiateRefund for shipment B failed: %v", err)
+	}
+
+	// Settle refund
+	_, _, err = env.MarketplaceService.ConfirmRefund(ctx, admin, refB.ID, service.ConfirmRefundInput{
+		ProviderRefundReference: refB.ProviderRefundReference,
+	})
+	if err != nil {
+		t.Fatalf("ConfirmRefund failed: %v", err)
+	}
+
+	// Verify order status is partially_refunded
+	ord, _, _, err := env.MarketplaceService.GetOrderByID(ctx, admin, orderRes.Order.ID)
+	if err != nil {
+		t.Fatalf("GetOrderByID failed: %v", err)
+	}
+	if ord.PaymentStatus != "partially_refunded" {
+		t.Fatalf("Expected payment status 'partially_refunded', got %s", ord.PaymentStatus)
+	}
+
+	// Verify shipment B is cancelled
+	shB, err := env.MarketplaceService.GetShipmentByID(ctx, admin, shipBId)
+	if err != nil {
+		t.Fatalf("GetShipmentByID B failed: %v", err)
+	}
+	if shB.Shipment.Status != "cancelled" {
+		t.Fatalf("Expected shipment B to be cancelled, got %s", shB.Shipment.Status)
+	}
+
+	// Now Seller A dispatches their unaffected, paid consignment!
+	shA, err := env.MarketplaceService.DispatchShipment(ctx, sellerA, shipAId, service.DispatchOrderInput{
+		CarrierName:    "GIG Logistics",
+		TrackingNumber: "GIG-A100",
+		DeliveryNotes:  "Fragile glass items packed",
+	})
+	if err != nil {
+		t.Fatalf("Seller A dispatch should succeed for non-refunded items, got error: %v", err)
+	}
+	if shA.Status != "dispatched" {
+		t.Fatalf("Expected shipment A status 'dispatched', got %s", shA.Status)
+	}
+
+	// Verify order fulfillment status is aggregated correctly (shipment A dispatched, shipment B cancelled)
+	ordAfter, _, _, _ := env.MarketplaceService.GetOrderByID(ctx, admin, orderRes.Order.ID)
+	if ordAfter.FulfilmentStatus != "dispatched" && ordAfter.FulfilmentStatus != "partially_dispatched" {
+		t.Errorf("Expected fulfilment status dispatched or partially_dispatched, got %s", ordAfter.FulfilmentStatus)
+	}
+}
+
+// 20. Rejection of dispatch for refunded consignment (VULN-01)
+func TestMultiVendor_RefundedShipmentDispatchRejection(t *testing.T) {
+	env := setupTestEnv(t)
+	defer env.Pool.Close()
+	ctx := context.Background()
+
+	admin, _, sellerB, _, prodB, orderRes := helperCreateMultiVendorOrder(t, env, ctx)
+	_, _ = env.MarketplaceService.ConfirmPayment(ctx, orderRes.Payment.Reference)
+
+	shipments, _ := env.MarketplaceService.ListOrderShipments(ctx, admin, orderRes.Order.ID)
+	var shipBId string
+	for _, s := range shipments {
+		if s.Shipment.BusinessID.String == prodB.BusinessID {
+			shipBId = s.Shipment.ID
+		}
+	}
+
+	// Initiate and confirm refund for shipment B
+	refB, _, err := env.MarketplaceService.InitiateRefund(ctx, admin, orderRes.Order.ID, service.RefundOrderInput{
+		AmountKobo: prodB.PriceKobo * 3,
+		Reason:     "Seller B refund",
+		ShipmentID: shipBId,
+	})
+	if err != nil {
+		t.Fatalf("InitiateRefund failed: %v", err)
+	}
+	_, _, err = env.MarketplaceService.ConfirmRefund(ctx, admin, refB.ID, service.ConfirmRefundInput{
+		ProviderRefundReference: refB.ProviderRefundReference,
+	})
+	if err != nil {
+		t.Fatalf("ConfirmRefund failed: %v", err)
+	}
+
+	// Seller B attempts to dispatch refunded/cancelled shipment B -> must be rejected!
+	_, err = env.MarketplaceService.DispatchShipment(ctx, sellerB, shipBId, service.DispatchOrderInput{
+		CarrierName:    "Rogue Courier",
+		TrackingNumber: "ROGUE-001",
+	})
+	if err == nil {
+		t.Fatal("Expected error when dispatching refunded/cancelled shipment, got nil")
+	}
+}
+
+// 21. Unattributed partial refund fails closed on seller dispatch (VULN-01)
+func TestMultiVendor_UnattributedPartialRefundFailsClosed(t *testing.T) {
+	env := setupTestEnv(t)
+	defer env.Pool.Close()
+	ctx := context.Background()
+
+	admin, sellerA, _, prodA, prodB, orderRes := helperCreateMultiVendorOrder(t, env, ctx)
+	_, _ = env.MarketplaceService.ConfirmPayment(ctx, orderRes.Payment.Reference)
+
+	shipments, _ := env.MarketplaceService.ListOrderShipments(ctx, admin, orderRes.Order.ID)
+	var shipAId string
+	for _, s := range shipments {
+		if s.Shipment.BusinessID.String == prodA.BusinessID {
+			shipAId = s.Shipment.ID
+		}
+	}
+
+	// Initiate partial refund WITHOUT shipment attribution
+	refUnattr, _, err := env.MarketplaceService.InitiateRefund(ctx, admin, orderRes.Order.ID, service.RefundOrderInput{
+		AmountKobo: prodB.PriceKobo * 1,
+		Reason:     "Ambiguous partial refund without shipment attribution",
+	})
+	if err != nil {
+		t.Fatalf("InitiateRefund failed: %v", err)
+	}
+	_, _, err = env.MarketplaceService.ConfirmRefund(ctx, admin, refUnattr.ID, service.ConfirmRefundInput{
+		ProviderRefundReference: refUnattr.ProviderRefundReference,
+	})
+	if err != nil {
+		t.Fatalf("ConfirmRefund failed: %v", err)
+	}
+
+	// Seller A attempts to dispatch -> must fail closed because of unattributed refund
+	_, err = env.MarketplaceService.DispatchShipment(ctx, sellerA, shipAId, service.DispatchOrderInput{
+		CarrierName:    "Carrier A",
+		TrackingNumber: "TRK-A",
+	})
+	if err == nil {
+		t.Fatal("Expected dispatch to fail closed on order with unattributed partial refunds, got nil")
+	}
+	if !strings.Contains(err.Error(), "unattributed partial refunds") {
+		t.Fatalf("Expected unattributed partial refund error message, got: %v", err)
+	}
+}
+
+// 22. Concurrent cancel and dispatch lock hierarchy prevents deadlock (VULN-02)
+func TestMultiVendor_ConcurrentCancelAndDispatchLockHierarchy(t *testing.T) {
+	env := setupTestEnv(t)
+	defer env.Pool.Close()
+	ctx := context.Background()
+
+	_, sellerA, _, prodA, _, orderRes := helperCreateMultiVendorOrder(t, env, ctx)
+	_, _ = env.MarketplaceService.ConfirmPayment(ctx, orderRes.Payment.Reference)
+
+	shipments, _ := env.MarketplaceService.ListOrderShipments(ctx, sellerA, orderRes.Order.ID)
+	var shipAId string
+	for _, s := range shipments {
+		if s.Shipment.BusinessID.String == prodA.BusinessID {
+			shipAId = s.Shipment.ID
+		}
+	}
+
+	var wg sync.WaitGroup
+	wg.Add(2)
+	errCh := make(chan error, 2)
+
+	// Goroutine 1: Buyer cancels order (Order lock first, then Shipments)
+	go func() {
+		defer wg.Done()
+		buyer := &db.User{ID: orderRes.Order.BuyerUserID.String, PrimaryRole: "member"}
+		_, err := env.MarketplaceService.CancelOrder(ctx, buyer, orderRes.Order.ID, "Buyer changed mind")
+		errCh <- err
+	}()
+
+	// Goroutine 2: Seller A dispatches shipment (Order lock first, then Shipment)
+	go func() {
+		defer wg.Done()
+		_, err := env.MarketplaceService.DispatchShipment(ctx, sellerA, shipAId, service.DispatchOrderInput{
+			CarrierName:    "FedEx",
+			TrackingNumber: "TRK-CONCURRENT",
+		})
+		errCh <- err
+	}()
+
+	wg.Wait()
+	close(errCh)
+
+	for err := range errCh {
+		if err != nil {
+			errStr := strings.ToLower(err.Error())
+			if strings.Contains(errStr, "deadlock detected") || strings.Contains(errStr, "40p01") {
+				t.Fatalf("Deadlock detected during concurrent cancel and dispatch: %v", err)
+			}
+		}
+	}
+}
+
+// 23. Unauthorized order shipment probing returns non-disclosing 404 (VULN-03)
+func TestMultiVendor_UnauthorizedOrderShipmentProbingRejected(t *testing.T) {
+	env := setupTestEnv(t)
+	defer env.Pool.Close()
+	ctx := context.Background()
+
+	_, _, _, _, _, orderRes := helperCreateMultiVendorOrder(t, env, ctx)
+	_, _ = env.MarketplaceService.ConfirmPayment(ctx, orderRes.Payment.Reference)
+
+	unrelatedUser := createRegisteredUser(t, env, fmt.Sprintf("probe_usr_%d", time.Now().UnixNano()), "member")
+
+	// Probing with valid existing order ID by unauthorized user
+	_, err := env.MarketplaceService.ListOrderShipments(ctx, unrelatedUser, orderRes.Order.ID)
+	if err == nil {
+		t.Fatal("Expected unauthorized order shipments query to fail, got nil")
+	}
+	if !errors.Is(err, service.ErrOrderNotFound) {
+		t.Fatalf("Expected ErrOrderNotFound non-disclosing error, got: %v", err)
+	}
+
+	// Probing nonexistent order ID returns identical error
+	nonExistentID := security.GenerateUUID()
+	_, nonExistentErr := env.MarketplaceService.ListOrderShipments(ctx, unrelatedUser, nonExistentID)
+	if !errors.Is(nonExistentErr, service.ErrOrderNotFound) {
+		t.Fatalf("Expected ErrOrderNotFound for nonexistent order, got: %v", nonExistentErr)
+	}
+}
+
+// 24. Bulk delivery confirmation blocked for multi-vendor orders (VULN-04)
+func TestMultiVendor_BulkDeliveryConfirmationBlockedForMultiVendor(t *testing.T) {
+	env := setupTestEnv(t)
+	defer env.Pool.Close()
+	ctx := context.Background()
+
+	admin, sellerA, sellerB, prodA, prodB, orderRes := helperCreateMultiVendorOrder(t, env, ctx)
+	_, _ = env.MarketplaceService.ConfirmPayment(ctx, orderRes.Payment.Reference)
+
+	shipments, _ := env.MarketplaceService.ListOrderShipments(ctx, admin, orderRes.Order.ID)
+	var shipAId, shipBId string
+	for _, s := range shipments {
+		if s.Shipment.BusinessID.String == prodA.BusinessID {
+			shipAId = s.Shipment.ID
+		} else if s.Shipment.BusinessID.String == prodB.BusinessID {
+			shipBId = s.Shipment.ID
+		}
+	}
+
+	// Dispatch both shipments
+	_, _ = env.MarketplaceService.DispatchShipment(ctx, sellerA, shipAId, service.DispatchOrderInput{CarrierName: "Carrier A", TrackingNumber: "TRK-A"})
+	_, _ = env.MarketplaceService.DispatchShipment(ctx, sellerB, shipBId, service.DispatchOrderInput{CarrierName: "Carrier B", TrackingNumber: "TRK-B"})
+
+	buyer := &db.User{ID: orderRes.Order.BuyerUserID.String, PrimaryRole: "member"}
+
+	// Attempting order-level bulk delivery confirmation on multi-vendor order must be BLOCKED
+	_, err := env.MarketplaceService.ConfirmDelivery(ctx, buyer, orderRes.Order.ID, "", "Confirm all")
+	if err == nil {
+		t.Fatal("Expected error when attempting order-level delivery confirmation on multi-vendor order, got nil")
+	}
+	if !strings.Contains(err.Error(), "cannot bulk confirm delivery") {
+		t.Fatalf("Expected multi-vendor rejection error, got: %v", err)
+	}
+
+	// Individual consignment confirmation on Shipment A succeeds!
+	shA, err := env.MarketplaceService.ConfirmShipmentDelivery(ctx, buyer, shipAId, "", "Received Seller A")
+	if err != nil {
+		t.Fatalf("ConfirmShipmentDelivery for shipment A failed: %v", err)
+	}
+	if shA.Status != "delivered" {
+		t.Errorf("Expected shipment A status delivered, got %s", shA.Status)
+	}
+
+	// Verify order status is partially_delivered
+	ord, _, _, _ := env.MarketplaceService.GetOrderByID(ctx, admin, orderRes.Order.ID)
+	if ord.FulfilmentStatus != "partially_delivered" {
+		t.Errorf("Expected fulfilment status partially_delivered, got %s", ord.FulfilmentStatus)
+	}
+
+	// Confirm Shipment B delivery
+	shB, err := env.MarketplaceService.ConfirmShipmentDelivery(ctx, buyer, shipBId, "", "Received Seller B")
+	if err != nil {
+		t.Fatalf("ConfirmShipmentDelivery for shipment B failed: %v", err)
+	}
+	if shB.Status != "delivered" {
+		t.Errorf("Expected shipment B status delivered, got %s", shB.Status)
+	}
+
+	// Verify order status is now fully delivered
+	ordDelivered, _, _, _ := env.MarketplaceService.GetOrderByID(ctx, admin, orderRes.Order.ID)
+	if ordDelivered.FulfilmentStatus != "delivered" || ordDelivered.OrderStatus != "delivered" {
+		t.Errorf("Expected order delivered, got fulfilment: %s, order: %s", ordDelivered.FulfilmentStatus, ordDelivered.OrderStatus)
+	}
+}
+
+// 25. Paid cancellation creates durable pending refund obligation (VULN-05)
+func TestMultiVendor_PaidCancellationCreatesDurableRefundObligation(t *testing.T) {
+	env := setupTestEnv(t)
+	defer env.Pool.Close()
+	ctx := context.Background()
+
+	admin, _, _, _, _, orderRes := helperCreateMultiVendorOrder(t, env, ctx)
+	_, _ = env.MarketplaceService.ConfirmPayment(ctx, orderRes.Payment.Reference)
+
+	buyer := &db.User{ID: orderRes.Order.BuyerUserID.String, PrimaryRole: "member"}
+
+	// Buyer cancels paid order
+	resOrder, err := env.MarketplaceService.CancelOrder(ctx, buyer, orderRes.Order.ID, "Customer requested cancellation before dispatch")
+	if err != nil {
+		t.Fatalf("CancelOrder failed: %v", err)
+	}
+
+	// Verify order status is cancelled
+	if resOrder.OrderStatus != "cancelled" {
+		t.Errorf("Expected order status cancelled, got %s", resOrder.OrderStatus)
+	}
+
+	// Payment status MUST NOT be prematurely set to 'refunded'
+	if resOrder.PaymentStatus == "refunded" {
+		t.Fatal("VULN-05 violation: payment_status was prematurely set to 'refunded' upon cancellation without verified settlement")
+	}
+
+	// Check durable pending refund in marketplace_refunds
+	refunds, err := env.MarketplaceService.ListRefundsByOrder(ctx, admin, orderRes.Order.ID)
+	if err != nil {
+		t.Fatalf("ListRefundsByOrder failed: %v", err)
+	}
+	if len(refunds) != 1 {
+		t.Fatalf("Expected 1 durable refund obligation created, got %d", len(refunds))
+	}
+	if refunds[0].Status != "pending" {
+		t.Errorf("Expected refund status 'pending', got %s", refunds[0].Status)
+	}
+	if refunds[0].AmountKobo != resOrder.TotalKobo {
+		t.Errorf("Expected refund amount %d, got %d", resOrder.TotalKobo, refunds[0].AmountKobo)
+	}
+
+	// Settle the refund
+	_, confirmedOrder, err := env.MarketplaceService.ConfirmRefund(ctx, admin, refunds[0].ID, service.ConfirmRefundInput{
+		ProviderRefundReference: refunds[0].ProviderRefundReference,
+	})
+	if err != nil {
+		t.Fatalf("ConfirmRefund failed: %v", err)
+	}
+	if confirmedOrder.PaymentStatus != "refunded" {
+		t.Errorf("Expected payment status 'refunded' after confirmation, got %s", confirmedOrder.PaymentStatus)
+	}
+}
+
+// 26. LGA coordinator jurisdiction oversight (VULN-06)
+func TestMultiVendor_LGACoordinatorShipmentOversight(t *testing.T) {
+	env := setupTestEnv(t)
+	defer env.Pool.Close()
+	ctx := context.Background()
+
+	admin := createRegisteredUser(t, env, fmt.Sprintf("lga_adm_%d", time.Now().UnixNano()), "super_admin")
+	seller, _, prod := helperCreateSellerWithProduct(t, env, ctx, fmt.Sprintf("lga_sel_%d", time.Now().UnixNano()), "LGA Store", "LGA Product", 20, admin)
+
+	// Fetch states and 2 distinct LGAs
+	states, err := env.Repo.Queries().ListStates(ctx)
+	if err != nil || len(states) == 0 {
+		t.Fatalf("Failed to retrieve states: %v", err)
+	}
+	st := states[0]
+
+	lgas, err := env.Repo.Queries().ListLGAsByState(ctx, st.ID)
+	if err != nil || len(lgas) < 2 {
+		t.Fatalf("Failed to retrieve LGAs for state %s: %v", st.ID, err)
+	}
+	lgaA := lgas[0]
+	lgaB := lgas[1]
+
+	buyer := createRegisteredUser(t, env, fmt.Sprintf("lga_buy_%d", time.Now().UnixNano()), "member")
+	orderRes, err := env.MarketplaceService.CreateOrder(ctx, buyer, service.CheckoutInput{
+		Items:           []service.CartItemInput{{ProductID: prod.ID, Quantity: 1}},
+		BuyerName:       "LGA Buyer",
+		BuyerEmail:      "lgabuyer@example.org",
+		BuyerPhone:      "+2348000000001",
+		DeliveryType:    "delivery",
+		ShippingAddress: "1 Market Square",
+		ShippingStateID: &st.ID,
+		ShippingLGAID:   &lgaA.ID,
+	})
+	if err != nil {
+		t.Fatalf("CreateOrder failed: %v", err)
+	}
+	_, _ = env.MarketplaceService.ConfirmPayment(ctx, orderRes.Payment.Reference)
+
+	shipments, err := env.MarketplaceService.ListOrderShipments(ctx, seller, orderRes.Order.ID)
+	if err != nil || len(shipments) == 0 {
+		t.Fatalf("Failed to retrieve shipments: %v", err)
+	}
+	shipId := shipments[0].Shipment.ID
+
+	// Create LGA Coordinator for LGA A
+	coordA := createRegisteredUser(t, env, fmt.Sprintf("lga_coord_a_%d", time.Now().UnixNano()), "lga_coordinator")
+	_, err = env.Repo.Queries().CreateAppointment(ctx, db.CreateAppointmentParams{
+		ID:               security.GenerateUUID(),
+		UserID:           coordA.ID,
+		RoleTitle:        "LGA Coordinator (" + lgaA.Name + ")",
+		RoleType:         "lga_coordinator",
+		JurisdictionType: "lga",
+		JurisdictionID:   pgtype.Text{String: lgaA.ID, Valid: true},
+		StartDate:        pgtype.Timestamptz{Time: time.Now().Add(-1 * time.Hour), Valid: true},
+		Status:           "active",
+	})
+	if err != nil {
+		t.Fatalf("CreateAppointment A failed: %v", err)
+	}
+
+	// Create LGA Coordinator for LGA B
+	coordB := createRegisteredUser(t, env, fmt.Sprintf("lga_coord_b_%d", time.Now().UnixNano()), "lga_coordinator")
+	_, err = env.Repo.Queries().CreateAppointment(ctx, db.CreateAppointmentParams{
+		ID:               security.GenerateUUID(),
+		UserID:           coordB.ID,
+		RoleTitle:        "LGA Coordinator (" + lgaB.Name + ")",
+		RoleType:         "lga_coordinator",
+		JurisdictionType: "lga",
+		JurisdictionID:   pgtype.Text{String: lgaB.ID, Valid: true},
+		StartDate:        pgtype.Timestamptz{Time: time.Now().Add(-1 * time.Hour), Valid: true},
+		Status:           "active",
+	})
+	if err != nil {
+		t.Fatalf("CreateAppointment B failed: %v", err)
+	}
+
+	// Coordinator A (matching LGA) can view shipment
+	shA, err := env.MarketplaceService.GetShipmentByID(ctx, coordA, shipId)
+	if err != nil {
+		t.Fatalf("Coordinator A should have access to shipment in LGA A: %v", err)
+	}
+	if shA.Shipment.ID != shipId {
+		t.Errorf("Expected shipment %s, got %s", shipId, shA.Shipment.ID)
+	}
+
+	// Coordinator B (mismatched LGA) is rejected
+	_, err = env.MarketplaceService.GetShipmentByID(ctx, coordB, shipId)
+	if err == nil {
+		t.Fatal("Expected ErrScopeUnauthorized for Coordinator B accessing LGA A shipment, got nil")
+	}
+	if !errors.Is(err, service.ErrScopeUnauthorized) {
+		t.Fatalf("Expected ErrScopeUnauthorized, got: %v", err)
+	}
+}
+
+// 27. Duplicate product cancellation stock restoration (VULN-07)
+func TestMultiVendor_DuplicateProductCancellationStockRestoration(t *testing.T) {
+	env := setupTestEnv(t)
+	defer env.Pool.Close()
+	ctx := context.Background()
+
+	admin := createRegisteredUser(t, env, fmt.Sprintf("dup_adm_%d", time.Now().UnixNano()), "super_admin")
+	_, _, prod := helperCreateSellerWithProduct(t, env, ctx, fmt.Sprintf("dup_sel_%d", time.Now().UnixNano()), "Duplicate Store", "Widget X", 50, admin)
+	buyer := createRegisteredUser(t, env, fmt.Sprintf("dup_buy_%d", time.Now().UnixNano()), "member")
+
+	// Order with two cart line items of Widget X: qty 2 and qty 3 (total 5)
+	orderRes, err := env.MarketplaceService.CreateOrder(ctx, buyer, service.CheckoutInput{
+		Items: []service.CartItemInput{
+			{ProductID: prod.ID, Quantity: 2},
+			{ProductID: prod.ID, Quantity: 3},
+		},
+		BuyerName:       "Duplicate Buyer",
+		BuyerEmail:      "dup@example.org",
+		BuyerPhone:      "+2348000000002",
+		DeliveryType:    "delivery",
+		ShippingAddress: "22 Industrial Ave",
+	})
+	if err != nil {
+		t.Fatalf("CreateOrder failed: %v", err)
+	}
+
+	// Verify stock was reduced by 5 (50 - 5 = 45)
+	pAfterOrder, _ := env.MarketplaceService.GetProductByID(ctx, prod.ID)
+	if pAfterOrder.StockQuantity != 45 {
+		t.Fatalf("Expected stock 45 after reserving 5 items, got %d", pAfterOrder.StockQuantity)
+	}
+
+	// Cancel order
+	_, err = env.MarketplaceService.CancelOrder(ctx, buyer, orderRes.Order.ID, "Changed mind on quantity")
+	if err != nil {
+		t.Fatalf("CancelOrder failed: %v", err)
+	}
+
+	// Verify stock is restored by EXACTLY 5 (back to 50), not just 2 or 3!
+	pAfterCancel, _ := env.MarketplaceService.GetProductByID(ctx, prod.ID)
+	if pAfterCancel.StockQuantity != 50 {
+		t.Fatalf("VULN-07 violation: expected stock 50 after cancellation restoration, got %d", pAfterCancel.StockQuantity)
+	}
+}
+
+// 28. Frontend dispatch notes payload compatibility (VULN-08)
+func TestMultiVendor_FrontendPayloadDeliveryNotesCompatibility(t *testing.T) {
+	env := setupTestEnv(t)
+	defer env.Pool.Close()
+	ctx := context.Background()
+
+	admin, sellerA, _, prodA, _, orderRes := helperCreateMultiVendorOrder(t, env, ctx)
+	_, _ = env.MarketplaceService.ConfirmPayment(ctx, orderRes.Payment.Reference)
+
+	shipments, _ := env.MarketplaceService.ListOrderShipments(ctx, admin, orderRes.Order.ID)
+	var shipAId string
+	for _, s := range shipments {
+		if s.Shipment.BusinessID.String == prodA.BusinessID {
+			shipAId = s.Shipment.ID
+		}
+	}
+
+	// Dispatch using "Notes" field (legacy frontend contract) without DeliveryNotes
+	shA, err := env.MarketplaceService.DispatchShipment(ctx, sellerA, shipAId, service.DispatchOrderInput{
+		CarrierName:    "Speed Courier",
+		TrackingNumber: "SPD-1234",
+		Notes:          "Package handed over to driver at warehouse dock",
+	})
+	if err != nil {
+		t.Fatalf("DispatchShipment failed: %v", err)
+	}
+
+	// Verify notes were recorded into delivery_notes
+	if shA.DeliveryNotes.String != "Package handed over to driver at warehouse dock" {
+		t.Errorf("Expected delivery notes 'Package handed over to driver at warehouse dock', got '%s'", shA.DeliveryNotes.String)
+	}
+}

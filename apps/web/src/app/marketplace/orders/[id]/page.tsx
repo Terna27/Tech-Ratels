@@ -233,8 +233,14 @@ export default function OrderDetailPage({ params }: OrderDetailProps) {
         <div className="flex items-center gap-2 flex-wrap">
           {order.order_status !== "cancelled" &&
             order.order_status !== "refunded" &&
+            order.order_status !== "dispatched" &&
+            order.order_status !== "partially_dispatched" &&
+            order.order_status !== "partially_delivered" &&
             order.order_status !== "delivered" &&
-            order.fulfilment_status !== "dispatched" && (
+            order.fulfilment_status !== "dispatched" &&
+            order.fulfilment_status !== "partially_dispatched" &&
+            order.fulfilment_status !== "partially_delivered" &&
+            order.fulfilment_status !== "delivered" && (
               <button
                 onClick={handleCancelOrder}
                 disabled={cancelling}
@@ -244,7 +250,9 @@ export default function OrderDetailPage({ params }: OrderDetailProps) {
               </button>
             )}
 
-          {order.fulfilment_status === "dispatched" && order.order_status !== "delivered" && (
+          {order.fulfilment_status === "dispatched" &&
+            order.order_status !== "delivered" &&
+            (!order.shipments || order.shipments.length <= 1) && (
             <button
               onClick={handleConfirmDelivery}
               disabled={confirmingDelivery}
