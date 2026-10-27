@@ -36,6 +36,7 @@ type Querier interface {
 	CloseSafeguardingCase(ctx context.Context, id string) (SafeguardingCase, error)
 	ConfirmMarketplaceShipmentDelivery(ctx context.Context, arg ConfirmMarketplaceShipmentDeliveryParams) (MarketplaceShipment, error)
 	CountActiveAppointments(ctx context.Context) (int64, error)
+	CountActiveShipmentItemsByShipment(ctx context.Context, shipmentID string) (int64, error)
 	CountActiveUsers(ctx context.Context) (int64, error)
 	CountAdminCommunityProjects(ctx context.Context, arg CountAdminCommunityProjectsParams) (int64, error)
 	CountAdminCommunityRequests(ctx context.Context, arg CountAdminCommunityRequestsParams) (int64, error)
@@ -404,6 +405,7 @@ type Querier interface {
 	GetSafeguardingSetting(ctx context.Context, key string) (SafeguardingSetting, error)
 	GetSchedulerRunByID(ctx context.Context, id string) (PublicReportSchedulerRun, error)
 	GetSchedulerRunByIdentifier(ctx context.Context, runIdentifier string) (PublicReportSchedulerRun, error)
+	GetShipmentItemByOrderItemID(ctx context.Context, orderItemID string) (GetShipmentItemByOrderItemIDRow, error)
 	GetStateByCode(ctx context.Context, code string) (State, error)
 	GetStateByID(ctx context.Context, id string) (State, error)
 	GetStockBalance(ctx context.Context, arg GetStockBalanceParams) (StockBalance, error)
@@ -514,6 +516,7 @@ type Querier interface {
 	ListOutboxAdmin(ctx context.Context, arg ListOutboxAdminParams) ([]NotificationOutbox, error)
 	ListPendingClaims(ctx context.Context) ([]ListPendingClaimsRow, error)
 	ListPendingClaimsByState(ctx context.Context, stateID string) ([]ListPendingClaimsByStateRow, error)
+	ListPendingMarketplaceRefunds(ctx context.Context, limit int32) ([]MarketplaceRefund, error)
 	ListPublicCareersJobs(ctx context.Context, arg ListPublicCareersJobsParams) ([]ListPublicCareersJobsRow, error)
 	ListPublicCommunityProjects(ctx context.Context, arg ListPublicCommunityProjectsParams) ([]ListPublicCommunityProjectsRow, error)
 	ListPublicGalleryMedia(ctx context.Context, arg ListPublicGalleryMediaParams) ([]ListPublicGalleryMediaRow, error)
@@ -648,6 +651,8 @@ type Querier interface {
 	UpdateSafeguardingCaseTriage(ctx context.Context, arg UpdateSafeguardingCaseTriageParams) (SafeguardingCase, error)
 	UpdateSafeguardingLegalHold(ctx context.Context, arg UpdateSafeguardingLegalHoldParams) (SafeguardingRetentionRecord, error)
 	UpdateSchedulerRun(ctx context.Context, arg UpdateSchedulerRunParams) (PublicReportSchedulerRun, error)
+	UpdateShipmentItemRefundByOrderItem(ctx context.Context, arg UpdateShipmentItemRefundByOrderItemParams) error
+	UpdateShipmentItemsRefundByShipment(ctx context.Context, arg UpdateShipmentItemsRefundByShipmentParams) error
 	UpdateState(ctx context.Context, arg UpdateStateParams) (State, error)
 	UpdateStatementItemMatch(ctx context.Context, arg UpdateStatementItemMatchParams) (FinancialStatementItem, error)
 	UpdateStockReservationStatus(ctx context.Context, arg UpdateStockReservationStatusParams) (StockReservation, error)

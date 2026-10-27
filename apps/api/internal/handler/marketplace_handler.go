@@ -1318,6 +1318,66 @@ func (h *MarketplaceHandler) AdminTriggerOrderExpiry(w http.ResponseWriter, r *h
 	JSON(w, http.StatusOK, result)
 }
 
+func (h *MarketplaceHandler) RetryPendingRefundsCron(w http.ResponseWriter, r *http.Request) {
+	cronSecret := r.Header.Get("X-Cron-Secret")
+	if cronSecret == "" {
+		cronSecret = r.Header.Get("X-Report-Cron-Secret")
+	}
+	if cronSecret == "" {
+		authHeader := r.Header.Get("Authorization")
+		if strings.HasPrefix(authHeader, "Bearer ") {
+			cronSecret = strings.TrimPrefix(authHeader, "Bearer ")
+		}
+	}
+
+	if h.cronSecret == "" || subtle.ConstantTimeCompare([]byte(cronSecret), []byte(h.cronSecret)) != 1 {
+		ErrorJSON(w, http.StatusUnauthorized, "UNAUTHORIZED", "Invalid or missing cron secret", nil)
+		return
+	}
+
+	batchSize := 50
+	if bs := r.URL.Query().Get("batch_size"); bs != "" {
+		if val, err := strconv.Atoi(bs); err == nil && val > 0 {
+			batchSize = val
+		}
+	}
+
+	result, err := h.marketplaceService.ProcessPendingRefunds(r.Context(), batchSize)
+	if err != nil {
+		ErrorJSON(w, http.StatusInternalServerError, "INTERNAL_ERROR", err.Error(), nil)
+		return
+	}
+
+	JSON(w, http.StatusOK, result)
+}
+
+func (h *MarketplaceHandler) AdminTriggerRefundRetry(w http.ResponseWriter, r *http.Request) {
+	user := GetCurrentUser(r.Context())
+	if user == nil {
+		ErrorJSON(w, http.StatusUnauthorized, "UNAUTHORIZED", "Authentication required", nil)
+		return
+	}
+	if user.PrimaryRole != "super_admin" && user.PrimaryRole != "admin" {
+		ErrorJSON(w, http.StatusForbidden, "FORBIDDEN", "Administrative permissions required", nil)
+		return
+	}
+
+	batchSize := 50
+	if bs := r.URL.Query().Get("batch_size"); bs != "" {
+		if val, err := strconv.Atoi(bs); err == nil && val > 0 {
+			batchSize = val
+		}
+	}
+
+	result, err := h.marketplaceService.ProcessPendingRefunds(r.Context(), batchSize)
+	if err != nil {
+		ErrorJSON(w, http.StatusInternalServerError, "INTERNAL_ERROR", err.Error(), nil)
+		return
+	}
+
+	JSON(w, http.StatusOK, result)
+}
+
 func (h *MarketplaceHandler) AdjustProductStock(w http.ResponseWriter, r *http.Request) {
 	user := GetCurrentUser(r.Context())
 	if user == nil {

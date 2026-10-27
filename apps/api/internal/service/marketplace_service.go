@@ -3444,6 +3444,11 @@ func (s *MarketplaceService) InitiateRefund(ctx context.Context, admin *db.User,
 			if !businessID.Valid {
 				businessID = TextFromString(itm.BusinessID)
 			}
+			if !shipmentID.Valid {
+				if si, siErr := q.GetShipmentItemByOrderItemID(ctx, itm.ID); siErr == nil {
+					shipmentID = TextFromString(si.ShipmentID)
+				}
+			}
 		}
 
 		refundID := security.GenerateUUID()
@@ -3715,15 +3720,25 @@ func (s *MarketplaceService) ManualSettleRefund(ctx context.Context, admin *db.U
 }
 
 func (s *MarketplaceService) settleRefundSuccess(ctx context.Context, admin *db.User, refundID string, providerRef string, notes string, metadata []byte) (*db.MarketplaceRefund, *db.GetMarketplaceOrderByIDRow, error) {
-	var updatedRefund db.MarketplaceRefund
-	var orderID string
+	initialRefund, err := s.repo.Queries().GetMarketplaceRefundByID(ctx, refundID)
+	if err != nil {
+		return nil, nil, errors.New("marketplace refund not found")
+	}
 
-	err := s.repo.WithTx(ctx, func(q *db.Queries) error {
+	var updatedRefund db.MarketplaceRefund
+	orderID := initialRefund.OrderID
+
+	err = s.repo.WithTx(ctx, func(q *db.Queries) error {
+		// Enforce strict order-first row lock hierarchy across all refund settlement workflows (VULN-02)
+		lockedOrder, err := q.GetMarketplaceOrderForUpdate(ctx, orderID)
+		if err != nil {
+			return fmt.Errorf("failed to lock order for refund settlement: %w", err)
+		}
+
 		lockedRefund, err := q.GetMarketplaceRefundByIDForUpdate(ctx, refundID)
 		if err != nil {
 			return errors.New("marketplace refund not found")
 		}
-		orderID = lockedRefund.OrderID
 
 		// Idempotent no-op if already successful
 		if lockedRefund.Status == "successful" {
@@ -3735,11 +3750,6 @@ func (s *MarketplaceService) settleRefundSuccess(ctx context.Context, admin *db.
 		}
 		if lockedRefund.Status != "pending" {
 			return fmt.Errorf("cannot settle refund with status '%s'", lockedRefund.Status)
-		}
-
-		lockedOrder, err := q.GetMarketplaceOrderForUpdate(ctx, lockedRefund.OrderID)
-		if err != nil {
-			return fmt.Errorf("failed to lock order for refund settlement: %w", err)
 		}
 
 		if admin != nil {
@@ -3816,6 +3826,14 @@ func (s *MarketplaceService) settleRefundSuccess(ctx context.Context, admin *db.
 			lockedOrder.FulfilmentStatus != "delivered" {
 
 			_ = q.CancelMarketplaceShipmentsByOrder(ctx, lockedOrder.ID)
+			shipments, _ := q.ListMarketplaceShipmentsByOrder(ctx, lockedOrder.ID)
+			for _, sh := range shipments {
+				_ = q.UpdateShipmentItemsRefundByShipment(ctx, db.UpdateShipmentItemsRefundByShipmentParams{
+					ShipmentID: sh.ID,
+					RefundID:   TextFromString(refundID),
+				})
+			}
+
 			items, err := q.ListMarketplaceOrderItemsByOrder(ctx, lockedOrder.ID)
 			if err != nil {
 				return err
@@ -3881,6 +3899,10 @@ func (s *MarketplaceService) settleRefundSuccess(ctx context.Context, admin *db.
 			shp, err := q.GetMarketplaceShipmentByID(ctx, lockedRefund.ShipmentID.String)
 			if err == nil && (shp.Status == "pending" || shp.Status == "processing" || shp.Status == "ready_for_pickup") {
 				_, _ = q.CancelMarketplaceShipmentByID(ctx, shp.ID)
+				_ = q.UpdateShipmentItemsRefundByShipment(ctx, db.UpdateShipmentItemsRefundByShipmentParams{
+					ShipmentID: shp.ID,
+					RefundID:   TextFromString(refundID),
+				})
 
 				type restockAgg struct {
 					totalQty int32
@@ -3904,11 +3926,8 @@ func (s *MarketplaceService) settleRefundSuccess(ctx context.Context, admin *db.
 					}
 
 					for pID, agg := range shipProdTotals {
-						releaseCount, cErr := q.CountOrderInventoryReleaseLogs(ctx, db.CountOrderInventoryReleaseLogsParams{
-							OrderID:   TextFromString(lockedOrder.ID),
-							ProductID: pID,
-						})
-						if cErr == nil && releaseCount == 0 {
+						idempKey := fmt.Sprintf("refund_restock:%s:%s", refundID, pID)
+						if _, lErr := q.GetMarketplaceInventoryLogByIdempotencyKey(ctx, TextFromString(idempKey)); lErr != nil {
 							incProd, err := q.IncrementProductStock(ctx, db.IncrementProductStockParams{
 								ID:            pID,
 								StockQuantity: agg.totalQty,
@@ -3929,9 +3948,53 @@ func (s *MarketplaceService) settleRefundSuccess(ctx context.Context, admin *db.
 									OrderID:        TextFromString(lockedOrder.ID),
 									ReferenceID:    refundID,
 									Reason:         fmt.Sprintf("Partial shipment refund %s settled", refundID),
-									IdempotencyKey: TextFromString(fmt.Sprintf("refund_restock:%s:%s", refundID, pID)),
+									IdempotencyKey: TextFromString(idempKey),
 								})
 							}
+						}
+					}
+				}
+			}
+		} else if !isFullRefund && canRestoreStock && lockedRefund.OrderItemID.Valid {
+			// Targeted order item refund: record item attribution and restock if shipment is not dispatched
+			_ = q.UpdateShipmentItemRefundByOrderItem(ctx, db.UpdateShipmentItemRefundByOrderItemParams{
+				OrderItemID: lockedRefund.OrderItemID.String,
+				RefundID:    TextFromString(refundID),
+			})
+
+			si, sErr := q.GetShipmentItemByOrderItemID(ctx, lockedRefund.OrderItemID.String)
+			if sErr == nil {
+				activeCount, cErr := q.CountActiveShipmentItemsByShipment(ctx, si.ShipmentID)
+				if cErr == nil && activeCount == 0 {
+					_, _ = q.CancelMarketplaceShipmentByID(ctx, si.ShipmentID)
+				}
+
+				if si.ProductID.Valid && strings.TrimSpace(si.ProductID.String) != "" {
+					pID := si.ProductID.String
+					idempKey := fmt.Sprintf("refund_restock:%s:%s", refundID, pID)
+					if _, lErr := q.GetMarketplaceInventoryLogByIdempotencyKey(ctx, TextFromString(idempKey)); lErr != nil {
+						incProd, err := q.IncrementProductStock(ctx, db.IncrementProductStockParams{
+							ID:            pID,
+							StockQuantity: si.Quantity,
+						})
+						if err == nil {
+							var actorID pgtype.Text
+							if admin != nil {
+								actorID = TextFromString(admin.ID)
+							}
+							_, _ = q.CreateMarketplaceInventoryLog(ctx, db.CreateMarketplaceInventoryLogParams{
+								ID:             security.GenerateUUID(),
+								ProductID:      pID,
+								BusinessID:     si.BusinessID,
+								ActorUserID:    actorID,
+								ActionType:     "refund_restock",
+								QuantityDelta:  si.Quantity,
+								BalanceAfter:   incProd.StockQuantity,
+								OrderID:        TextFromString(lockedOrder.ID),
+								ReferenceID:    refundID,
+								Reason:         fmt.Sprintf("Item-level partial refund %s settled", refundID),
+								IdempotencyKey: TextFromString(idempKey),
+							})
 						}
 					}
 				}
@@ -4167,18 +4230,78 @@ func (s *MarketplaceService) ResolveDispute(ctx context.Context, admin *db.User,
 		return nil, fmt.Errorf("failed to resolve dispute: %w", err)
 	}
 
-	// If resolved with refund, restore stock quantities and set order and payment status to refunded
+	// If resolved with refund, restore stock quantities safely with ledger logging and set order and payment status to refunded
 	if status == "resolved_refunded" {
 		_ = s.repo.WithTx(ctx, func(q *db.Queries) error {
-			items, _ := q.ListMarketplaceOrderItemsByOrder(ctx, d.OrderID)
-			for _, itm := range items {
-				if itm.ProductID.Valid {
-					_, _ = q.IncrementProductStock(ctx, db.IncrementProductStockParams{
-						ID:            itm.ProductID.String,
-						StockQuantity: itm.Quantity,
-					})
-				}
+			lockedOrder, err := q.GetMarketplaceOrderForUpdate(ctx, d.OrderID)
+			if err != nil {
+				return err
 			}
+
+			if !lockedOrder.StockReleased && lockedOrder.OrderStatus != "cancelled" && lockedOrder.OrderStatus != "refunded" {
+				items, err := q.ListMarketplaceOrderItemsByOrder(ctx, d.OrderID)
+				if err != nil {
+					return err
+				}
+
+				type restockAgg struct {
+					totalQty int32
+					busID    string
+				}
+				prodTotals := make(map[string]*restockAgg)
+				for _, itm := range items {
+					if itm.ProductID.Valid && strings.TrimSpace(itm.ProductID.String) != "" {
+						pID := itm.ProductID.String
+						if agg, exists := prodTotals[pID]; exists {
+							agg.totalQty += itm.Quantity
+						} else {
+							prodTotals[pID] = &restockAgg{
+								totalQty: itm.Quantity,
+								busID:    itm.BusinessID,
+							}
+						}
+					}
+				}
+
+				for pID, agg := range prodTotals {
+					idempKey := fmt.Sprintf("dispute_restock:%s:%s", disputeID, pID)
+					if _, lErr := q.GetMarketplaceInventoryLogByIdempotencyKey(ctx, TextFromString(idempKey)); lErr != nil {
+						incProd, err := q.IncrementProductStock(ctx, db.IncrementProductStockParams{
+							ID:            pID,
+							StockQuantity: agg.totalQty,
+						})
+						if err == nil {
+							var actorID pgtype.Text
+							if admin != nil {
+								actorID = TextFromString(admin.ID)
+							}
+							_, _ = q.CreateMarketplaceInventoryLog(ctx, db.CreateMarketplaceInventoryLogParams{
+								ID:             security.GenerateUUID(),
+								ProductID:      pID,
+								BusinessID:     agg.busID,
+								ActorUserID:    actorID,
+								ActionType:     "refund_restock",
+								QuantityDelta:  agg.totalQty,
+								BalanceAfter:   incProd.StockQuantity,
+								OrderID:        TextFromString(d.OrderID),
+								ReferenceID:    disputeID,
+								Reason:         "Dispute resolved with refund: " + notes,
+								IdempotencyKey: TextFromString(idempKey),
+							})
+						}
+					}
+				}
+
+				_, _ = q.UpdateMarketplaceOrderExpiryFields(ctx, db.UpdateMarketplaceOrderExpiryFieldsParams{
+					ID:                     lockedOrder.ID,
+					ReservationExpiresAt:   lockedOrder.ReservationExpiresAt,
+					CancellationReason:     "Dispute resolved with refund",
+					StockReleased:          true,
+					ReconciliationRequired: lockedOrder.ReconciliationRequired,
+					ReconciliationNotes:    lockedOrder.ReconciliationNotes,
+				})
+			}
+
 			_, _ = q.UpdateMarketplaceOrderStatus(ctx, db.UpdateMarketplaceOrderStatusParams{
 				ID:          d.OrderID,
 				OrderStatus: "refunded",
@@ -4904,4 +5027,132 @@ func (s *MarketplaceService) ListBusinessInventoryLogs(ctx context.Context, user
 		logs = []db.MarketplaceInventoryLog{}
 	}
 	return logs, nil
+}
+
+// -------------------------------------------------------------
+// Durable Refund Recovery & Retry Mechanism
+// -------------------------------------------------------------
+
+type ProcessPendingRefundsResult struct {
+	ProcessedCount int      `json:"processed_count"`
+	SettledCount   int      `json:"settled_count"`
+	FailedCount    int      `json:"failed_count"`
+	RetriedCount   int      `json:"retried_count"`
+	PendingCount   int      `json:"pending_count"`
+	Errors         []string `json:"errors,omitempty"`
+}
+
+func (s *MarketplaceService) ProcessPendingRefunds(ctx context.Context, batchSize int) (*ProcessPendingRefundsResult, error) {
+	if batchSize <= 0 {
+		batchSize = 50
+	}
+	if batchSize > 200 {
+		batchSize = 200
+	}
+
+	refunds, err := s.repo.Queries().ListPendingMarketplaceRefunds(ctx, int32(batchSize))
+	if err != nil {
+		return nil, fmt.Errorf("failed to list pending refunds: %w", err)
+	}
+
+	result := &ProcessPendingRefundsResult{
+		ProcessedCount: len(refunds),
+	}
+
+	for _, ref := range refunds {
+		// Manual or offline refunds require human administrator confirmation/evidence
+		if ref.Provider == "manual" || ref.Provider == "offline" {
+			result.PendingCount++
+			continue
+		}
+
+		providerRef := strings.TrimSpace(ref.ProviderRefundReference)
+
+		// Case 1: Provider reference already exists -> authoritatively verify status with provider
+		if providerRef != "" {
+			verifyOut, err := s.paymentGateway.VerifyRefund(ctx, providerRef)
+			if err != nil {
+				// Provider error/timeout: leave pending for next retry cycle
+				result.PendingCount++
+				result.Errors = append(result.Errors, fmt.Sprintf("refund %s verification error: %v", ref.ID, err))
+				continue
+			}
+
+			switch verifyOut.Status {
+			case "successful":
+				_, _, err := s.settleRefundSuccess(ctx, nil, ref.ID, providerRef, "Authoritatively confirmed by durable refund recovery worker", verifyOut.RawResponse)
+				if err != nil {
+					result.Errors = append(result.Errors, fmt.Sprintf("failed to settle verified refund %s: %v", ref.ID, err))
+				} else {
+					result.SettledCount++
+				}
+			case "failed":
+				_, _, err := s.FailRefund(ctx, nil, ref.ID, "Payment provider reported refund failure during recovery verification")
+				if err != nil {
+					result.Errors = append(result.Errors, fmt.Sprintf("failed to mark refund %s as failed: %v", ref.ID, err))
+				} else {
+					result.FailedCount++
+				}
+			default: // "pending", "processing", etc.
+				result.PendingCount++
+			}
+			continue
+		}
+
+		// Case 2: Provider reference is missing (e.g. timeout during initial dispatch or server crash)
+		// Retry initiating provider refund
+		payRec, pErr := s.repo.Queries().GetMarketplacePaymentByOrder(ctx, ref.OrderID)
+		if pErr != nil || payRec.Reference == "" {
+			result.PendingCount++
+			result.Errors = append(result.Errors, fmt.Sprintf("refund %s missing order payment record", ref.ID))
+			continue
+		}
+
+		refundOut, pReqErr := s.paymentGateway.RefundPayment(ctx, payment.RefundPaymentInput{
+			PaymentReference: payRec.Reference,
+			AmountKobo:       ref.AmountKobo,
+			Currency:         payRec.Currency,
+			CustomerNote:     ref.Reason,
+			MerchantNote:     fmt.Sprintf("Durable recovery retry for refund %s (order %s)", ref.ID, ref.OrderID),
+		})
+
+		if pReqErr != nil {
+			result.PendingCount++
+			result.Errors = append(result.Errors, fmt.Sprintf("refund %s initiation retry error: %v", ref.ID, pReqErr))
+			continue
+		}
+
+		if refundOut != nil {
+			if refundOut.Status == "successful" {
+				_, _, err := s.settleRefundSuccess(ctx, nil, ref.ID, refundOut.RefundReference, "Settled on recovery retry by payment provider", refundOut.RawResponse)
+				if err != nil {
+					result.Errors = append(result.Errors, fmt.Sprintf("failed to settle refund %s: %v", ref.ID, err))
+				} else {
+					result.SettledCount++
+				}
+			} else if refundOut.RefundReference != "" {
+				meta := refundOut.RawResponse
+				if len(meta) == 0 {
+					meta = []byte("{}")
+				}
+				_ = s.repo.WithTx(ctx, func(q *db.Queries) error {
+					_, err := q.UpdateMarketplaceRefundStatus(ctx, db.UpdateMarketplaceRefundStatusParams{
+						ID:                      ref.ID,
+						Status:                  "pending",
+						ProviderRefundReference: refundOut.RefundReference,
+						ConfirmedByUserID:       pgtype.Text{Valid: false},
+						SettlementNotes:         "Pending provider settlement (recorded by refund worker)",
+						Metadata:                meta,
+					})
+					return err
+				})
+				result.RetriedCount++
+				result.PendingCount++
+			} else {
+				result.PendingCount++
+			}
+		}
+	}
+
+	return result, nil
 }

@@ -11,9 +11,11 @@ import (
 	"ratels-api/internal/db"
 	"ratels-api/internal/delivery"
 	"ratels-api/internal/migrator"
+	"ratels-api/internal/payment"
 	"ratels-api/internal/repository"
 	"ratels-api/internal/security"
 	"ratels-api/internal/service"
+	"ratels-api/internal/storage"
 	"ratels-api/internal/worker"
 )
 
@@ -222,4 +224,33 @@ func TestOutboxWorker_PreferenceOptOutSkipping(t *testing.T) {
 	if check.DeliveryState != "skipped" {
 		t.Fatalf("expected delivery state 'skipped', got '%s'", check.DeliveryState)
 	}
+}
+
+func TestRefundWorker_Lifecycle(t *testing.T) {
+	testDBURL := os.Getenv("TEST_DATABASE_URL")
+	if testDBURL == "" {
+		testDBURL = "postgres://postgres@127.0.0.1:5432/ratels_test?sslmode=disable"
+	}
+
+	ctx := context.Background()
+	pool, err := pgxpool.New(ctx, testDBURL)
+	if err != nil {
+		t.Fatalf("Failed to connect to database: %v", err)
+	}
+	defer pool.Close()
+
+	repo := repository.NewRepository(pool)
+	auditSvc := service.NewAuditService(repo)
+	sandboxGateway := payment.NewSandboxGateway("http://localhost:3000")
+	mockStorage := storage.NewDevSandboxStorageService("http://localhost:3000")
+	mktSvc := service.NewMarketplaceService(repo, auditSvc, sandboxGateway, mockStorage)
+
+	w := worker.NewRefundWorker(mktSvc, &worker.RefundWorkerConfig{
+		PollInterval: 50 * time.Millisecond,
+		BatchSize:    10,
+	})
+
+	w.Start(ctx)
+	time.Sleep(100 * time.Millisecond)
+	w.Stop()
 }

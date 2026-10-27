@@ -611,6 +611,33 @@ WHERE id = $1;
 SELECT * FROM marketplace_order_items
 WHERE id = $1;
 
+-- name: UpdateShipmentItemsRefundByShipment :exec
+UPDATE marketplace_shipment_items
+SET refunded_quantity = quantity,
+    refund_id = $2
+WHERE shipment_id = $1;
+
+-- name: UpdateShipmentItemRefundByOrderItem :exec
+UPDATE marketplace_shipment_items
+SET refunded_quantity = quantity,
+    refund_id = $2
+WHERE order_item_id = $1;
+
+-- name: GetShipmentItemByOrderItemID :one
+SELECT msi.*,
+       oi.product_id,
+       oi.business_id,
+       oi.order_id
+FROM marketplace_shipment_items msi
+JOIN marketplace_order_items oi ON oi.id = msi.order_item_id
+WHERE msi.order_item_id = $1
+LIMIT 1;
+
+-- name: CountActiveShipmentItemsByShipment :one
+SELECT COUNT(*) FROM marketplace_shipment_items
+WHERE shipment_id = $1
+  AND (refund_id IS NULL OR refunded_quantity < quantity);
+
 -- -------------------------------------------------------------
 -- Marketplace Disputes
 -- -------------------------------------------------------------
@@ -736,6 +763,12 @@ FOR UPDATE;
 SELECT * FROM marketplace_refunds
 WHERE order_id = $1
 ORDER BY created_at DESC;
+
+-- name: ListPendingMarketplaceRefunds :many
+SELECT * FROM marketplace_refunds
+WHERE status = 'pending'
+ORDER BY created_at ASC
+LIMIT $1;
 
 -- name: GetPendingRefundByOrder :one
 SELECT * FROM marketplace_refunds

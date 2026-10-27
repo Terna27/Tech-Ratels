@@ -262,6 +262,10 @@ func main() {
 	reportScheduler.Start(ctx)
 	defer reportScheduler.Stop()
 
+	refundWorker := worker.NewRefundWorker(marketplaceService, nil)
+	refundWorker.Start(ctx)
+	defer refundWorker.Stop()
+
 	reportH := handler.NewReportHandler(reportService)
 	reportH.SetScheduler(reportScheduler, cfg.ReportCronSecret)
 

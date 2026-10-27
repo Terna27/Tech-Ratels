@@ -100,6 +100,19 @@ func (q *Queries) ConfirmMarketplaceShipmentDelivery(ctx context.Context, arg Co
 	return i, err
 }
 
+const countActiveShipmentItemsByShipment = `-- name: CountActiveShipmentItemsByShipment :one
+SELECT COUNT(*) FROM marketplace_shipment_items
+WHERE shipment_id = $1
+  AND (refund_id IS NULL OR refunded_quantity < quantity)
+`
+
+func (q *Queries) CountActiveShipmentItemsByShipment(ctx context.Context, shipmentID string) (int64, error) {
+	row := q.db.QueryRow(ctx, countActiveShipmentItemsByShipment, shipmentID)
+	var count int64
+	err := row.Scan(&count)
+	return count, err
+}
+
 const countOrderInventoryReleaseLogs = `-- name: CountOrderInventoryReleaseLogs :one
 SELECT COUNT(*) FROM marketplace_inventory_logs
 WHERE order_id = $1 AND product_id = $2
@@ -2316,6 +2329,48 @@ func (q *Queries) GetPendingRefundByOrder(ctx context.Context, orderID string) (
 	return i, err
 }
 
+const getShipmentItemByOrderItemID = `-- name: GetShipmentItemByOrderItemID :one
+SELECT msi.id, msi.shipment_id, msi.order_item_id, msi.quantity, msi.created_at, msi.refunded_quantity, msi.refund_id,
+       oi.product_id,
+       oi.business_id,
+       oi.order_id
+FROM marketplace_shipment_items msi
+JOIN marketplace_order_items oi ON oi.id = msi.order_item_id
+WHERE msi.order_item_id = $1
+LIMIT 1
+`
+
+type GetShipmentItemByOrderItemIDRow struct {
+	ID               string             `json:"id"`
+	ShipmentID       string             `json:"shipment_id"`
+	OrderItemID      string             `json:"order_item_id"`
+	Quantity         int32              `json:"quantity"`
+	CreatedAt        pgtype.Timestamptz `json:"created_at"`
+	RefundedQuantity int32              `json:"refunded_quantity"`
+	RefundID         pgtype.Text        `json:"refund_id"`
+	ProductID        pgtype.Text        `json:"product_id"`
+	BusinessID       string             `json:"business_id"`
+	OrderID          string             `json:"order_id"`
+}
+
+func (q *Queries) GetShipmentItemByOrderItemID(ctx context.Context, orderItemID string) (GetShipmentItemByOrderItemIDRow, error) {
+	row := q.db.QueryRow(ctx, getShipmentItemByOrderItemID, orderItemID)
+	var i GetShipmentItemByOrderItemIDRow
+	err := row.Scan(
+		&i.ID,
+		&i.ShipmentID,
+		&i.OrderItemID,
+		&i.Quantity,
+		&i.CreatedAt,
+		&i.RefundedQuantity,
+		&i.RefundID,
+		&i.ProductID,
+		&i.BusinessID,
+		&i.OrderID,
+	)
+	return i, err
+}
+
 const hasActiveRefundForShipment = `-- name: HasActiveRefundForShipment :one
 SELECT EXISTS (
     SELECT 1 FROM marketplace_refunds
@@ -3737,6 +3792,51 @@ func (q *Queries) ListMarketplaceShipmentsByOrder(ctx context.Context, orderID s
 	return items, nil
 }
 
+const listPendingMarketplaceRefunds = `-- name: ListPendingMarketplaceRefunds :many
+SELECT id, order_id, payment_id, amount_kobo, status, provider, provider_refund_reference, initiated_by_user_id, confirmed_by_user_id, reason, settlement_notes, metadata, created_at, updated_at, shipment_id, business_id, order_item_id FROM marketplace_refunds
+WHERE status = 'pending'
+ORDER BY created_at ASC
+LIMIT $1
+`
+
+func (q *Queries) ListPendingMarketplaceRefunds(ctx context.Context, limit int32) ([]MarketplaceRefund, error) {
+	rows, err := q.db.Query(ctx, listPendingMarketplaceRefunds, limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []MarketplaceRefund
+	for rows.Next() {
+		var i MarketplaceRefund
+		if err := rows.Scan(
+			&i.ID,
+			&i.OrderID,
+			&i.PaymentID,
+			&i.AmountKobo,
+			&i.Status,
+			&i.Provider,
+			&i.ProviderRefundReference,
+			&i.InitiatedByUserID,
+			&i.ConfirmedByUserID,
+			&i.Reason,
+			&i.SettlementNotes,
+			&i.Metadata,
+			&i.CreatedAt,
+			&i.UpdatedAt,
+			&i.ShipmentID,
+			&i.BusinessID,
+			&i.OrderItemID,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const markOrderCancelledWithReason = `-- name: MarkOrderCancelledWithReason :one
 UPDATE marketplace_orders
 SET order_status = 'cancelled',
@@ -4635,5 +4735,39 @@ type UpdateOrderItemShipmentIDParams struct {
 
 func (q *Queries) UpdateOrderItemShipmentID(ctx context.Context, arg UpdateOrderItemShipmentIDParams) error {
 	_, err := q.db.Exec(ctx, updateOrderItemShipmentID, arg.ID, arg.ShipmentID)
+	return err
+}
+
+const updateShipmentItemRefundByOrderItem = `-- name: UpdateShipmentItemRefundByOrderItem :exec
+UPDATE marketplace_shipment_items
+SET refunded_quantity = quantity,
+    refund_id = $2
+WHERE order_item_id = $1
+`
+
+type UpdateShipmentItemRefundByOrderItemParams struct {
+	OrderItemID string      `json:"order_item_id"`
+	RefundID    pgtype.Text `json:"refund_id"`
+}
+
+func (q *Queries) UpdateShipmentItemRefundByOrderItem(ctx context.Context, arg UpdateShipmentItemRefundByOrderItemParams) error {
+	_, err := q.db.Exec(ctx, updateShipmentItemRefundByOrderItem, arg.OrderItemID, arg.RefundID)
+	return err
+}
+
+const updateShipmentItemsRefundByShipment = `-- name: UpdateShipmentItemsRefundByShipment :exec
+UPDATE marketplace_shipment_items
+SET refunded_quantity = quantity,
+    refund_id = $2
+WHERE shipment_id = $1
+`
+
+type UpdateShipmentItemsRefundByShipmentParams struct {
+	ShipmentID string      `json:"shipment_id"`
+	RefundID   pgtype.Text `json:"refund_id"`
+}
+
+func (q *Queries) UpdateShipmentItemsRefundByShipment(ctx context.Context, arg UpdateShipmentItemsRefundByShipmentParams) error {
+	_, err := q.db.Exec(ctx, updateShipmentItemsRefundByShipment, arg.ShipmentID, arg.RefundID)
 	return err
 }

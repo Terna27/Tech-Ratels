@@ -1080,3 +1080,57 @@ func TestMarketplaceHTTP_InventoryLedgerAndExpiryEndpoints(t *testing.T) {
 		t.Fatalf("Expected 200 OK for fetching business inventory logs, got %d: %s", rr.Code, rr.Body.String())
 	}
 }
+
+func TestMarketplaceHTTP_RefundRecoveryEndpoints(t *testing.T) {
+	h := setupTestHarness(t)
+	defer h.Pool.Close()
+
+	// 1. Internal Cron Endpoint Authentication
+	// Missing cron secret -> 401
+	req, _ := http.NewRequest("POST", "/api/v1/internal/cron/retry-refunds", nil)
+	rr := httptest.NewRecorder()
+	h.Router.ServeHTTP(rr, req)
+	if rr.Code != http.StatusUnauthorized {
+		t.Fatalf("Expected 401 for missing cron secret, got %d: %s", rr.Code, rr.Body.String())
+	}
+
+	// Invalid cron secret -> 401
+	req, _ = http.NewRequest("POST", "/api/v1/internal/cron/retry-refunds", nil)
+	req.Header.Set("X-Cron-Secret", "wrong_secret_string")
+	rr = httptest.NewRecorder()
+	h.Router.ServeHTTP(rr, req)
+	if rr.Code != http.StatusUnauthorized {
+		t.Fatalf("Expected 401 for invalid cron secret, got %d: %s", rr.Code, rr.Body.String())
+	}
+
+	// Valid cron secret -> 200
+	req, _ = http.NewRequest("POST", "/api/v1/internal/cron/retry-refunds?batch_size=20", nil)
+	req.Header.Set("X-Cron-Secret", "test_cron_secret_32_chars_long_123")
+	rr = httptest.NewRecorder()
+	h.Router.ServeHTTP(rr, req)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("Expected 200 OK for valid cron secret, got %d: %s", rr.Code, rr.Body.String())
+	}
+
+	// 2. Admin Trigger Endpoint Authorization
+	_, memberToken := createTestUserWithToken(t, h, "mkt_ref_member", "Member", "member")
+	_, adminToken := createTestUserWithToken(t, h, "mkt_ref_admin", "Admin", "super_admin")
+
+	// Member attempts to trigger refund retry -> 403 Forbidden
+	req, _ = http.NewRequest("POST", "/api/v1/marketplace/admin/refunds/retry-pending", nil)
+	req.Header.Set("Authorization", "Bearer "+memberToken)
+	rr = httptest.NewRecorder()
+	h.Router.ServeHTTP(rr, req)
+	if rr.Code != http.StatusForbidden {
+		t.Fatalf("Expected 403 Forbidden for member triggering refund retry, got %d: %s", rr.Code, rr.Body.String())
+	}
+
+	// Super Admin triggers refund retry -> 200 OK
+	req, _ = http.NewRequest("POST", "/api/v1/marketplace/admin/refunds/retry-pending?batch_size=25", nil)
+	req.Header.Set("Authorization", "Bearer "+adminToken)
+	rr = httptest.NewRecorder()
+	h.Router.ServeHTTP(rr, req)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("Expected 200 OK for admin triggering refund retry, got %d: %s", rr.Code, rr.Body.String())
+	}
+}

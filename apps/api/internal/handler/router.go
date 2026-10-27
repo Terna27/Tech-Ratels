@@ -334,6 +334,7 @@ func NewRouter(p RouterParams) http.Handler {
 				mktAdm.Get("/disputes", p.MarketplaceHandler.ListDisputesAdmin)
 				mktAdm.Post("/disputes/{id}/resolve", p.MarketplaceHandler.ResolveDispute)
 				mktAdm.Post("/inventory/expire-stale-orders", p.MarketplaceHandler.AdminTriggerOrderExpiry)
+				mktAdm.Post("/refunds/retry-pending", p.MarketplaceHandler.AdminTriggerRefundRetry)
 				mktAdm.Get("/products/{id}/inventory-logs", p.MarketplaceHandler.ListProductInventoryLogs)
 			})
 		})
@@ -486,6 +487,7 @@ func NewRouter(p RouterParams) http.Handler {
 			api.Route("/internal", func(in chi.Router) {
 				in.Post("/cron/reports", p.ReportHandler.RunSchedulerCron)
 				in.Post("/cron/expire-orders", p.MarketplaceHandler.ExpireStaleOrdersCron)
+				in.Post("/cron/retry-refunds", p.MarketplaceHandler.RetryPendingRefundsCron)
 			})
 		}
 
