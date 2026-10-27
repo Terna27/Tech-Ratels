@@ -25,7 +25,7 @@ CREATE INDEX IF NOT EXISTS idx_mkt_inventory_logs_idempotency ON marketplace_inv
 CREATE INDEX IF NOT EXISTS idx_mkt_inventory_logs_created ON marketplace_inventory_logs(created_at DESC);
 
 -- 2. Marketplace Orders Expiry, Cancellation Reason & Reconciliation Fields
-ALTER TABLE marketplace_orders 
+ALTER TABLE marketplace_orders
     ADD COLUMN IF NOT EXISTS reservation_expires_at TIMESTAMPTZ,
     ADD COLUMN IF NOT EXISTS cancellation_reason VARCHAR(255) NOT NULL DEFAULT '',
     ADD COLUMN IF NOT EXISTS stock_released BOOLEAN NOT NULL DEFAULT FALSE,
@@ -34,15 +34,15 @@ ALTER TABLE marketplace_orders
 
 -- Update order_status check constraint to support requires_reconciliation state
 ALTER TABLE marketplace_orders DROP CONSTRAINT IF EXISTS marketplace_orders_order_status_check;
-ALTER TABLE marketplace_orders ADD CONSTRAINT marketplace_orders_order_status_check 
+ALTER TABLE marketplace_orders ADD CONSTRAINT marketplace_orders_order_status_check
     CHECK (order_status IN ('placed', 'processing', 'ready_for_pickup', 'dispatched', 'delivered', 'cancelled', 'refunded', 'requires_reconciliation'));
 
-CREATE INDEX IF NOT EXISTS idx_mkt_orders_reservation_expiry 
-    ON marketplace_orders(payment_status, reservation_expires_at) 
+CREATE INDEX IF NOT EXISTS idx_mkt_orders_reservation_expiry
+    ON marketplace_orders(payment_status, reservation_expires_at)
     WHERE payment_status = 'pending' AND stock_released = FALSE;
 
-CREATE INDEX IF NOT EXISTS idx_mkt_orders_reconciliation 
-    ON marketplace_orders(reconciliation_required) 
+CREATE INDEX IF NOT EXISTS idx_mkt_orders_reconciliation
+    ON marketplace_orders(reconciliation_required)
     WHERE reconciliation_required = TRUE;
 
 -- +goose Down
@@ -55,5 +55,5 @@ ALTER TABLE marketplace_orders DROP COLUMN IF EXISTS stock_released;
 ALTER TABLE marketplace_orders DROP COLUMN IF EXISTS reconciliation_required;
 ALTER TABLE marketplace_orders DROP COLUMN IF EXISTS reconciliation_notes;
 ALTER TABLE marketplace_orders DROP CONSTRAINT IF EXISTS marketplace_orders_order_status_check;
-ALTER TABLE marketplace_orders ADD CONSTRAINT marketplace_orders_order_status_check 
+ALTER TABLE marketplace_orders ADD CONSTRAINT marketplace_orders_order_status_check
     CHECK (order_status IN ('placed', 'processing', 'ready_for_pickup', 'dispatched', 'delivered', 'cancelled', 'refunded'));
