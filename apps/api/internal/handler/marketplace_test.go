@@ -1036,8 +1036,9 @@ func TestMarketplaceHTTP_InventoryLedgerAndExpiryEndpoints(t *testing.T) {
 
 	// 4. Manual Stock Adjustment
 	adjBody, _ := json.Marshal(map[string]interface{}{
-		"quantity_delta": 15,
-		"reason":         "Restock batch A",
+		"idempotency_key": fmt.Sprintf("adj-http-seller1-%d", time.Now().UnixNano()),
+		"quantity_delta":  15,
+		"reason":          "Restock batch A",
 	})
 
 	// Seller 1 adjusts own product -> 200 OK

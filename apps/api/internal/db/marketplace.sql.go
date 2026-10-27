@@ -2238,7 +2238,7 @@ func (q *Queries) ListBusinessBranchesByBusiness(ctx context.Context, businessID
 
 const listExpiredPendingMarketplaceOrders = `-- name: ListExpiredPendingMarketplaceOrders :many
 SELECT id, order_number, buyer_user_id, buyer_name, buyer_email, buyer_phone, delivery_type, shipping_address, shipping_state_id, shipping_lga_id, pickup_branch_id, subtotal_kobo, delivery_fee_kobo, total_kobo, currency, order_status, payment_status, fulfilment_status, idempotency_key, notes, created_at, updated_at, version, reservation_expires_at, cancellation_reason, stock_released, reconciliation_required, reconciliation_notes FROM marketplace_orders
-WHERE payment_status = 'pending'
+WHERE payment_status IN ('pending', 'failed')
   AND order_status = 'placed'
   AND stock_released = FALSE
   AND reservation_expires_at IS NOT NULL

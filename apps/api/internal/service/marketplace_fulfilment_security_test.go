@@ -781,3 +781,97 @@ func TestFulfilmentSecurity_SellerFacingCustomerDataMinimization(t *testing.T) {
 		t.Errorf("Buyer must see all their cart items (expected 2, got %d)", len(buyerItems))
 	}
 }
+
+// 11. Dispatch blocked for reconciliation orders
+func TestFulfilmentSecurity_RequiresReconciliationDispatchRejection(t *testing.T) {
+	env := setupTestEnv(t)
+	defer env.Pool.Close()
+	ctx := context.Background()
+
+	admin := createRegisteredUser(t, env, "sec_admin_rec_1", "super_admin")
+	seller, _, prod := helperCreateSellerWithProduct(t, env, ctx, "sec_seller_rec_1", "Seller Store Rec 1", "Safety Boots", 10, admin)
+	buyer := createRegisteredUser(t, env, "sec_buyer_rec_1", "member")
+
+	orderRes, err := env.MarketplaceService.CreateOrder(ctx, buyer, service.CheckoutInput{
+		Items:           []service.CartItemInput{{ProductID: prod.ID, Quantity: 2}},
+		BuyerName:       "Reconciliation Buyer",
+		BuyerEmail:      "rec_buyer@example.org",
+		BuyerPhone:      "+2348011112222",
+		DeliveryType:    "delivery",
+		ShippingAddress: "123 Reconciliation St",
+	})
+	if err != nil {
+		t.Fatalf("CreateOrder failed: %v", err)
+	}
+
+	// Order is marked as paid but requiring reconciliation (e.g. late payment after expiry)
+	_, err = env.Pool.Exec(ctx, `
+		UPDATE marketplace_orders
+		SET payment_status = 'paid',
+		    order_status = 'requires_reconciliation',
+		    reconciliation_required = true,
+		    stock_released = true,
+		    reconciliation_notes = 'Test late payment reconciliation'
+		WHERE id = $1`, orderRes.Order.ID)
+	if err != nil {
+		t.Fatalf("Failed to update order to requires_reconciliation: %v", err)
+	}
+
+	// Attempt to dispatch must fail with ErrOrderReconciliationRequired
+	_, err = env.MarketplaceService.DispatchOrder(ctx, seller, orderRes.Order.ID, service.DispatchOrderInput{
+		CarrierName:    "DHL",
+		TrackingNumber: "DHL-REC-001",
+	})
+	if err == nil {
+		t.Fatal("Expected error when dispatching order in requires_reconciliation state, got nil")
+	}
+	if !errors.Is(err, service.ErrOrderReconciliationRequired) {
+		t.Fatalf("Expected ErrOrderReconciliationRequired, got %v", err)
+	}
+}
+
+// 12. Dispatch blocked when stock_released is true
+func TestFulfilmentSecurity_StockReleasedDispatchRejection(t *testing.T) {
+	env := setupTestEnv(t)
+	defer env.Pool.Close()
+	ctx := context.Background()
+
+	admin := createRegisteredUser(t, env, "sec_admin_rel_1", "super_admin")
+	seller, _, prod := helperCreateSellerWithProduct(t, env, ctx, "sec_seller_rel_1", "Seller Store Rel 1", "Safety Goggles", 10, admin)
+	buyer := createRegisteredUser(t, env, "sec_buyer_rel_1", "member")
+
+	orderRes, err := env.MarketplaceService.CreateOrder(ctx, buyer, service.CheckoutInput{
+		Items:           []service.CartItemInput{{ProductID: prod.ID, Quantity: 1}},
+		BuyerName:       "Released Stock Buyer",
+		BuyerEmail:      "released_buyer@example.org",
+		BuyerPhone:      "+2348011112222",
+		DeliveryType:    "delivery",
+		ShippingAddress: "456 Released Rd",
+	})
+	if err != nil {
+		t.Fatalf("CreateOrder failed: %v", err)
+	}
+
+	// Order is marked as paid, but stock was released
+	_, err = env.Pool.Exec(ctx, `
+		UPDATE marketplace_orders
+		SET payment_status = 'paid',
+		    order_status = 'processing',
+		    stock_released = true
+		WHERE id = $1`, orderRes.Order.ID)
+	if err != nil {
+		t.Fatalf("Failed to update order stock_released: %v", err)
+	}
+
+	// Attempt to dispatch must fail with ErrOrderStockAlreadyReleased
+	_, err = env.MarketplaceService.DispatchOrder(ctx, seller, orderRes.Order.ID, service.DispatchOrderInput{
+		CarrierName:    "FedEx",
+		TrackingNumber: "FDX-REL-001",
+	})
+	if err == nil {
+		t.Fatal("Expected error when dispatching order with stock_released = true, got nil")
+	}
+	if !errors.Is(err, service.ErrOrderStockAlreadyReleased) {
+		t.Fatalf("Expected ErrOrderStockAlreadyReleased, got %v", err)
+	}
+}

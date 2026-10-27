@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -890,8 +891,9 @@ func TestInventory_ManualStockAdjustmentPermissions(t *testing.T) {
 
 	// Seller 1 adjusts own product (+10)
 	upProd, log1, err := mktSvc.AdjustInventory(ctx, seller1, prod1.ID, service.AdjustInventoryInput{
-		QuantityDelta: 10,
-		Reason:        "Received new stock shipment",
+		IdempotencyKey: fmt.Sprintf("test-adj-seller1-%d", time.Now().UnixNano()),
+		QuantityDelta:  10,
+		Reason:         "Received new stock shipment",
 	})
 	if err != nil {
 		t.Fatalf("Seller adjust inventory failed: %v", err)
@@ -905,8 +907,9 @@ func TestInventory_ManualStockAdjustmentPermissions(t *testing.T) {
 
 	// Seller 2 attempts to adjust Seller 1's product -> Rejected!
 	_, _, err = mktSvc.AdjustInventory(ctx, seller2, prod1.ID, service.AdjustInventoryInput{
-		QuantityDelta: -5,
-		Reason:        "Unauthorized tampering attempt",
+		IdempotencyKey: fmt.Sprintf("test-adj-seller2-%d", time.Now().UnixNano()),
+		QuantityDelta:  -5,
+		Reason:         "Unauthorized tampering attempt",
 	})
 	if err == nil {
 		t.Fatalf("Expected unauthorized error for cross-seller adjustment, got nil")
@@ -914,8 +917,9 @@ func TestInventory_ManualStockAdjustmentPermissions(t *testing.T) {
 
 	// Super Admin adjusts product (-5) -> Allowed!
 	upProd2, log2, err := mktSvc.AdjustInventory(ctx, admin, prod1.ID, service.AdjustInventoryInput{
-		QuantityDelta: -5,
-		Reason:        "Damaged units write-off",
+		IdempotencyKey: fmt.Sprintf("test-adj-admin-%d", time.Now().UnixNano()),
+		QuantityDelta:  -5,
+		Reason:         "Damaged units write-off",
 	})
 	if err != nil {
 		t.Fatalf("Admin adjust inventory failed: %v", err)
@@ -929,8 +933,9 @@ func TestInventory_ManualStockAdjustmentPermissions(t *testing.T) {
 
 	// Negative balance rejection: attempt to subtract 100 when only 25 in stock
 	_, _, err = mktSvc.AdjustInventory(ctx, seller1, prod1.ID, service.AdjustInventoryInput{
-		QuantityDelta: -100,
-		Reason:        "Attempting negative balance",
+		IdempotencyKey: fmt.Sprintf("test-adj-neg-%d", time.Now().UnixNano()),
+		QuantityDelta:  -100,
+		Reason:         "Attempting negative balance",
 	})
 	if err == nil {
 		t.Fatalf("Expected error for negative balance adjustment, got nil")
@@ -965,7 +970,11 @@ func TestInventory_LedgerRunningBalanceIntegrity(t *testing.T) {
 	mktSvc := service.NewMarketplaceService(env.Repo, env.AuditService, gw)
 
 	// Step A: Manual +5 (10 -> 15)
-	_, _, err := mktSvc.AdjustInventory(ctx, seller, prod.ID, service.AdjustInventoryInput{QuantityDelta: 5, Reason: "Restock"})
+	_, _, err := mktSvc.AdjustInventory(ctx, seller, prod.ID, service.AdjustInventoryInput{
+		IdempotencyKey: fmt.Sprintf("adj-ledger-%d", time.Now().UnixNano()),
+		QuantityDelta:  5,
+		Reason:         "Restock",
+	})
 	if err != nil {
 		t.Fatalf("AdjustInventory failed: %v", err)
 	}
@@ -1089,5 +1098,510 @@ func TestInventory_UniqueIdempotencyKeyConstraint(t *testing.T) {
 	})
 	if err == nil {
 		t.Fatalf("Expected error for duplicate idempotency key, got nil")
+	}
+}
+
+// 15. Pending provider verification preserves reservation
+func TestInventory_PendingProviderVerificationPreservesReservation(t *testing.T) {
+	env := setupTestEnv(t)
+	defer env.Pool.Close()
+	ctx := context.Background()
+
+	admin := createRegisteredUser(t, env, "inv_admin_pend", "super_admin")
+	_, _, prod := helperCreateSellerWithProduct(t, env, ctx, "inv_seller_pend", "Pending Store", "Pliers", 10, admin)
+	buyer := createRegisteredUser(t, env, "inv_buyer_pend", "member")
+
+	gw := &mockInventoryExpiryGateway{
+		providerName: "paystack",
+		verifyFn: func(ctx context.Context, reference string) (*payment.VerifyPaymentOutput, error) {
+			return &payment.VerifyPaymentOutput{
+				PaymentReference: reference,
+				Status:           "pending",
+			}, nil
+		},
+	}
+	mktSvc := service.NewMarketplaceService(env.Repo, env.AuditService, gw)
+
+	orderRes, err := mktSvc.CreateOrder(ctx, buyer, service.CheckoutInput{
+		Items:        []service.CartItemInput{{ProductID: prod.ID, Quantity: 3}},
+		BuyerName:    "Pending Buyer",
+		BuyerEmail:   "pend_buyer@example.org",
+		BuyerPhone:   "+2348000000015",
+		DeliveryType: "pickup",
+	})
+	if err != nil {
+		t.Fatalf("CreateOrder failed: %v", err)
+	}
+
+	// Stock is reserved: 10 - 3 = 7
+	pMid, _ := mktSvc.GetProductByID(ctx, prod.ID)
+	if pMid.StockQuantity != 7 {
+		t.Fatalf("Expected stock 7 after reservation, got %d", pMid.StockQuantity)
+	}
+
+	// ConfirmPayment during pending status must NOT mark payment or order as failed
+	_, err = mktSvc.ConfirmPayment(ctx, orderRes.Payment.Reference)
+	if err == nil {
+		t.Fatal("Expected error on pending payment confirmation, got nil")
+	}
+	if !strings.Contains(err.Error(), "pending") {
+		t.Fatalf("Expected pending verification error, got %v", err)
+	}
+
+	// Verify order status is still placed and pending
+	ord, err := env.Repo.Queries().GetMarketplaceOrderByID(ctx, orderRes.Order.ID)
+	if err != nil {
+		t.Fatalf("GetMarketplaceOrderByID failed: %v", err)
+	}
+	if ord.OrderStatus != "placed" {
+		t.Errorf("Expected order status 'placed', got %s", ord.OrderStatus)
+	}
+	if ord.PaymentStatus != "pending" {
+		t.Errorf("Expected payment status 'pending', got %s", ord.PaymentStatus)
+	}
+	if ord.StockReleased {
+		t.Errorf("Stock must NOT be released while pending")
+	}
+
+	// Product stock must still be 7
+	pAfter, _ := mktSvc.GetProductByID(ctx, prod.ID)
+	if pAfter.StockQuantity != 7 {
+		t.Errorf("Stock must remain 7, got %d", pAfter.StockQuantity)
+	}
+}
+
+// 16. Failed payment order cleanup by expiry worker
+func TestInventory_FailedPaymentCleanup(t *testing.T) {
+	env := setupTestEnv(t)
+	defer env.Pool.Close()
+	ctx := context.Background()
+
+	admin := createRegisteredUser(t, env, "inv_admin_fail", "super_admin")
+	_, _, prod := helperCreateSellerWithProduct(t, env, ctx, "inv_seller_fail", "Fail Store", "Hammer", 10, admin)
+	buyer := createRegisteredUser(t, env, "inv_buyer_fail", "member")
+
+	verifyStatus := "failed"
+	gw := &mockInventoryExpiryGateway{
+		providerName: "paystack",
+		verifyFn: func(ctx context.Context, reference string) (*payment.VerifyPaymentOutput, error) {
+			return &payment.VerifyPaymentOutput{
+				PaymentReference: reference,
+				Status:           verifyStatus,
+			}, nil
+		},
+	}
+	mktSvc := service.NewMarketplaceService(env.Repo, env.AuditService, gw)
+
+	orderRes, err := mktSvc.CreateOrder(ctx, buyer, service.CheckoutInput{
+		Items:        []service.CartItemInput{{ProductID: prod.ID, Quantity: 2}},
+		BuyerName:    "Failed Buyer",
+		BuyerEmail:   "failed_buyer@example.org",
+		BuyerPhone:   "+2348000000016",
+		DeliveryType: "pickup",
+	})
+	if err != nil {
+		t.Fatalf("CreateOrder failed: %v", err)
+	}
+
+	// Terminal failure reported during checkout
+	_, err = mktSvc.ConfirmPayment(ctx, orderRes.Payment.Reference)
+	if err == nil {
+		t.Fatal("Expected error on failed payment confirmation, got nil")
+	}
+
+	// Order is now placed with payment_status = failed, stock_released = false
+	ordMid, _ := env.Repo.Queries().GetMarketplaceOrderByID(ctx, orderRes.Order.ID)
+	if ordMid.PaymentStatus != "failed" || ordMid.StockReleased {
+		t.Fatalf("Expected payment_status failed and stock_released false, got %+v", ordMid)
+	}
+
+	// Expire order in DB
+	_, _ = env.Pool.Exec(ctx, "UPDATE marketplace_orders SET reservation_expires_at = NOW() - INTERVAL '1 hour' WHERE id = $1", orderRes.Order.ID)
+
+	// Clean up stale orders
+	res, err := mktSvc.ExpireStaleReservations(ctx, 50)
+	if err != nil {
+		t.Fatalf("ExpireStaleReservations failed: %v", err)
+	}
+	if res.ExpiredCount < 1 {
+		t.Fatalf("Expected at least 1 expired order, got %d", res.ExpiredCount)
+	}
+
+	// Verify order is now cancelled with stock released
+	ordAfter, _ := env.Repo.Queries().GetMarketplaceOrderByID(ctx, orderRes.Order.ID)
+	if ordAfter.OrderStatus != "cancelled" || !ordAfter.StockReleased {
+		t.Errorf("Expected cancelled and stock_released=true, got %+v", ordAfter)
+	}
+
+	// Stock is restored to 10
+	pAfter, _ := mktSvc.GetProductByID(ctx, prod.ID)
+	if pAfter.StockQuantity != 10 {
+		t.Errorf("Expected stock restored to 10, got %d", pAfter.StockQuantity)
+	}
+}
+
+// 17. Provider HTTP errors (429, 500, 502) must NOT cancel orders
+func TestInventory_ProviderHTTPErrorsInconclusive(t *testing.T) {
+	testCases := []struct {
+		name     string
+		errToRet error
+	}{
+		{"HTTP 429 Too Many Requests", fmt.Errorf("paystack verify returned unexpected HTTP status 429: Too Many Requests")},
+		{"HTTP 500 Internal Error", fmt.Errorf("paystack verify returned unexpected HTTP status 500: Internal Server Error")},
+		{"HTTP 502 Bad Gateway", fmt.Errorf("paystack verify returned unexpected HTTP status 502: Bad Gateway")},
+		{"Malformed JSON", fmt.Errorf("failed to parse verify response: unexpected end of JSON input")},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			env := setupTestEnv(t)
+			defer env.Pool.Close()
+			ctx := context.Background()
+
+			admin := createRegisteredUser(t, env, fmt.Sprintf("adm_err_%d", time.Now().UnixNano()), "super_admin")
+			_, _, prod := helperCreateSellerWithProduct(t, env, ctx, fmt.Sprintf("sel_err_%d", time.Now().UnixNano()), "Store Err", "Chisel", 10, admin)
+			buyer := createRegisteredUser(t, env, fmt.Sprintf("buy_err_%d", time.Now().UnixNano()), "member")
+
+			gw := &mockInventoryExpiryGateway{
+				providerName: "paystack",
+				verifyFn: func(ctx context.Context, reference string) (*payment.VerifyPaymentOutput, error) {
+					return nil, tc.errToRet
+				},
+			}
+			mktSvc := service.NewMarketplaceService(env.Repo, env.AuditService, gw)
+
+			orderRes, err := mktSvc.CreateOrder(ctx, buyer, service.CheckoutInput{
+				Items:        []service.CartItemInput{{ProductID: prod.ID, Quantity: 2}},
+				BuyerName:    "Buyer Err",
+				BuyerEmail:   "buyer_err@example.org",
+				BuyerPhone:   "+2348000000017",
+				DeliveryType: "pickup",
+			})
+			if err != nil {
+				t.Fatalf("CreateOrder failed: %v", err)
+			}
+
+			// Expire in DB
+			_, _ = env.Pool.Exec(ctx, "UPDATE marketplace_orders SET reservation_expires_at = NOW() - INTERVAL '1 hour' WHERE id = $1", orderRes.Order.ID)
+
+			res, err := mktSvc.ExpireStaleReservations(ctx, 50)
+			if err != nil {
+				t.Fatalf("ExpireStaleReservations returned unexpected fatal error: %v", err)
+			}
+			if res.ReconciliationCount < 1 {
+				t.Errorf("Expected order to be counted in ReconciliationCount, got %d", res.ReconciliationCount)
+			}
+
+			// Order MUST NOT be cancelled; stock MUST NOT be released!
+			ord, _ := env.Repo.Queries().GetMarketplaceOrderByID(ctx, orderRes.Order.ID)
+			if ord.OrderStatus != "requires_reconciliation" {
+				t.Errorf("Expected requires_reconciliation, got %s", ord.OrderStatus)
+			}
+			if ord.StockReleased {
+				t.Errorf("Stock must NOT be released when provider verification is inconclusive")
+			}
+			if !ord.ReconciliationRequired {
+				t.Errorf("Expected reconciliation_required = true")
+			}
+
+			// Stock remains 8 (reserved)
+			p, _ := mktSvc.GetProductByID(ctx, prod.ID)
+			if p.StockQuantity != 8 {
+				t.Errorf("Stock must remain 8, got %d", p.StockQuantity)
+			}
+		})
+	}
+}
+
+// 18. Unknown or non-terminal provider statuses must NOT release stock
+func TestInventory_UnknownProviderStatusInconclusive(t *testing.T) {
+	env := setupTestEnv(t)
+	defer env.Pool.Close()
+	ctx := context.Background()
+
+	admin := createRegisteredUser(t, env, "inv_admin_unk", "super_admin")
+	_, _, prod := helperCreateSellerWithProduct(t, env, ctx, "inv_seller_unk", "Unknown Store", "Drill Bit", 10, admin)
+	buyer := createRegisteredUser(t, env, "inv_buyer_unk", "member")
+
+	gw := &mockInventoryExpiryGateway{
+		providerName: "paystack",
+		verifyFn: func(ctx context.Context, reference string) (*payment.VerifyPaymentOutput, error) {
+			return &payment.VerifyPaymentOutput{
+				PaymentReference: reference,
+				Status:           "queued", // Non-terminal / unknown status
+			}, nil
+		},
+	}
+	mktSvc := service.NewMarketplaceService(env.Repo, env.AuditService, gw)
+
+	orderRes, err := mktSvc.CreateOrder(ctx, buyer, service.CheckoutInput{
+		Items:        []service.CartItemInput{{ProductID: prod.ID, Quantity: 2}},
+		BuyerName:    "Buyer Unk",
+		BuyerEmail:   "buyer_unk@example.org",
+		BuyerPhone:   "+2348000000018",
+		DeliveryType: "pickup",
+	})
+	if err != nil {
+		t.Fatalf("CreateOrder failed: %v", err)
+	}
+
+	_, _ = env.Pool.Exec(ctx, "UPDATE marketplace_orders SET reservation_expires_at = NOW() - INTERVAL '1 hour' WHERE id = $1", orderRes.Order.ID)
+
+	res, err := mktSvc.ExpireStaleReservations(ctx, 50)
+	if err != nil {
+		t.Fatalf("ExpireStaleReservations failed: %v", err)
+	}
+	if res.ReconciliationCount < 1 {
+		t.Errorf("Expected reconciliation count >= 1, got %d", res.ReconciliationCount)
+	}
+
+	ord, _ := env.Repo.Queries().GetMarketplaceOrderByID(ctx, orderRes.Order.ID)
+	if ord.OrderStatus != "requires_reconciliation" {
+		t.Errorf("Expected requires_reconciliation, got %s", ord.OrderStatus)
+	}
+	if ord.StockReleased {
+		t.Errorf("Stock must NOT be released for non-terminal status")
+	}
+}
+
+// 19. Duplicate inventory adjustment idempotency
+func TestInventory_DuplicateInventoryAdjustment(t *testing.T) {
+	env := setupTestEnv(t)
+	defer env.Pool.Close()
+	ctx := context.Background()
+
+	admin := createRegisteredUser(t, env, "inv_admin_dup_adj", "super_admin")
+	seller, _, prod := helperCreateSellerWithProduct(t, env, ctx, "inv_seller_dup_adj", "Store Dup Adj", "Screws", 50, admin)
+
+	mktSvc := service.NewMarketplaceService(env.Repo, env.AuditService, payment.NewSandboxGateway("http://localhost:3000"))
+
+	idempKey := fmt.Sprintf("adj-dup-%d", time.Now().UnixNano())
+
+	// First adjustment: +10
+	up1, log1, err := mktSvc.AdjustInventory(ctx, seller, prod.ID, service.AdjustInventoryInput{
+		IdempotencyKey: idempKey,
+		QuantityDelta:  10,
+		Reason:         "Restock batch 1",
+	})
+	if err != nil {
+		t.Fatalf("First adjustment failed: %v", err)
+	}
+	if up1.StockQuantity != 60 {
+		t.Errorf("Expected stock 60, got %d", up1.StockQuantity)
+	}
+	if log1.BalanceAfter != 60 {
+		t.Errorf("Expected log balance 60, got %d", log1.BalanceAfter)
+	}
+
+	// Second adjustment with identical payload: must be harmless idempotent replay
+	up2, log2, err := mktSvc.AdjustInventory(ctx, seller, prod.ID, service.AdjustInventoryInput{
+		IdempotencyKey: idempKey,
+		QuantityDelta:  10,
+		Reason:         "Restock batch 1",
+	})
+	if err != nil {
+		t.Fatalf("Second adjustment should succeed idempotently, got: %v", err)
+	}
+	if up2.StockQuantity != 60 {
+		t.Errorf("Stock must NOT change on duplicate request (expected 60, got %d)", up2.StockQuantity)
+	}
+	if log2.ID != log1.ID {
+		t.Errorf("Expected same log ID on idempotent replay, got %s vs %s", log2.ID, log1.ID)
+	}
+}
+
+// 20. Conflicting idempotency key reuse rejection
+func TestInventory_ConflictingIdempotencyKeyReuse(t *testing.T) {
+	env := setupTestEnv(t)
+	defer env.Pool.Close()
+	ctx := context.Background()
+
+	admin := createRegisteredUser(t, env, "inv_admin_conf", "super_admin")
+	seller, _, prod := helperCreateSellerWithProduct(t, env, ctx, "inv_seller_conf", "Store Conf", "Nails", 40, admin)
+
+	mktSvc := service.NewMarketplaceService(env.Repo, env.AuditService, payment.NewSandboxGateway("http://localhost:3000"))
+
+	idempKey := fmt.Sprintf("adj-conf-%d", time.Now().UnixNano())
+
+	// First adjustment: +10
+	_, _, err := mktSvc.AdjustInventory(ctx, seller, prod.ID, service.AdjustInventoryInput{
+		IdempotencyKey: idempKey,
+		QuantityDelta:  10,
+		Reason:         "Initial add",
+	})
+	if err != nil {
+		t.Fatalf("First adjustment failed: %v", err)
+	}
+
+	// Reusing same key with DIFFERENT delta: must be rejected with ErrIdempotencyConflict
+	_, _, err = mktSvc.AdjustInventory(ctx, seller, prod.ID, service.AdjustInventoryInput{
+		IdempotencyKey: idempKey,
+		QuantityDelta:  20, // Different!
+		Reason:         "Initial add",
+	})
+	if err == nil {
+		t.Fatal("Expected ErrIdempotencyConflict on conflicting payload, got nil")
+	}
+	if !errors.Is(err, service.ErrIdempotencyConflict) {
+		t.Fatalf("Expected ErrIdempotencyConflict, got %v", err)
+	}
+
+	// Reusing same key with DIFFERENT reason: must be rejected with ErrIdempotencyConflict
+	_, _, err = mktSvc.AdjustInventory(ctx, seller, prod.ID, service.AdjustInventoryInput{
+		IdempotencyKey: idempKey,
+		QuantityDelta:  10,
+		Reason:         "Different reason", // Different!
+	})
+	if err == nil {
+		t.Fatal("Expected ErrIdempotencyConflict on conflicting reason, got nil")
+	}
+	if !errors.Is(err, service.ErrIdempotencyConflict) {
+		t.Fatalf("Expected ErrIdempotencyConflict, got %v", err)
+	}
+
+	// Verify stock is still 50
+	p, _ := mktSvc.GetProductByID(ctx, prod.ID)
+	if p.StockQuantity != 50 {
+		t.Errorf("Stock must remain 50, got %d", p.StockQuantity)
+	}
+}
+
+// 21. Migration compatibility with historical cancelled and pending orders
+func TestInventory_HistoricalOrderMigrationCompatibility(t *testing.T) {
+	env := setupTestEnv(t)
+	defer env.Pool.Close()
+	ctx := context.Background()
+
+	admin := createRegisteredUser(t, env, "inv_admin_mig", "super_admin")
+	_, _, prod := helperCreateSellerWithProduct(t, env, ctx, "inv_seller_mig", "Store Mig", "Bricks", 100, admin)
+	buyer := createRegisteredUser(t, env, "inv_buyer_mig", "member")
+
+	mktSvc := service.NewMarketplaceService(env.Repo, env.AuditService, payment.NewSandboxGateway("http://localhost:3000"))
+
+	// Create order 1: Cancelled order simulating pre-Step 63.4 state (stock_released = false)
+	o1, err := mktSvc.CreateOrder(ctx, buyer, service.CheckoutInput{
+		Items:        []service.CartItemInput{{ProductID: prod.ID, Quantity: 1}},
+		BuyerName:    "Hist Buyer 1",
+		BuyerEmail:   "hist1@example.org",
+		BuyerPhone:   "+2348000000021",
+		DeliveryType: "pickup",
+	})
+	if err != nil {
+		t.Fatalf("CreateOrder 1 failed: %v", err)
+	}
+	_, _ = env.Pool.Exec(ctx, "UPDATE marketplace_orders SET order_status = 'cancelled', stock_released = false WHERE id = $1", o1.Order.ID)
+
+	// Create order 2: Historical pending order without reservation_expires_at
+	o2, err := mktSvc.CreateOrder(ctx, buyer, service.CheckoutInput{
+		Items:        []service.CartItemInput{{ProductID: prod.ID, Quantity: 1}},
+		BuyerName:    "Hist Buyer 2",
+		BuyerEmail:   "hist2@example.org",
+		BuyerPhone:   "+2348000000022",
+		DeliveryType: "pickup",
+	})
+	if err != nil {
+		t.Fatalf("CreateOrder 2 failed: %v", err)
+	}
+	_, _ = env.Pool.Exec(ctx, "UPDATE marketplace_orders SET reservation_expires_at = NULL WHERE id = $1", o2.Order.ID)
+
+	// Execute migration 20 Up statements
+	_, err = env.Pool.Exec(ctx, `
+		UPDATE marketplace_orders
+		SET stock_released = TRUE
+		WHERE stock_released = FALSE
+		  AND order_status IN ('cancelled', 'refunded');
+
+		UPDATE marketplace_orders
+		SET reservation_expires_at = created_at + INTERVAL '30 minutes'
+		WHERE reservation_expires_at IS NULL
+		  AND order_status = 'placed'
+		  AND payment_status = 'pending';
+	`)
+	if err != nil {
+		t.Fatalf("Migration statements failed: %v", err)
+	}
+
+	// Verify order 1 now has stock_released = true
+	ord1, _ := env.Repo.Queries().GetMarketplaceOrderByID(ctx, o1.Order.ID)
+	if !ord1.StockReleased {
+		t.Errorf("Order 1 stock_released must be true after migration")
+	}
+
+	// Verify order 2 now has reservation_expires_at populated
+	ord2, _ := env.Repo.Queries().GetMarketplaceOrderByID(ctx, o2.Order.ID)
+	if !ord2.ReservationExpiresAt.Valid {
+		t.Errorf("Order 2 reservation_expires_at must be valid after migration")
+	}
+}
+
+// 22. Inventory ledger insertion failure rolls back transaction
+func TestInventory_LedgerInsertionFailureRollback(t *testing.T) {
+	env := setupTestEnv(t)
+	defer env.Pool.Close()
+	ctx := context.Background()
+
+	admin := createRegisteredUser(t, env, "inv_admin_roll", "super_admin")
+	_, biz, prod := helperCreateSellerWithProduct(t, env, ctx, "inv_seller_roll", "Store Roll", "Generator", 10, admin)
+	buyer := createRegisteredUser(t, env, "inv_buyer_roll", "member")
+
+	mktSvc := service.NewMarketplaceService(env.Repo, env.AuditService, payment.NewSandboxGateway("http://localhost:3000"))
+
+	orderRes, err := mktSvc.CreateOrder(ctx, buyer, service.CheckoutInput{
+		Items:        []service.CartItemInput{{ProductID: prod.ID, Quantity: 2}},
+		BuyerName:    "Roll Buyer",
+		BuyerEmail:   "roll@example.org",
+		BuyerPhone:   "+2348000000023",
+		DeliveryType: "pickup",
+	})
+	if err != nil {
+		t.Fatalf("CreateOrder failed: %v", err)
+	}
+
+	// Stock is now 8
+	pMid, _ := mktSvc.GetProductByID(ctx, prod.ID)
+	if pMid.StockQuantity != 8 {
+		t.Fatalf("Expected intermediate stock 8, got %d", pMid.StockQuantity)
+	}
+
+	// Pre-insert a colliding ledger entry with action_type='audit_note' so CountOrderInventoryReleaseLogs returns 0,
+	// but the unique idempotency key constraint on release:<orderID>:<productID> will collide during CancelOrder.
+	collidingKey := fmt.Sprintf("release:%s:%s", orderRes.Order.ID, prod.ID)
+	_, err = env.Repo.Queries().CreateMarketplaceInventoryLog(ctx, db.CreateMarketplaceInventoryLogParams{
+		ID:             security.GenerateUUID(),
+		ProductID:      prod.ID,
+		BusinessID:     biz.ID,
+		ActorUserID:    pgtype.Text{Valid: false},
+		ActionType:     "audit_note",
+		QuantityDelta:  0,
+		BalanceAfter:   8,
+		OrderID:        service.TextFromString(orderRes.Order.ID),
+		ReferenceID:    "COLLISION-PRE-INSERT",
+		Reason:         "Simulate unique key collision",
+		IdempotencyKey: service.TextFromString(collidingKey),
+	})
+	if err != nil {
+		t.Fatalf("Failed to pre-insert colliding log: %v", err)
+	}
+
+	// Attempting to cancel the order must fail when CreateMarketplaceInventoryLog fails
+	_, err = mktSvc.CancelOrder(ctx, buyer, orderRes.Order.ID, "Customer requested cancellation")
+	if err == nil {
+		t.Fatal("Expected error on CancelOrder due to ledger insertion failure, got nil")
+	}
+
+	// PROVE ROLLBACK:
+	// 1. Product stock must still be 8 (NOT incremented to 10!)
+	pAfter, _ := mktSvc.GetProductByID(ctx, prod.ID)
+	if pAfter.StockQuantity != 8 {
+		t.Errorf("Stock increment MUST be rolled back (expected 8, got %d)", pAfter.StockQuantity)
+	}
+
+	// 2. Order status must still be 'placed' (NOT 'cancelled'!)
+	ordAfter, _ := env.Repo.Queries().GetMarketplaceOrderByID(ctx, orderRes.Order.ID)
+	if ordAfter.OrderStatus != "placed" {
+		t.Errorf("Order status update MUST be rolled back (expected 'placed', got '%s')", ordAfter.OrderStatus)
+	}
+	if ordAfter.StockReleased {
+		t.Errorf("Order stock_released MUST be rolled back (expected false, got true)")
 	}
 }

@@ -672,7 +672,7 @@ WHERE order_id = $1 AND product_id = $2
 
 -- name: ListExpiredPendingMarketplaceOrders :many
 SELECT * FROM marketplace_orders
-WHERE payment_status = 'pending'
+WHERE payment_status IN ('pending', 'failed')
   AND order_status = 'placed'
   AND stock_released = FALSE
   AND reservation_expires_at IS NOT NULL

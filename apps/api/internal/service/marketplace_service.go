@@ -37,7 +37,12 @@ var (
 	ErrOrderAlreadyDispatched   = errors.New("order has already been dispatched")
 	ErrOrderAlreadyCancelled    = errors.New("order is already cancelled")
 	ErrOrderAlreadyRefunded     = errors.New("cannot dispatch a refunded order")
-	ErrCrossSellerDispatch      = errors.New("sellers can dispatch only items belonging to their businesses")
+	ErrCrossSellerDispatch         = errors.New("sellers can dispatch only items belonging to their businesses")
+	ErrOrderReconciliationRequired = errors.New("cannot dispatch order requiring administrative reconciliation")
+	ErrOrderStockAlreadyReleased   = errors.New("cannot dispatch order whose inventory reservation has been released")
+	ErrIdempotencyKeyRequired      = errors.New("idempotency_key is required")
+	ErrIdempotencyKeyTooLong       = errors.New("idempotency_key cannot exceed 128 characters")
+	ErrIdempotencyConflict         = errors.New("idempotency key conflict: key already used with different payload")
 )
 
 type MarketplaceService struct {
@@ -1157,7 +1162,7 @@ func (s *MarketplaceService) CreateOrder(ctx context.Context, buyerUser *db.User
 						if buyerUser != nil {
 							actorID = TextFromString(buyerUser.ID)
 						}
-						_, _ = q.CreateMarketplaceInventoryLog(ctx, db.CreateMarketplaceInventoryLogParams{
+						_, logErr := q.CreateMarketplaceInventoryLog(ctx, db.CreateMarketplaceInventoryLogParams{
 							ID:             security.GenerateUUID(),
 							ProductID:      itm.ProductID,
 							BusinessID:     prodBusID,
@@ -1170,6 +1175,9 @@ func (s *MarketplaceService) CreateOrder(ctx context.Context, buyerUser *db.User
 							Reason:         "Gateway initialization failure rollback",
 							IdempotencyKey: TextFromString(fmt.Sprintf("release:%s:%s", createdOrder.ID, itm.ProductID)),
 						})
+						if logErr != nil {
+							return fmt.Errorf("failed to record inventory reservation release during rollback: %w", logErr)
+						}
 					}
 				}
 			}
@@ -1242,7 +1250,14 @@ func (s *MarketplaceService) ConfirmPayment(ctx context.Context, reference strin
 	}
 
 	if verifyOut.Status != "successful" {
-		// Out-of-order event safeguard: Row lock and never downgrade an already-paid or refunded order
+		// Non-terminal status check: Do NOT mark payment as failed if status is pending, processing, queued, etc.
+		isTerminalFailure := verifyOut.Status == "failed" || verifyOut.Status == "abandoned" || verifyOut.Status == "reversed"
+		if !isTerminalFailure {
+			// Status is pending/in-progress: preserve reservation and return clear pending error
+			return nil, fmt.Errorf("payment verification pending (status: %s)", verifyOut.Status)
+		}
+
+		// Confirmed terminal failure: record failed status safely without overwriting already-paid orders
 		_ = s.repo.WithTx(ctx, func(q *db.Queries) error {
 			lockedPay, err := q.GetMarketplacePaymentByReferenceForUpdate(ctx, reference)
 			if err != nil {
@@ -1432,7 +1447,7 @@ func (s *MarketplaceService) ConfirmPayment(ctx context.Context, reference strin
 					p, pErr := q.GetMarketplaceProductByID(ctx, itm.ProductID.String)
 					if pErr == nil {
 						idempotencyKey := fmt.Sprintf("sale_confirmed:%s:%s", lockedOrder.ID, itm.ProductID.String)
-						_, _ = q.CreateMarketplaceInventoryLog(ctx, db.CreateMarketplaceInventoryLogParams{
+						_, logErr := q.CreateMarketplaceInventoryLog(ctx, db.CreateMarketplaceInventoryLogParams{
 							ID:             security.GenerateUUID(),
 							ProductID:      p.ID,
 							BusinessID:     p.BusinessID,
@@ -1445,6 +1460,9 @@ func (s *MarketplaceService) ConfirmPayment(ctx context.Context, reference strin
 							Reason:         "Payment confirmed",
 							IdempotencyKey: TextFromString(idempotencyKey),
 						})
+						if logErr != nil {
+							return fmt.Errorf("failed to record sale confirmation inventory log: %w", logErr)
+						}
 					}
 				}
 			}
@@ -1854,7 +1872,15 @@ func (s *MarketplaceService) DispatchOrder(ctx context.Context, user *db.User, o
 			return ErrOrderNotPaid
 		}
 
-		// 2. Order status guards
+		// 2. Reconciliation & Inventory Release guards:
+		if lockedOrder.OrderStatus == "requires_reconciliation" || lockedOrder.ReconciliationRequired {
+			return ErrOrderReconciliationRequired
+		}
+		if lockedOrder.StockReleased {
+			return ErrOrderStockAlreadyReleased
+		}
+
+		// 3. Order status guards
 		if lockedOrder.OrderStatus == "cancelled" {
 			return fmt.Errorf("cannot dispatch an order with status '%s'", lockedOrder.OrderStatus)
 		}
@@ -2121,7 +2147,7 @@ func (s *MarketplaceService) CancelOrder(ctx context.Context, user *db.User, ord
 						if user != nil {
 							actorID = TextFromString(user.ID)
 						}
-						_, _ = q.CreateMarketplaceInventoryLog(ctx, db.CreateMarketplaceInventoryLogParams{
+						_, logErr := q.CreateMarketplaceInventoryLog(ctx, db.CreateMarketplaceInventoryLogParams{
 							ID:             security.GenerateUUID(),
 							ProductID:      itm.ProductID.String,
 							BusinessID:     prodBusID,
@@ -2134,6 +2160,9 @@ func (s *MarketplaceService) CancelOrder(ctx context.Context, user *db.User, ord
 							Reason:         "Order cancelled: " + reason,
 							IdempotencyKey: TextFromString(fmt.Sprintf("release:%s:%s", orderID, itm.ProductID.String)),
 						})
+						if logErr != nil {
+							return fmt.Errorf("failed to record cancellation inventory release log: %w", logErr)
+						}
 					}
 				}
 			}
@@ -2665,7 +2694,7 @@ func (s *MarketplaceService) settleRefundSuccess(ctx context.Context, admin *db.
 						if admin != nil {
 							actorID = TextFromString(admin.ID)
 						}
-						_, _ = q.CreateMarketplaceInventoryLog(ctx, db.CreateMarketplaceInventoryLogParams{
+						_, logErr := q.CreateMarketplaceInventoryLog(ctx, db.CreateMarketplaceInventoryLogParams{
 							ID:             security.GenerateUUID(),
 							ProductID:      itm.ProductID.String,
 							BusinessID:     prodBusID,
@@ -2678,6 +2707,9 @@ func (s *MarketplaceService) settleRefundSuccess(ctx context.Context, admin *db.
 							Reason:         fmt.Sprintf("Full refund %s settled", refundID),
 							IdempotencyKey: TextFromString(fmt.Sprintf("refund_restock:%s:%s", refundID, itm.ProductID.String)),
 						})
+						if logErr != nil {
+							return fmt.Errorf("failed to record refund restock inventory log: %w", logErr)
+						}
 					}
 				}
 			}
@@ -3227,28 +3259,27 @@ func (s *MarketplaceService) ExpireStaleReservations(ctx context.Context, batchS
 
 		// 2. Query provider status OUTSIDE any database transaction if gateway configured
 		providerPaid := false
-		providerUnreachable := false
+		providerInconclusive := false
 		var verifyErr error
 
 		if s.paymentGateway.ProviderName() != "unconfigured" && pErr == nil && payRec.Reference != "" {
 			verifyOut, err := s.paymentGateway.VerifyPayment(ctx, payRec.Reference)
 			if err != nil {
-				// Provider error: network timeout, service unavailable, etc.
-				if errors.Is(err, payment.ErrPaymentProcessingUnavailable) ||
-					strings.Contains(strings.ToLower(err.Error()), "network") ||
-					strings.Contains(strings.ToLower(err.Error()), "timeout") ||
-					strings.Contains(strings.ToLower(err.Error()), "connection") ||
-					strings.Contains(strings.ToLower(err.Error()), "unavailable") {
-					providerUnreachable = true
-					verifyErr = err
-				}
+				// Treat ALL provider errors (HTTP 429, 500, 502, timeouts, network, malformed) as inconclusive!
+				providerInconclusive = true
+				verifyErr = err
 			} else if verifyOut.Status == "successful" {
 				providerPaid = true
+			} else if verifyOut.Status != "failed" && verifyOut.Status != "abandoned" && verifyOut.Status != "reversed" {
+				// Status is non-terminal or unknown (e.g. "pending", "processing", "queued", etc.)
+				// Never release stock when provider verification is non-terminal or unknown.
+				providerInconclusive = true
+				verifyErr = fmt.Errorf("inconclusive provider payment status: %s", verifyOut.Status)
 			}
 		}
 
-		// 3. If provider was unreachable: flag for administrative reconciliation, do NOT cancel, do NOT release stock!
-		if providerUnreachable {
+		// 3. If provider was inconclusive: flag for administrative reconciliation, do NOT cancel, do NOT release stock!
+		if providerInconclusive {
 			_ = s.repo.WithTx(ctx, func(q *db.Queries) error {
 				lockedOrd, err := q.GetMarketplaceOrderForUpdate(ctx, ord.ID)
 				if err != nil {
@@ -3259,12 +3290,12 @@ func (s *MarketplaceService) ExpireStaleReservations(ctx context.Context, batchS
 				}
 				_, err = q.MarkOrderRequiresReconciliation(ctx, db.MarkOrderRequiresReconciliationParams{
 					ID:                  ord.ID,
-					ReconciliationNotes: fmt.Sprintf("Payment verification unreachable during reservation expiry check: %v", verifyErr),
+					ReconciliationNotes: fmt.Sprintf("Payment verification inconclusive during reservation expiry check: %v", verifyErr),
 				})
 				return err
 			})
 			result.ReconciliationCount++
-			result.Errors = append(result.Errors, fmt.Sprintf("order %s flagged for reconciliation: gateway unreachable (%v)", ord.OrderNumber, verifyErr))
+			result.Errors = append(result.Errors, fmt.Sprintf("order %s flagged for reconciliation: provider verification inconclusive (%v)", ord.OrderNumber, verifyErr))
 			continue
 		}
 
@@ -3288,7 +3319,7 @@ func (s *MarketplaceService) ExpireStaleReservations(ctx context.Context, batchS
 			}
 
 			// Concurrency guard: If already handled, paid, or stock released
-			if lockedOrd.StockReleased || lockedOrd.OrderStatus != "placed" || lockedOrd.PaymentStatus != "pending" {
+			if lockedOrd.StockReleased || lockedOrd.OrderStatus != "placed" || (lockedOrd.PaymentStatus != "pending" && lockedOrd.PaymentStatus != "failed") {
 				return nil
 			}
 
@@ -3317,7 +3348,7 @@ func (s *MarketplaceService) ExpireStaleReservations(ctx context.Context, batchS
 						if pErr == nil {
 							prodBusID = p.BusinessID
 						}
-						_, _ = q.CreateMarketplaceInventoryLog(ctx, db.CreateMarketplaceInventoryLogParams{
+						_, logErr := q.CreateMarketplaceInventoryLog(ctx, db.CreateMarketplaceInventoryLogParams{
 							ID:             security.GenerateUUID(),
 							ProductID:      itm.ProductID.String,
 							BusinessID:     prodBusID,
@@ -3330,6 +3361,9 @@ func (s *MarketplaceService) ExpireStaleReservations(ctx context.Context, batchS
 							Reason:         "Reservation expired: payment timeout",
 							IdempotencyKey: TextFromString(fmt.Sprintf("release:%s:%s", ord.ID, itm.ProductID.String)),
 						})
+						if logErr != nil {
+							return fmt.Errorf("failed to record expiry inventory release log: %w", logErr)
+						}
 					}
 				}
 			}
@@ -3378,14 +3412,22 @@ func (s *MarketplaceService) ExpireStaleReservations(ctx context.Context, batchS
 }
 
 type AdjustInventoryInput struct {
-	QuantityDelta int32  `json:"quantity_delta"`
-	Reason        string `json:"reason"`
-	ReferenceID   string `json:"reference_id,omitempty"`
+	IdempotencyKey string `json:"idempotency_key"`
+	QuantityDelta  int32  `json:"quantity_delta"`
+	Reason         string `json:"reason"`
+	ReferenceID    string `json:"reference_id,omitempty"`
 }
 
 func (s *MarketplaceService) AdjustInventory(ctx context.Context, user *db.User, productID string, input AdjustInventoryInput) (*db.MarketplaceProduct, *db.MarketplaceInventoryLog, error) {
 	if user == nil {
 		return nil, nil, errors.New("authentication required")
+	}
+	idempotencyKey := strings.TrimSpace(input.IdempotencyKey)
+	if idempotencyKey == "" {
+		return nil, nil, ErrIdempotencyKeyRequired
+	}
+	if len(idempotencyKey) > 128 {
+		return nil, nil, ErrIdempotencyKeyTooLong
 	}
 	reason := strings.TrimSpace(input.Reason)
 	if reason == "" {
@@ -3436,6 +3478,45 @@ func (s *MarketplaceService) AdjustInventory(ctx context.Context, user *db.User,
 			}
 		}
 
+		// Enforce Idempotency in PostgreSQL:
+		// Check if a ledger record with this exact idempotency key already exists.
+		existingLog, err := q.GetMarketplaceInventoryLogByIdempotencyKey(ctx, TextFromString(idempotencyKey))
+		if err == nil && existingLog.ID != "" {
+			// Idempotency key already exists. Verify identical payload:
+			if existingLog.ProductID == productID &&
+				existingLog.QuantityDelta == input.QuantityDelta &&
+				existingLog.Reason == reason {
+				// Exact duplicate request: return existing product and log without altering inventory
+				invLog = existingLog
+				updatedProd = db.MarketplaceProduct{
+					ID:                   lockedProd.ID,
+					BusinessID:           lockedProd.BusinessID,
+					BranchID:             lockedProd.BranchID,
+					Title:                lockedProd.Title,
+					Slug:                 lockedProd.Slug,
+					Description:          lockedProd.Description,
+					Category:             lockedProd.Category,
+					Sku:                  lockedProd.Sku,
+					PriceKobo:            lockedProd.PriceKobo,
+					CompareAtPriceKobo:   lockedProd.CompareAtPriceKobo,
+					StockQuantity:        lockedProd.StockQuantity,
+					LowStockThreshold:    lockedProd.LowStockThreshold,
+					Images:               lockedProd.Images,
+					WeightGrams:          lockedProd.WeightGrams,
+					DeliveryRestrictions: lockedProd.DeliveryRestrictions,
+					ReturnPolicy:         lockedProd.ReturnPolicy,
+					Status:               lockedProd.Status,
+					IsFeatured:           lockedProd.IsFeatured,
+					CreatedAt:            lockedProd.CreatedAt,
+					UpdatedAt:            lockedProd.UpdatedAt,
+					Version:              lockedProd.Version,
+				}
+				return nil
+			}
+			// Same key used with different payload: reject conflicting reuse
+			return ErrIdempotencyConflict
+		}
+
 		newStock := lockedProd.StockQuantity + input.QuantityDelta
 		if newStock < 0 {
 			return fmt.Errorf("insufficient stock: adjustment would result in negative stock balance (%d)", newStock)
@@ -3454,7 +3535,6 @@ func (s *MarketplaceService) AdjustInventory(ctx context.Context, user *db.User,
 		if refID == "" {
 			refID = fmt.Sprintf("ADJ-%s", security.GenerateUUID()[:8])
 		}
-		idempotencyKey := fmt.Sprintf("manual:%s:%d", productID, time.Now().UnixNano())
 
 		logEntry, err := q.CreateMarketplaceInventoryLog(ctx, db.CreateMarketplaceInventoryLogParams{
 			ID:             security.GenerateUUID(),

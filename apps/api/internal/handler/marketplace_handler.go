@@ -716,6 +716,10 @@ func (h *MarketplaceHandler) DispatchOrder(w http.ResponseWriter, r *http.Reques
 			ErrorJSON(w, http.StatusNotFound, "NOT_FOUND", err.Error(), nil)
 			return
 		}
+		if errors.Is(err, service.ErrOrderReconciliationRequired) || errors.Is(err, service.ErrOrderStockAlreadyReleased) {
+			ErrorJSON(w, http.StatusBadRequest, "DISPATCH_FAILED", err.Error(), nil)
+			return
+		}
 		ErrorJSON(w, http.StatusBadRequest, "DISPATCH_FAILED", err.Error(), nil)
 		return
 	}
@@ -1164,6 +1168,9 @@ func (h *MarketplaceHandler) AdjustProductStock(w http.ResponseWriter, r *http.R
 		ErrorJSON(w, http.StatusBadRequest, "INVALID_REQUEST", "Malformed JSON payload", nil)
 		return
 	}
+	if input.IdempotencyKey == "" {
+		input.IdempotencyKey = r.Header.Get("Idempotency-Key")
+	}
 
 	prod, invLog, err := h.marketplaceService.AdjustInventory(r.Context(), user, productID, input)
 	if err != nil {
@@ -1173,6 +1180,14 @@ func (h *MarketplaceHandler) AdjustProductStock(w http.ResponseWriter, r *http.R
 		}
 		if errors.Is(err, service.ErrProductNotFound) {
 			ErrorJSON(w, http.StatusNotFound, "NOT_FOUND", err.Error(), nil)
+			return
+		}
+		if errors.Is(err, service.ErrIdempotencyConflict) {
+			ErrorJSON(w, http.StatusConflict, "IDEMPOTENCY_CONFLICT", err.Error(), nil)
+			return
+		}
+		if errors.Is(err, service.ErrIdempotencyKeyRequired) || errors.Is(err, service.ErrIdempotencyKeyTooLong) {
+			ErrorJSON(w, http.StatusBadRequest, "INVALID_REQUEST", err.Error(), nil)
 			return
 		}
 		ErrorJSON(w, http.StatusBadRequest, "ADJUSTMENT_FAILED", err.Error(), nil)
