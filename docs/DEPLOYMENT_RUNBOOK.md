@@ -114,27 +114,55 @@ psql "$DATABASE_URL" -c "SELECT version();"
 
 ## 6. Render Deployment Execution Steps
 
-### Phase A: Neon PostgreSQL Baseline Snapshot (Zero-Downtime Backup)
+### Phase A: Neon PostgreSQL Baseline Snapshot & Restoration Runbook
 1. **Never provision a Render-managed database.** The authoritative production database is Neon Serverless PostgreSQL 16.
-2. In the **Neon Console**, create an instant point-in-time branch snapshot before release:
-   - Branch name: `ratels-prod-pre-step66`
-   - Parent branch: `main` (or production branch)
-3. Take a standalone compressed snapshot dump via Render shell or local terminal:
-   ```bash
-   pg_dump -Fc "$NEON_DATABASE_URL" -f "ratels_neon_backup_$(date +%Y%m%d_%H%M%S).dump"
-   ```
+2. **Neon Instant Snapshot Branching (Zero-Downtime)**:
+   - In the **Neon Console** (`console.neon.tech`), select the Ratels project.
+   - Go to **Branches** → Click **Create Branch**.
+   - Branch Name: `ratels-prod-pre-step66`
+   - Parent Branch: `main` (the active production branch)
+   - *Time required: < 5 seconds. Captures an exact byte-level copy-on-write snapshot without connection termination.*
+3. **Standalone Compressed Dump Backup (`pg_dump`)**:
+   - Run from an authorized administrative workstation or Render Shell:
+     ```bash
+     pg_dump -Fc --no-owner --no-privileges "$DATABASE_URL" -f "ratels_neon_backup_$(date +%Y%m%d_%H%M%S).dump"
+     ```
+   - Verify backup file size and integrity:
+     ```bash
+     pg_restore --list "ratels_neon_backup_"*.dump | head -n 30
+     ```
+4. **Documented Restoration Procedure**:
+   - **Method 1 (Instant Branch Promotion - Recommended)**:
+     - In Neon Console → Select branch `ratels-prod-pre-step66`.
+     - Click **Set as Default Branch** (or copy its connection string to `DATABASE_URL` in Render).
+     - Services reconnect instantly to the pre-release state.
+   - **Method 2 (`pg_restore` Disaster Recovery)**:
+     ```bash
+     # Drop and restore all tables cleanly to pre-release snapshot:
+     pg_restore -v --clean --if-exists --no-owner --no-privileges -d "$DATABASE_URL" ratels_neon_backup_*.dump
+     ```
 
-### Phase B: Render Environment Group Configuration & Service Linking
-1. In Render Dashboard → Environment Groups → Create or update group `ratels-production-env`.
-2. Populate the required environment variables:
-   - `DATABASE_URL`: Neon PostgreSQL connection string (ending with `?sslmode=require`).
-   - `JWT_SECRET`: Preserve the existing production secret string.
-   - `BREVO_API_KEY`: Existing Brevo API key.
-   - `PAYSTACK_SECRET_KEY` & `PAYSTACK_PUBLIC_KEY`: Live keys (or set `PAYMENT_PROVIDER=unconfigured` until keys are provisioned).
-   - `R2_ACCESS_KEY_ID`, `R2_SECRET_ACCESS_KEY`, `R2_ACCOUNT_ID`, `R2_BUCKET_NAME`: Media assets bucket.
-   - `SAFEGUARDING_ENCRYPTION_KEY`: 32+ byte key (or leave `SAFEGUARDING_REPORTING_ENABLED=false`).
-3. Link `ratels-production-env` to existing services: `ratels-api` (or `ratels`), `ratels-worker`, and `ratels-web`.
-4. **Service Verification**: Verify that existing services in Render (`ratels-api` / `ratels` and `ratels-web`) are linked rather than creating duplicate web services.
+### Phase B: Render Deployment Control & Environment Setup
+1. **Temporarily Pause Auto-Deploy in Render Dashboard**:
+   - For `ratels-api` (or `ratels`): Go to **Settings** → Set **Auto-Deploy** to `No`.
+   - For `ratels-web`: Go to **Settings** → Set **Auto-Deploy** to `No`.
+   - *Rationale: Prevents partial, concurrent, or premature deployment when the branch is merged.*
+2. **Verify Release Commit**:
+   - Confirm git HEAD on release branch matches audited commit (`c9b5896` or release PR merge commit).
+3. **Environment Group Configuration (`ratels-production-env`)**:
+   - In Render Dashboard → Environment Groups → Create or update group `ratels-production-env`.
+   - Populate verified environment variables:
+     - `DATABASE_URL`: Neon PostgreSQL connection string (ending with `?sslmode=require`).
+     - `JWT_SECRET`: Preserve the existing production secret string (do not regenerate).
+     - `BREVO_API_KEY`: Existing Brevo API key.
+     - `ALLOWED_ORIGINS`: `https://app.ratelsworldwide.org,https://ratelsworldwide.org,https://ratels-web.onrender.com`.
+     - `PAYMENT_PROVIDER`: Set to `unconfigured` until live Paystack keys are ready, or `paystack` once keys are provided.
+     - `PAYSTACK_SECRET_KEY` & `PAYSTACK_PUBLIC_KEY`: Live credentials (if activating Paystack).
+     - `R2_ACCESS_KEY_ID`, `R2_SECRET_ACCESS_KEY`, `R2_ACCOUNT_ID`, `R2_BUCKET_NAME`: Media assets bucket.
+     - `SAFEGUARDING_REPORTING_ENABLED`: Keep `false` unless 32-byte `SAFEGUARDING_ENCRYPTION_KEY` is supplied.
+4. **Link Environment Group & Verify Existing Services**:
+   - Link `ratels-production-env` to existing services: `ratels-api` (or `ratels`), `ratels-worker`, and `ratels-web`.
+   - Ensure Render updates the existing services rather than spinning up duplicates.
 
 ### Phase C: Deploy Backend Services
 1. Deploy `ratels-api`:
