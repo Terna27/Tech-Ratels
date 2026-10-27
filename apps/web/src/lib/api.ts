@@ -22,7 +22,8 @@ const getApiBase = (): string => {
     return "/api/v1";
   }
   const raw = process.env.INTERNAL_API_URL || process.env.API_URL || process.env.BACKEND_URL || process.env.NEXT_PUBLIC_API_URL || "http://127.0.0.1:8000";
-  return raw.endsWith("/api/v1") ? raw : `${raw.replace(/\/+$/, "")}/api/v1`;
+  const trimmed = raw.trim().replace(/\/+$/, "");
+  return trimmed.endsWith("/api/v1") ? trimmed : `${trimmed}/api/v1`;
 };
 
 export const API_BASE = getApiBase();
@@ -76,11 +77,17 @@ export async function apiRequest<T = any>(
 
   // Same-origin relative URL resolution in browser (/api/v1/...)
   let url: string;
-  if (endpoint.startsWith("http")) {
+  if (endpoint.startsWith("http://") || endpoint.startsWith("https://")) {
     url = endpoint;
   } else {
     const base = typeof window !== "undefined" ? "/api/v1" : API_BASE;
-    const cleanEndpoint = endpoint.startsWith("/") ? endpoint : `/${endpoint}`;
+    let cleanEndpoint = endpoint.startsWith("/") ? endpoint : `/${endpoint}`;
+    // Guard against duplicated /api/v1 paths (e.g. /api/v1/api/v1/... or /api/v1/auth/...)
+    if (cleanEndpoint.startsWith("/api/v1/")) {
+      cleanEndpoint = cleanEndpoint.substring("/api/v1".length);
+    } else if (cleanEndpoint === "/api/v1") {
+      cleanEndpoint = "";
+    }
     url = `${base}${cleanEndpoint}`;
   }
 

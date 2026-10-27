@@ -1,7 +1,8 @@
 # ==============================================================================
 # RENDER BLUEPRINT SPECIFICATION — RATELS WORLDWIDE PRODUCTION INFRASTRUCTURE
 # ==============================================================================
-# Declares web services, background workers, PostgreSQL database, and cron jobs.
+# Declares web services, background workers, and scheduled cron jobs.
+# Production database: Authoritative external Neon PostgreSQL (never provision Render DB).
 # Do not trigger auto-deployment or merge without user approval.
 
 services:
@@ -23,16 +24,16 @@ services:
         value: "8000"
       - key: TZ
         value: Africa/Lagos
+      # External Neon Serverless PostgreSQL connection string (must end with ?sslmode=require)
       - key: DATABASE_URL
-        fromDatabase:
-          name: ratels-postgres
-          property: connectionString
+        sync: false
+      # Preserves existing production JWT signing secret; never auto-regenerate
       - key: JWT_SECRET
-        generateValue: true
+        sync: false
       - key: JWT_EXPIRY_HOURS
         value: "24"
       - key: ALLOWED_ORIGINS
-        value: https://app.ratelsworldwide.org,https://ratelsworldwide.org
+        value: https://app.ratelsworldwide.org,https://ratelsworldwide.org,https://ratels-web.onrender.com
       - key: FRONTEND_BASE_URL
         value: https://app.ratelsworldwide.org
       - key: DEV_DELIVERY_SAFE_MODE
@@ -53,8 +54,9 @@ services:
         value: RATELS
       - key: ENABLE_OUTBOX_WORKER
         value: "true"
+      # Payment gateway: 'paystack' once live keys are configured, or 'unconfigured' to disable checkout safely
       - key: PAYMENT_PROVIDER
-        value: paystack
+        sync: false
       - key: PAYSTACK_SECRET_KEY
         sync: false
       - key: PAYSTACK_PUBLIC_KEY
@@ -66,7 +68,7 @@ services:
       - key: R2_SECRET_ACCESS_KEY
         sync: false
       - key: R2_BUCKET_NAME
-        value: ratels-marketplace-assets-prod
+        sync: false
       - key: R2_PUBLIC_DOMAIN
         value: https://media.ratelsworldwide.org
       - key: R2_REPORTS_ACCOUNT_ID
@@ -76,9 +78,10 @@ services:
       - key: R2_REPORTS_SECRET_ACCESS_KEY
         sync: false
       - key: R2_REPORTS_BUCKET_NAME
-        value: ratels-private-reports-prod
+        sync: false
+      # Safeguarding reporting disabled by default until dedicated SAFEGUARDING_ENCRYPTION_KEY (>=32 bytes) is set
       - key: SAFEGUARDING_REPORTING_ENABLED
-        value: "true"
+        value: "false"
       - key: SAFEGUARDING_ENCRYPTION_KEY
         sync: false
       - key: REPORT_CRON_SECRET
@@ -98,12 +101,17 @@ services:
     plan: standard
     region: frankfurt
     autoDeploy: false
+    dockerBuildArgs:
+      NEXT_PUBLIC_API_URL: https://api.ratelsworldwide.org/api/v1
+      API_URL: https://api.ratelsworldwide.org/api/v1
     envVars:
       - key: NODE_ENV
         value: production
       - key: PORT
         value: "3000"
       - key: NEXT_PUBLIC_API_URL
+        value: https://api.ratelsworldwide.org/api/v1
+      - key: API_URL
         value: https://api.ratelsworldwide.org/api/v1
 
   # ----------------------------------------------------------------------------
@@ -123,14 +131,9 @@ services:
       - key: TZ
         value: Africa/Lagos
       - key: DATABASE_URL
-        fromDatabase:
-          name: ratels-postgres
-          property: connectionString
+        sync: false
       - key: JWT_SECRET
-        fromService:
-          type: web
-          name: ratels-api
-          envVarKey: JWT_SECRET
+        sync: false
       - key: FRONTEND_BASE_URL
         value: https://app.ratelsworldwide.org
       - key: DEV_DELIVERY_SAFE_MODE
@@ -148,7 +151,7 @@ services:
       - key: TERMII_SENDER_ID
         value: RATELS
       - key: PAYMENT_PROVIDER
-        value: paystack
+        sync: false
       - key: PAYSTACK_SECRET_KEY
         sync: false
       - key: PAYSTACK_PUBLIC_KEY
@@ -160,7 +163,7 @@ services:
       - key: R2_SECRET_ACCESS_KEY
         sync: false
       - key: R2_BUCKET_NAME
-        value: ratels-marketplace-assets-prod
+        sync: false
       - key: R2_PUBLIC_DOMAIN
         value: https://media.ratelsworldwide.org
 
@@ -179,19 +182,6 @@ services:
       - key: APP_ENV
         value: production
       - key: DATABASE_URL
-        fromDatabase:
-          name: ratels-postgres
-          property: connectionString
+        sync: false
       - key: TZ
         value: Africa/Lagos
-
-# ------------------------------------------------------------------------------
-# 5. Managed PostgreSQL 16 Database
-# ------------------------------------------------------------------------------
-databases:
-  - name: ratels-postgres
-    databaseName: ratels_production
-    user: ratels_admin
-    plan: standard
-    region: frankfurt
-    postgresMajorVersion: "16"

@@ -7,7 +7,7 @@ The Ratels Worldwide management platform comprises three distributed containeriz
 1. **`ratels-api`** (Web Service): High-performance Go 1.25 REST API server exposing `/api/v1` routes with connection pooling, automatic startup migration execution, in-process outbox worker, report scheduler, and refund recovery engine.
 2. **`ratels-web`** (Web Service): Next.js 15 client dashboard providing responsive web interfaces for Buyers, Sellers, Coordinators, and Administrators.
 3. **`ratels-worker`** (Background Worker): Dedicated container running `/app/worker` executing durable outbox notifications, scheduled monthly transparency reports, and background refund reconciliation.
-4. **`ratels-postgres`** (Managed PostgreSQL 16): Primary database instance running in Europe (Frankfurt) with automated daily backups, SSL transport encryption, and connection pooling.
+4. **Neon Serverless PostgreSQL 16**: Primary authoritative database cluster with automated PITR daily backups, SSL transport encryption (`sslmode=require`), zero-downtime branching, and connection pooling. **Do not provision a Render-managed database.**
 5. **Cloudflare R2**:
    - `ratels-marketplace-assets-prod`: Public S3-compatible bucket storing validated product and catalogue imagery.
    - `ratels-private-reports-prod`: Dedicated private bucket storing signed transparency snapshot exports and safeguarding records.
@@ -21,29 +21,31 @@ All values must be configured via Render Dashboard Environment Groups or Secrets
 | Variable Name | Required Service | Classification | Description & Validation Rule |
 | :--- | :--- | :--- | :--- |
 | `APP_ENV` | api, worker, cron | System | Must be set to `production`. Activates strict CORS, SSL enforcement, and disables fallback dev sandboxes. |
-| `DATABASE_URL` | api, worker, cron | Secret | Connection string from `ratels-postgres` (must end with `?sslmode=require`). |
-| `JWT_SECRET` | api, worker | Secret | High-entropy random string (minimum 32 characters). |
+| `DATABASE_URL` | api, worker, cron | Secret | Connection string from Neon PostgreSQL (must end with `?sslmode=require`). Never hardcode or provision Render DB. |
+| `JWT_SECRET` | api, worker | Secret | High-entropy random string (minimum 32 characters). Preserve existing production secret; never auto-regenerate. |
 | `JWT_EXPIRY_HOURS` | api | Config | Default `24`. Controls session cookie and token lifespan. |
-| `ALLOWED_ORIGINS` | api | Config | Comma-separated frontend domains (e.g. `https://app.ratelsworldwide.org,https://ratelsworldwide.org`). Wildcards prohibited. |
+| `ALLOWED_ORIGINS` | api | Config | Comma-separated frontend domains (e.g. `https://app.ratelsworldwide.org,https://ratelsworldwide.org,https://ratels-web.onrender.com`). Wildcards prohibited. |
 | `FRONTEND_BASE_URL` | api, worker | Config | Primary frontend URL (e.g. `https://app.ratelsworldwide.org`). Used in verification and receipt links. |
 | `DEV_DELIVERY_SAFE_MODE`| api, worker | Safety Flag | Must be set to `false` in production. |
-| `PAYMENT_PROVIDER` | api, worker | Config | Must be `paystack` (or `unconfigured` to disable checkout). `sandbox` is blocked in production. |
-| `PAYSTACK_SECRET_KEY` | api, worker | Secret | Paystack Live Secret Key (`sk_live_...`). Required for checkout and webhook verification. |
+| `PAYMENT_PROVIDER` | api, worker | Config | Set to `paystack` once live keys are configured, or `unconfigured` to safely disable checkout. `sandbox` is blocked in production. |
+| `PAYSTACK_SECRET_KEY` | api, worker | Secret | Paystack Live Secret Key (`sk_live_...`). Required for checkout and webhook verification when `PAYMENT_PROVIDER=paystack`. |
 | `PAYSTACK_PUBLIC_KEY` | api, worker | Config | Paystack Live Public Key (`pk_live_...`). |
 | `EMAIL_PROVIDER` | api, worker | Config | Set to `brevo` or `resend`. |
 | `BREVO_API_KEY` | api, worker | Secret | Live Brevo HTTPS API key (`xkeysib-...`). |
 | `EMAIL_FROM_ADDRESS` | api, worker | Config | Verified sender email (e.g. `notifications@ratelsworldwide.org`). |
 | `TERMII_API_KEY` | api, worker | Secret | Termii SMS Live API Key (`TL_...`). |
 | `TERMII_SENDER_ID` | api, worker | Config | Approved alphanumeric sender ID (e.g. `RATELS`). |
-| `R2_ACCOUNT_ID` | api, worker | Secret | Cloudflare Account ID. |
+| `R2_ACCOUNT_ID` | api, worker | Secret | Cloudflare Account ID. Required if Cloudflare R2 is configured. |
 | `R2_ACCESS_KEY_ID` | api, worker | Secret | Cloudflare R2 S3-compatible Access Key ID. |
 | `R2_SECRET_ACCESS_KEY` | api, worker | Secret | Cloudflare R2 Secret Access Key. |
 | `R2_BUCKET_NAME` | api, worker | Config | Public marketplace catalogue bucket. |
 | `R2_PUBLIC_DOMAIN` | api, worker | Config | Custom CDN domain or R2 public URL (`https://media.ratelsworldwide.org`). |
-| `SAFEGUARDING_ENCRYPTION_KEY` | api | Secret | 32-byte AES-GCM encryption key for confidential incident reports. |
+| `SAFEGUARDING_REPORTING_ENABLED` | api | Config | Default `false`. Set to `true` only after providing `SAFEGUARDING_ENCRYPTION_KEY`. |
+| `SAFEGUARDING_ENCRYPTION_KEY` | api | Secret | 32-byte AES-GCM encryption key for confidential incident reports (required if safeguarding enabled). |
 | `REPORT_CRON_SECRET` | api | Secret | Shared bearer secret for triggering monthly report generation. |
 | `MARKETPLACE_CRON_SECRET` | api | Secret | Shared bearer secret for triggering reservation expiry and refund reconciliation. |
-| `NEXT_PUBLIC_API_URL` | web | Config | Public API base URL accessed by browser (`https://api.ratelsworldwide.org/api/v1`). |
+| `NEXT_PUBLIC_API_URL` | web | Build & Runtime | Public API base URL accessed by browser (`https://api.ratelsworldwide.org/api/v1`). Passed as build argument in Docker. |
+| `API_URL` | web | Build & Runtime | Server-side SSR backend URL proxy destination (`https://api.ratelsworldwide.org/api/v1`). |
 
 ---
 
@@ -112,22 +114,35 @@ psql "$DATABASE_URL" -c "SELECT version();"
 
 ## 6. Render Deployment Execution Steps
 
-### Phase A: Database Setup
-1. Provision `ratels-postgres` on Render (Standard plan, PostgreSQL 16).
-2. Take a manual baseline snapshot before attaching services.
+### Phase A: Neon PostgreSQL Baseline Snapshot (Zero-Downtime Backup)
+1. **Never provision a Render-managed database.** The authoritative production database is Neon Serverless PostgreSQL 16.
+2. In the **Neon Console**, create an instant point-in-time branch snapshot before release:
+   - Branch name: `ratels-prod-pre-step66`
+   - Parent branch: `main` (or production branch)
+3. Take a standalone compressed snapshot dump via Render shell or local terminal:
+   ```bash
+   pg_dump -Fc "$NEON_DATABASE_URL" -f "ratels_neon_backup_$(date +%Y%m%d_%H%M%S).dump"
+   ```
 
-### Phase B: Environment Group Configuration
-1. Create an Environment Group in Render named `ratels-production-env`.
-2. Add all variables listed in Section 2.
-3. Link the Environment Group to `ratels-api` and `ratels-worker`.
+### Phase B: Render Environment Group Configuration & Service Linking
+1. In Render Dashboard → Environment Groups → Create or update group `ratels-production-env`.
+2. Populate the required environment variables:
+   - `DATABASE_URL`: Neon PostgreSQL connection string (ending with `?sslmode=require`).
+   - `JWT_SECRET`: Preserve the existing production secret string.
+   - `BREVO_API_KEY`: Existing Brevo API key.
+   - `PAYSTACK_SECRET_KEY` & `PAYSTACK_PUBLIC_KEY`: Live keys (or set `PAYMENT_PROVIDER=unconfigured` until keys are provisioned).
+   - `R2_ACCESS_KEY_ID`, `R2_SECRET_ACCESS_KEY`, `R2_ACCOUNT_ID`, `R2_BUCKET_NAME`: Media assets bucket.
+   - `SAFEGUARDING_ENCRYPTION_KEY`: 32+ byte key (or leave `SAFEGUARDING_REPORTING_ENABLED=false`).
+3. Link `ratels-production-env` to existing services: `ratels-api` (or `ratels`), `ratels-worker`, and `ratels-web`.
+4. **Service Verification**: Verify that existing services in Render (`ratels-api` / `ratels` and `ratels-web`) are linked rather than creating duplicate web services.
 
 ### Phase C: Deploy Backend Services
 1. Deploy `ratels-api`:
-   - Inspect build logs: verify Docker build stages compile without error.
+   - Inspect build logs: verify Docker multi-stage build compiles `server`, `worker`, `report-cron`, `seed`, and `admin` binaries.
    - Inspect startup logs:
-     - Verify PostgreSQL connection and ping.
-     - Verify migration 22 executes and reports `applied`.
-     - Verify reference geographic seeder completes.
+     - Verify PostgreSQL connection established to Neon.
+     - Verify migrations 19, 20, 21, and 22 execute and report `applied`.
+     - Verify reference geographic seeder completes (6 zones, 37 states, 774 LGAs).
      - Verify server reports: `listening on 0.0.0.0:8000`.
 2. Deploy `ratels-worker`:
    - Inspect worker startup logs:
@@ -136,8 +151,8 @@ psql "$DATABASE_URL" -c "SELECT version();"
 
 ### Phase D: Deploy Frontend
 1. Deploy `ratels-web`:
-   - Verify `NEXT_PUBLIC_API_URL` points to the live backend.
-   - Verify static generation (58/58 pages compiled).
+   - Pass build argument: `NEXT_PUBLIC_API_URL=https://api.ratelsworldwide.org/api/v1`.
+   - Verify static generation (58/58 pages compiled clean).
    - Verify health check on root `/`.
 
 ---

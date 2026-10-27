@@ -2,11 +2,19 @@ FROM node:24-alpine AS builder
 
 WORKDIR /app
 
+# Build-time API configuration (allows passing public API endpoint during docker build)
+ARG NEXT_PUBLIC_API_URL=https://api.ratelsworldwide.org/api/v1
+ARG API_URL=https://api.ratelsworldwide.org/api/v1
+ARG INTERNAL_API_URL
+
+ENV NEXT_PUBLIC_API_URL=${NEXT_PUBLIC_API_URL}
+ENV API_URL=${API_URL}
+ENV INTERNAL_API_URL=${INTERNAL_API_URL:-$API_URL}
+
 COPY apps/web/package.json ./
 RUN npm install
 
 COPY apps/web/ ./
-ENV NEXT_PUBLIC_API_URL=http://api:8000/api/v1
 RUN npm run build
 
 FROM node:24-alpine AS runner
@@ -14,6 +22,12 @@ WORKDIR /app
 
 ENV NODE_ENV=production
 ENV PORT=3000
+
+# Runtime API configuration for Next.js SSR and reverse-proxy rewrites
+ARG NEXT_PUBLIC_API_URL=https://api.ratelsworldwide.org/api/v1
+ARG API_URL=https://api.ratelsworldwide.org/api/v1
+ENV NEXT_PUBLIC_API_URL=${NEXT_PUBLIC_API_URL}
+ENV API_URL=${API_URL}
 
 COPY --from=builder /app/package.json ./
 COPY --from=builder /app/node_modules ./node_modules
