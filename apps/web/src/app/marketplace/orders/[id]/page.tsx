@@ -100,6 +100,26 @@ export default function OrderDetailPage({ params }: OrderDetailProps) {
     }
   };
 
+  const handleConfirmShipmentDelivery = async (shipmentId: string) => {
+    if (!window.confirm("Confirm that you have received this vendor consignment in good condition?")) {
+      return;
+    }
+    setConfirmingDelivery(true);
+    setError(null);
+    try {
+      await apiRequest(`/marketplace/shipments/${shipmentId}/confirm-delivery`, {
+        method: "POST",
+        body: JSON.stringify({ notes: "Vendor shipment confirmed received by buyer" }),
+      });
+      setActionMessage("Vendor shipment receipt confirmed!");
+      fetchOrder();
+    } catch (err: any) {
+      setError(err.message || "Failed to confirm shipment delivery");
+    } finally {
+      setConfirmingDelivery(false);
+    }
+  };
+
   useEffect(() => {
     if (!authLoading && !user) {
       router.push(`/login?redirect=/marketplace/orders/${orderId}`);
@@ -156,9 +176,9 @@ export default function OrderDetailPage({ params }: OrderDetailProps) {
     );
   }
 
-  const { order, items = [], shipment } = data;
+  const { order, items = [], shipment, shipments = [] } = data;
   const isPaid = order.payment_status === "paid";
-  const isDispatched = order.fulfilment_status === "dispatched" || order.fulfilment_status === "delivered";
+  const isDispatched = order.fulfilment_status === "dispatched" || order.fulfilment_status === "partially_dispatched" || order.fulfilment_status === "partially_delivered" || order.fulfilment_status === "delivered";
   const isDelivered = order.fulfilment_status === "delivered";
 
   return (
@@ -400,8 +420,110 @@ export default function OrderDetailPage({ params }: OrderDetailProps) {
               )}
             </div>
 
-            {/* Shipment Dispatch Details */}
-            {shipment ? (
+            {/* Multi-Vendor Shipment Consignments & Tracking */}
+            {shipments && shipments.length > 0 ? (
+              <div className="mt-4 pt-4 border-t border-gray-100 space-y-3">
+                <div className="text-xs font-bold text-emerald-950 flex items-center justify-between">
+                  <span className="flex items-center gap-1.5">
+                    <Package className="w-3.5 h-3.5 text-emerald-700" />
+                    Vendor Shipments ({shipments.length})
+                  </span>
+                  <span className="text-[10px] text-gray-500 font-normal">
+                    Tracked per vendor
+                  </span>
+                </div>
+
+                <div className="space-y-3">
+                  {shipments.map((s: any) => {
+                    const sh = s.shipment || s;
+                    const bus = s.business;
+                    const shItems = s.items || [];
+                    const isShDispatched = sh.status === "dispatched" || sh.status === "in_transit";
+                    const isShDelivered = sh.status === "delivered";
+
+                    return (
+                      <div
+                        key={sh.id}
+                        className="bg-gray-50 rounded-xl p-3 space-y-2 text-[11px] border border-gray-100 shadow-2xs"
+                      >
+                        <div className="flex justify-between items-center">
+                          <span className="font-bold text-gray-900 flex items-center gap-1">
+                            <Building2 className="w-3.5 h-3.5 text-emerald-700" />
+                            {bus?.name || "Vendor Store"}
+                          </span>
+                          <Badge
+                            variant={
+                              isShDelivered
+                                ? "primary"
+                                : isShDispatched
+                                ? "info"
+                                : "neutral"
+                            }
+                            size="sm"
+                          >
+                            {sh.status.toUpperCase()}
+                          </Badge>
+                        </div>
+
+                        {shItems.length > 0 && (
+                          <div className="text-[10px] text-gray-600 bg-white p-2 rounded-lg border border-gray-100 space-y-0.5">
+                            <span className="font-semibold text-gray-700 block">Package Items:</span>
+                            {shItems.map((itm: any) => (
+                              <div key={itm.id} className="flex justify-between">
+                                <span>{itm.title_snapshot}</span>
+                                <span className="font-mono text-gray-500">x{itm.quantity}</span>
+                              </div>
+                            ))}
+                          </div>
+                        )}
+
+                        {sh.carrier_name && (
+                          <div className="flex justify-between">
+                            <span className="text-gray-500">Courier:</span>
+                            <span className="font-semibold text-gray-900">{sh.carrier_name}</span>
+                          </div>
+                        )}
+                        {sh.tracking_number && (
+                          <div className="flex justify-between">
+                            <span className="text-gray-500">Tracking:</span>
+                            <span className="font-mono font-bold text-gray-900">{sh.tracking_number}</span>
+                          </div>
+                        )}
+                        {sh.dispatched_at && (
+                          <div className="flex justify-between">
+                            <span className="text-gray-500">Dispatched:</span>
+                            <span className="text-gray-700">
+                              {new Date(sh.dispatched_at).toLocaleDateString("en-NG")}
+                            </span>
+                          </div>
+                        )}
+                        {sh.delivered_at && (
+                          <div className="flex justify-between">
+                            <span className="text-gray-500">Delivered:</span>
+                            <span className="text-emerald-700 font-semibold">
+                              {new Date(sh.delivered_at).toLocaleDateString("en-NG")}
+                            </span>
+                          </div>
+                        )}
+
+                        {isShDispatched && !isShDelivered && (
+                          <div className="pt-2 border-t border-gray-200/60 flex justify-end">
+                            <button
+                              onClick={() => handleConfirmShipmentDelivery(sh.id)}
+                              disabled={confirmingDelivery}
+                              className="px-2.5 py-1 bg-emerald-700 hover:bg-emerald-800 text-white font-bold rounded-lg text-[10px] inline-flex items-center gap-1 transition disabled:opacity-50"
+                            >
+                              <CheckCircle2 className="w-3 h-3" />
+                              {confirmingDelivery ? "Confirming..." : "Confirm Received"}
+                            </button>
+                          </div>
+                        )}
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+            ) : shipment ? (
               <div className="mt-4 pt-4 border-t border-gray-100 space-y-2">
                 <div className="text-xs font-bold text-emerald-950 flex items-center gap-1.5">
                   <Package className="w-3.5 h-3.5 text-emerald-700" />

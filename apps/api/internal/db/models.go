@@ -908,6 +908,7 @@ type MarketplaceOrderItem struct {
 	SubtotalKobo      int64              `json:"subtotal_kobo"`
 	ImageUrlSnapshot  pgtype.Text        `json:"image_url_snapshot"`
 	CreatedAt         pgtype.Timestamptz `json:"created_at"`
+	ShipmentID        pgtype.Text        `json:"shipment_id"`
 }
 
 type MarketplacePayment struct {
@@ -982,6 +983,15 @@ type MarketplaceShipment struct {
 	ProofOfDeliveryUrl  pgtype.Text        `json:"proof_of_delivery_url"`
 	CreatedAt           pgtype.Timestamptz `json:"created_at"`
 	UpdatedAt           pgtype.Timestamptz `json:"updated_at"`
+	BusinessID          pgtype.Text        `json:"business_id"`
+}
+
+type MarketplaceShipmentItem struct {
+	ID          string             `json:"id"`
+	ShipmentID  string             `json:"shipment_id"`
+	OrderItemID string             `json:"order_item_id"`
+	Quantity    int32              `json:"quantity"`
+	CreatedAt   pgtype.Timestamptz `json:"created_at"`
 }
 
 type MaterialRequest struct {

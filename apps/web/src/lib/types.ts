@@ -892,9 +892,9 @@ export interface MarketplaceOrder {
   delivery_fee_kobo: number;
   total_kobo: number;
   currency: string;
-  order_status: "placed" | "processing" | "ready_for_pickup" | "dispatched" | "delivered" | "cancelled" | "refunded";
+  order_status: "placed" | "processing" | "partially_dispatched" | "ready_for_pickup" | "dispatched" | "partially_delivered" | "delivered" | "cancelled" | "refunded" | "requires_reconciliation";
   payment_status: "pending" | "paid" | "failed" | "refunded";
-  fulfilment_status: "unfulfilled" | "preparing" | "dispatched" | "delivered" | "returned";
+  fulfilment_status: "unfulfilled" | "preparing" | "partially_dispatched" | "dispatched" | "partially_delivered" | "delivered" | "returned";
   idempotency_key?: string;
   notes?: string;
   item_count?: number;
@@ -924,17 +924,42 @@ export interface MarketplacePayment {
 export interface MarketplaceShipment {
   id: string;
   order_id: string;
+  business_id?: string;
   carrier_name: string;
   tracking_number: string;
   tracking_url?: string;
-  status: "dispatched" | "in_transit" | "delivered" | "failed" | "returned";
-  dispatched_at: string;
+  status: "pending" | "processing" | "ready_for_pickup" | "dispatched" | "in_transit" | "delivered" | "failed" | "returned" | "cancelled";
+  dispatched_at?: string;
   estimated_delivery_at?: string;
   delivered_at?: string;
   delivery_notes?: string;
   proof_of_delivery_url?: string;
   created_at: string;
   updated_at: string;
+}
+
+export interface ShipmentItemDetail {
+  id: string;
+  shipment_id: string;
+  order_item_id: string;
+  quantity: number;
+  product_id?: string;
+  title_snapshot: string;
+  sku_snapshot: string;
+  price_kobo_snapshot: number;
+  image_url_snapshot?: string;
+  business_id: string;
+}
+
+export interface ShipmentDetailResult {
+  shipment: MarketplaceShipment;
+  order?: MarketplaceOrder;
+  business?: {
+    id: string;
+    name: string;
+    slug?: string;
+  };
+  items: ShipmentItemDetail[];
 }
 
 export interface MarketplaceDispute {

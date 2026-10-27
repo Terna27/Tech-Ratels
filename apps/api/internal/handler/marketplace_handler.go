@@ -264,7 +264,7 @@ func (h *MarketplaceHandler) ListMyOrders(w http.ResponseWriter, r *http.Request
 func (h *MarketplaceHandler) GetOrder(w http.ResponseWriter, r *http.Request) {
 	user := GetCurrentUser(r.Context())
 	id := chi.URLParam(r, "id")
-	order, items, shipment, err := h.marketplaceService.GetOrderByID(r.Context(), user, id)
+	order, items, shipment, shipments, err := h.marketplaceService.GetOrderWithShipmentsByID(r.Context(), user, id)
 	if err != nil {
 		if errors.Is(err, service.ErrOrderNotFound) {
 			ErrorJSON(w, http.StatusNotFound, "NOT_FOUND", "Order not found", nil)
@@ -282,9 +282,10 @@ func (h *MarketplaceHandler) GetOrder(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	JSON(w, http.StatusOK, map[string]interface{}{
-		"order":    order,
-		"items":    items,
-		"shipment": shipment,
+		"order":     order,
+		"items":     items,
+		"shipment":  shipment,
+		"shipments": shipments,
 	})
 }
 
@@ -771,6 +772,173 @@ func (h *MarketplaceHandler) GetSellerMetrics(w http.ResponseWriter, r *http.Req
 		return
 	}
 	JSON(w, http.StatusOK, metrics)
+}
+
+func (h *MarketplaceHandler) ListOrderShipments(w http.ResponseWriter, r *http.Request) {
+	user := GetCurrentUser(r.Context())
+	orderID := chi.URLParam(r, "id")
+	shipments, err := h.marketplaceService.ListOrderShipments(r.Context(), user, orderID)
+	if err != nil {
+		if errors.Is(err, service.ErrOrderNotFound) {
+			ErrorJSON(w, http.StatusNotFound, "NOT_FOUND", "Order not found", nil)
+			return
+		}
+		if errors.Is(err, service.ErrScopeUnauthorized) {
+			ErrorJSON(w, http.StatusForbidden, "SCOPE_UNAUTHORIZED", err.Error(), nil)
+			return
+		}
+		ErrorJSON(w, http.StatusInternalServerError, "INTERNAL_ERROR", err.Error(), nil)
+		return
+	}
+	JSON(w, http.StatusOK, shipments)
+}
+
+func (h *MarketplaceHandler) ListSellerShipments(w http.ResponseWriter, r *http.Request) {
+	user := GetCurrentUser(r.Context())
+	var status *string
+	if s := r.URL.Query().Get("status"); s != "" {
+		status = &s
+	}
+	shipments, err := h.marketplaceService.ListSellerShipments(r.Context(), user, status)
+	if err != nil {
+		ErrorJSON(w, http.StatusInternalServerError, "INTERNAL_ERROR", err.Error(), nil)
+		return
+	}
+	JSON(w, http.StatusOK, shipments)
+}
+
+func (h *MarketplaceHandler) GetShipment(w http.ResponseWriter, r *http.Request) {
+	user := GetCurrentUser(r.Context())
+	id := chi.URLParam(r, "id")
+	sh, err := h.marketplaceService.GetShipmentByID(r.Context(), user, id)
+	if err != nil {
+		if errors.Is(err, service.ErrShipmentNotFound) {
+			ErrorJSON(w, http.StatusNotFound, "NOT_FOUND", "Shipment not found", nil)
+			return
+		}
+		if errors.Is(err, service.ErrScopeUnauthorized) {
+			ErrorJSON(w, http.StatusForbidden, "SCOPE_UNAUTHORIZED", err.Error(), nil)
+			return
+		}
+		if errors.Is(err, service.ErrUnauthorizedSellerAction) {
+			ErrorJSON(w, http.StatusForbidden, "FORBIDDEN", err.Error(), nil)
+			return
+		}
+		ErrorJSON(w, http.StatusInternalServerError, "INTERNAL_ERROR", err.Error(), nil)
+		return
+	}
+	JSON(w, http.StatusOK, sh)
+}
+
+func (h *MarketplaceHandler) DispatchShipment(w http.ResponseWriter, r *http.Request) {
+	user := GetCurrentUser(r.Context())
+	id := chi.URLParam(r, "id")
+
+	var req service.DispatchOrderInput
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		ErrorJSON(w, http.StatusBadRequest, "INVALID_REQUEST", "Malformed JSON payload", nil)
+		return
+	}
+
+	sh, err := h.marketplaceService.DispatchShipment(r.Context(), user, id, req)
+	if err != nil {
+		if errors.Is(err, service.ErrScopeUnauthorized) {
+			ErrorJSON(w, http.StatusForbidden, "SCOPE_UNAUTHORIZED", err.Error(), nil)
+			return
+		}
+		if errors.Is(err, service.ErrUnauthorizedSellerAction) {
+			ErrorJSON(w, http.StatusForbidden, "FORBIDDEN", err.Error(), nil)
+			return
+		}
+		if errors.Is(err, service.ErrShipmentNotFound) || errors.Is(err, service.ErrOrderNotFound) {
+			ErrorJSON(w, http.StatusNotFound, "NOT_FOUND", err.Error(), nil)
+			return
+		}
+		ErrorJSON(w, http.StatusBadRequest, "DISPATCH_FAILED", err.Error(), nil)
+		return
+	}
+	JSON(w, http.StatusOK, sh)
+}
+
+func (h *MarketplaceHandler) ConfirmShipmentDelivery(w http.ResponseWriter, r *http.Request) {
+	user := GetCurrentUser(r.Context())
+	id := chi.URLParam(r, "id")
+
+	var req struct {
+		ProofURL string `json:"proof_url"`
+		Notes    string `json:"notes"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		ErrorJSON(w, http.StatusBadRequest, "INVALID_REQUEST", "Malformed JSON payload", nil)
+		return
+	}
+
+	sh, err := h.marketplaceService.ConfirmShipmentDelivery(r.Context(), user, id, req.ProofURL, req.Notes)
+	if err != nil {
+		if errors.Is(err, service.ErrScopeUnauthorized) {
+			ErrorJSON(w, http.StatusForbidden, "SCOPE_UNAUTHORIZED", err.Error(), nil)
+			return
+		}
+		if errors.Is(err, service.ErrUnauthorizedSellerAction) || errors.Is(err, service.ErrUnauthorizedBuyerAction) {
+			ErrorJSON(w, http.StatusForbidden, "FORBIDDEN", err.Error(), nil)
+			return
+		}
+		if errors.Is(err, service.ErrShipmentNotFound) || errors.Is(err, service.ErrOrderNotFound) {
+			ErrorJSON(w, http.StatusNotFound, "NOT_FOUND", err.Error(), nil)
+			return
+		}
+		ErrorJSON(w, http.StatusBadRequest, "DELIVERY_CONFIRM_FAILED", err.Error(), nil)
+		return
+	}
+	JSON(w, http.StatusOK, sh)
+}
+
+func (h *MarketplaceHandler) UpdateShipmentTracking(w http.ResponseWriter, r *http.Request) {
+	user := GetCurrentUser(r.Context())
+	id := chi.URLParam(r, "id")
+
+	var req service.UpdateShipmentTrackingInput
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		ErrorJSON(w, http.StatusBadRequest, "INVALID_REQUEST", "Malformed JSON payload", nil)
+		return
+	}
+
+	sh, err := h.marketplaceService.UpdateShipmentTracking(r.Context(), user, id, req)
+	if err != nil {
+		if errors.Is(err, service.ErrScopeUnauthorized) {
+			ErrorJSON(w, http.StatusForbidden, "SCOPE_UNAUTHORIZED", err.Error(), nil)
+			return
+		}
+		if errors.Is(err, service.ErrUnauthorizedSellerAction) {
+			ErrorJSON(w, http.StatusForbidden, "FORBIDDEN", err.Error(), nil)
+			return
+		}
+		if errors.Is(err, service.ErrShipmentNotFound) || errors.Is(err, service.ErrOrderNotFound) {
+			ErrorJSON(w, http.StatusNotFound, "NOT_FOUND", err.Error(), nil)
+			return
+		}
+		ErrorJSON(w, http.StatusBadRequest, "UPDATE_FAILED", err.Error(), nil)
+		return
+	}
+	JSON(w, http.StatusOK, sh)
+}
+
+func (h *MarketplaceHandler) ListAdminShipments(w http.ResponseWriter, r *http.Request) {
+	user := GetCurrentUser(r.Context())
+	var status *string
+	if s := r.URL.Query().Get("status"); s != "" {
+		status = &s
+	}
+	shipments, err := h.marketplaceService.ListAllShipmentsAdmin(r.Context(), user, status)
+	if err != nil {
+		if errors.Is(err, service.ErrScopeUnauthorized) {
+			ErrorJSON(w, http.StatusForbidden, "SCOPE_UNAUTHORIZED", err.Error(), nil)
+			return
+		}
+		ErrorJSON(w, http.StatusInternalServerError, "INTERNAL_ERROR", err.Error(), nil)
+		return
+	}
+	JSON(w, http.StatusOK, shipments)
 }
 
 // -------------------------------------------------------------

@@ -12,6 +12,64 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 )
 
+const cancelMarketplaceShipmentsByOrder = `-- name: CancelMarketplaceShipmentsByOrder :exec
+UPDATE marketplace_shipments
+SET status = 'cancelled',
+    updated_at = CURRENT_TIMESTAMP
+WHERE order_id = $1
+  AND status IN ('pending', 'processing')
+`
+
+func (q *Queries) CancelMarketplaceShipmentsByOrder(ctx context.Context, orderID string) error {
+	_, err := q.db.Exec(ctx, cancelMarketplaceShipmentsByOrder, orderID)
+	return err
+}
+
+const confirmMarketplaceShipmentDelivery = `-- name: ConfirmMarketplaceShipmentDelivery :one
+UPDATE marketplace_shipments
+SET status = 'delivered',
+    delivered_at = $2,
+    proof_of_delivery_url = $3,
+    delivery_notes = $4,
+    updated_at = CURRENT_TIMESTAMP
+WHERE id = $1
+RETURNING id, order_id, carrier_name, tracking_number, tracking_url, status, dispatched_at, estimated_delivery_at, delivered_at, delivery_notes, proof_of_delivery_url, created_at, updated_at, business_id
+`
+
+type ConfirmMarketplaceShipmentDeliveryParams struct {
+	ID                 string             `json:"id"`
+	DeliveredAt        pgtype.Timestamptz `json:"delivered_at"`
+	ProofOfDeliveryUrl pgtype.Text        `json:"proof_of_delivery_url"`
+	DeliveryNotes      pgtype.Text        `json:"delivery_notes"`
+}
+
+func (q *Queries) ConfirmMarketplaceShipmentDelivery(ctx context.Context, arg ConfirmMarketplaceShipmentDeliveryParams) (MarketplaceShipment, error) {
+	row := q.db.QueryRow(ctx, confirmMarketplaceShipmentDelivery,
+		arg.ID,
+		arg.DeliveredAt,
+		arg.ProofOfDeliveryUrl,
+		arg.DeliveryNotes,
+	)
+	var i MarketplaceShipment
+	err := row.Scan(
+		&i.ID,
+		&i.OrderID,
+		&i.CarrierName,
+		&i.TrackingNumber,
+		&i.TrackingUrl,
+		&i.Status,
+		&i.DispatchedAt,
+		&i.EstimatedDeliveryAt,
+		&i.DeliveredAt,
+		&i.DeliveryNotes,
+		&i.ProofOfDeliveryUrl,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+		&i.BusinessID,
+	)
+	return i, err
+}
+
 const countOrderInventoryReleaseLogs = `-- name: CountOrderInventoryReleaseLogs :one
 SELECT COUNT(*) FROM marketplace_inventory_logs
 WHERE order_id = $1 AND product_id = $2
@@ -397,7 +455,7 @@ INSERT INTO marketplace_order_items (
     $1, $2, $3, $4, $5,
     $6, $7, $8, $9,
     $10, CURRENT_TIMESTAMP
-) RETURNING id, order_id, product_id, business_id, title_snapshot, sku_snapshot, price_kobo_snapshot, quantity, subtotal_kobo, image_url_snapshot, created_at
+) RETURNING id, order_id, product_id, business_id, title_snapshot, sku_snapshot, price_kobo_snapshot, quantity, subtotal_kobo, image_url_snapshot, created_at, shipment_id
 `
 
 type CreateMarketplaceOrderItemParams struct {
@@ -442,6 +500,7 @@ func (q *Queries) CreateMarketplaceOrderItem(ctx context.Context, arg CreateMark
 		&i.SubtotalKobo,
 		&i.ImageUrlSnapshot,
 		&i.CreatedAt,
+		&i.ShipmentID,
 	)
 	return i, err
 }
@@ -670,19 +729,20 @@ func (q *Queries) CreateMarketplaceRefund(ctx context.Context, arg CreateMarketp
 const createMarketplaceShipment = `-- name: CreateMarketplaceShipment :one
 
 INSERT INTO marketplace_shipments (
-    id, order_id, carrier_name, tracking_number, tracking_url,
+    id, order_id, business_id, carrier_name, tracking_number, tracking_url,
     status, dispatched_at, estimated_delivery_at, delivered_at,
     delivery_notes, proof_of_delivery_url, created_at, updated_at
 ) VALUES (
-    $1, $2, $3, $4, $5,
-    $6, $7, $8, $9,
-    $10, $11, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP
-) RETURNING id, order_id, carrier_name, tracking_number, tracking_url, status, dispatched_at, estimated_delivery_at, delivered_at, delivery_notes, proof_of_delivery_url, created_at, updated_at
+    $1, $2, $3, $4, $5, $6,
+    $7, $8, $9, $10,
+    $11, $12, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP
+) RETURNING id, order_id, carrier_name, tracking_number, tracking_url, status, dispatched_at, estimated_delivery_at, delivered_at, delivery_notes, proof_of_delivery_url, created_at, updated_at, business_id
 `
 
 type CreateMarketplaceShipmentParams struct {
 	ID                  string             `json:"id"`
 	OrderID             string             `json:"order_id"`
+	BusinessID          pgtype.Text        `json:"business_id"`
 	CarrierName         string             `json:"carrier_name"`
 	TrackingNumber      string             `json:"tracking_number"`
 	TrackingUrl         pgtype.Text        `json:"tracking_url"`
@@ -701,6 +761,7 @@ func (q *Queries) CreateMarketplaceShipment(ctx context.Context, arg CreateMarke
 	row := q.db.QueryRow(ctx, createMarketplaceShipment,
 		arg.ID,
 		arg.OrderID,
+		arg.BusinessID,
 		arg.CarrierName,
 		arg.TrackingNumber,
 		arg.TrackingUrl,
@@ -726,6 +787,41 @@ func (q *Queries) CreateMarketplaceShipment(ctx context.Context, arg CreateMarke
 		&i.ProofOfDeliveryUrl,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.BusinessID,
+	)
+	return i, err
+}
+
+const createMarketplaceShipmentItem = `-- name: CreateMarketplaceShipmentItem :one
+INSERT INTO marketplace_shipment_items (
+    id, shipment_id, order_item_id, quantity, created_at
+) VALUES (
+    $1, $2, $3, $4, CURRENT_TIMESTAMP
+) ON CONFLICT (shipment_id, order_item_id) DO NOTHING
+RETURNING id, shipment_id, order_item_id, quantity, created_at
+`
+
+type CreateMarketplaceShipmentItemParams struct {
+	ID          string `json:"id"`
+	ShipmentID  string `json:"shipment_id"`
+	OrderItemID string `json:"order_item_id"`
+	Quantity    int32  `json:"quantity"`
+}
+
+func (q *Queries) CreateMarketplaceShipmentItem(ctx context.Context, arg CreateMarketplaceShipmentItemParams) (MarketplaceShipmentItem, error) {
+	row := q.db.QueryRow(ctx, createMarketplaceShipmentItem,
+		arg.ID,
+		arg.ShipmentID,
+		arg.OrderItemID,
+		arg.Quantity,
+	)
+	var i MarketplaceShipmentItem
+	err := row.Scan(
+		&i.ID,
+		&i.ShipmentID,
+		&i.OrderItemID,
+		&i.Quantity,
+		&i.CreatedAt,
 	)
 	return i, err
 }
@@ -790,6 +886,60 @@ WHERE id = $1
 func (q *Queries) DeleteMarketplaceProduct(ctx context.Context, id string) error {
 	_, err := q.db.Exec(ctx, deleteMarketplaceProduct, id)
 	return err
+}
+
+const dispatchMarketplaceShipment = `-- name: DispatchMarketplaceShipment :one
+UPDATE marketplace_shipments
+SET status = 'dispatched',
+    carrier_name = $2,
+    tracking_number = $3,
+    tracking_url = $4,
+    dispatched_at = $5,
+    estimated_delivery_at = $6,
+    delivery_notes = $7,
+    updated_at = CURRENT_TIMESTAMP
+WHERE id = $1
+RETURNING id, order_id, carrier_name, tracking_number, tracking_url, status, dispatched_at, estimated_delivery_at, delivered_at, delivery_notes, proof_of_delivery_url, created_at, updated_at, business_id
+`
+
+type DispatchMarketplaceShipmentParams struct {
+	ID                  string             `json:"id"`
+	CarrierName         string             `json:"carrier_name"`
+	TrackingNumber      string             `json:"tracking_number"`
+	TrackingUrl         pgtype.Text        `json:"tracking_url"`
+	DispatchedAt        pgtype.Timestamptz `json:"dispatched_at"`
+	EstimatedDeliveryAt pgtype.Timestamptz `json:"estimated_delivery_at"`
+	DeliveryNotes       pgtype.Text        `json:"delivery_notes"`
+}
+
+func (q *Queries) DispatchMarketplaceShipment(ctx context.Context, arg DispatchMarketplaceShipmentParams) (MarketplaceShipment, error) {
+	row := q.db.QueryRow(ctx, dispatchMarketplaceShipment,
+		arg.ID,
+		arg.CarrierName,
+		arg.TrackingNumber,
+		arg.TrackingUrl,
+		arg.DispatchedAt,
+		arg.EstimatedDeliveryAt,
+		arg.DeliveryNotes,
+	)
+	var i MarketplaceShipment
+	err := row.Scan(
+		&i.ID,
+		&i.OrderID,
+		&i.CarrierName,
+		&i.TrackingNumber,
+		&i.TrackingUrl,
+		&i.Status,
+		&i.DispatchedAt,
+		&i.EstimatedDeliveryAt,
+		&i.DeliveredAt,
+		&i.DeliveryNotes,
+		&i.ProofOfDeliveryUrl,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+		&i.BusinessID,
+	)
+	return i, err
 }
 
 const getBusinessBranchByID = `-- name: GetBusinessBranchByID :one
@@ -1936,8 +2086,63 @@ func (q *Queries) GetMarketplaceSellerOverviewMetrics(ctx context.Context, busin
 	return i, err
 }
 
+const getMarketplaceShipmentByID = `-- name: GetMarketplaceShipmentByID :one
+SELECT id, order_id, carrier_name, tracking_number, tracking_url, status, dispatched_at, estimated_delivery_at, delivered_at, delivery_notes, proof_of_delivery_url, created_at, updated_at, business_id FROM marketplace_shipments
+WHERE id = $1
+`
+
+func (q *Queries) GetMarketplaceShipmentByID(ctx context.Context, id string) (MarketplaceShipment, error) {
+	row := q.db.QueryRow(ctx, getMarketplaceShipmentByID, id)
+	var i MarketplaceShipment
+	err := row.Scan(
+		&i.ID,
+		&i.OrderID,
+		&i.CarrierName,
+		&i.TrackingNumber,
+		&i.TrackingUrl,
+		&i.Status,
+		&i.DispatchedAt,
+		&i.EstimatedDeliveryAt,
+		&i.DeliveredAt,
+		&i.DeliveryNotes,
+		&i.ProofOfDeliveryUrl,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+		&i.BusinessID,
+	)
+	return i, err
+}
+
+const getMarketplaceShipmentByIDForUpdate = `-- name: GetMarketplaceShipmentByIDForUpdate :one
+SELECT id, order_id, carrier_name, tracking_number, tracking_url, status, dispatched_at, estimated_delivery_at, delivered_at, delivery_notes, proof_of_delivery_url, created_at, updated_at, business_id FROM marketplace_shipments
+WHERE id = $1
+FOR UPDATE
+`
+
+func (q *Queries) GetMarketplaceShipmentByIDForUpdate(ctx context.Context, id string) (MarketplaceShipment, error) {
+	row := q.db.QueryRow(ctx, getMarketplaceShipmentByIDForUpdate, id)
+	var i MarketplaceShipment
+	err := row.Scan(
+		&i.ID,
+		&i.OrderID,
+		&i.CarrierName,
+		&i.TrackingNumber,
+		&i.TrackingUrl,
+		&i.Status,
+		&i.DispatchedAt,
+		&i.EstimatedDeliveryAt,
+		&i.DeliveredAt,
+		&i.DeliveryNotes,
+		&i.ProofOfDeliveryUrl,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+		&i.BusinessID,
+	)
+	return i, err
+}
+
 const getMarketplaceShipmentByOrder = `-- name: GetMarketplaceShipmentByOrder :one
-SELECT id, order_id, carrier_name, tracking_number, tracking_url, status, dispatched_at, estimated_delivery_at, delivered_at, delivery_notes, proof_of_delivery_url, created_at, updated_at FROM marketplace_shipments
+SELECT id, order_id, carrier_name, tracking_number, tracking_url, status, dispatched_at, estimated_delivery_at, delivered_at, delivery_notes, proof_of_delivery_url, created_at, updated_at, business_id FROM marketplace_shipments
 WHERE order_id = $1
 ORDER BY created_at DESC
 LIMIT 1
@@ -1960,6 +2165,40 @@ func (q *Queries) GetMarketplaceShipmentByOrder(ctx context.Context, orderID str
 		&i.ProofOfDeliveryUrl,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.BusinessID,
+	)
+	return i, err
+}
+
+const getMarketplaceShipmentByOrderAndBusiness = `-- name: GetMarketplaceShipmentByOrderAndBusiness :one
+SELECT id, order_id, carrier_name, tracking_number, tracking_url, status, dispatched_at, estimated_delivery_at, delivered_at, delivery_notes, proof_of_delivery_url, created_at, updated_at, business_id FROM marketplace_shipments
+WHERE order_id = $1 AND business_id = $2
+LIMIT 1
+`
+
+type GetMarketplaceShipmentByOrderAndBusinessParams struct {
+	OrderID    string      `json:"order_id"`
+	BusinessID pgtype.Text `json:"business_id"`
+}
+
+func (q *Queries) GetMarketplaceShipmentByOrderAndBusiness(ctx context.Context, arg GetMarketplaceShipmentByOrderAndBusinessParams) (MarketplaceShipment, error) {
+	row := q.db.QueryRow(ctx, getMarketplaceShipmentByOrderAndBusiness, arg.OrderID, arg.BusinessID)
+	var i MarketplaceShipment
+	err := row.Scan(
+		&i.ID,
+		&i.OrderID,
+		&i.CarrierName,
+		&i.TrackingNumber,
+		&i.TrackingUrl,
+		&i.Status,
+		&i.DispatchedAt,
+		&i.EstimatedDeliveryAt,
+		&i.DeliveredAt,
+		&i.DeliveryNotes,
+		&i.ProofOfDeliveryUrl,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+		&i.BusinessID,
 	)
 	return i, err
 }
@@ -2162,6 +2401,100 @@ func (q *Queries) ListAllMarketplaceOrders(ctx context.Context, arg ListAllMarke
 			&i.ReconciliationRequired,
 			&i.ReconciliationNotes,
 			&i.ItemCount,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listAllMarketplaceShipmentsAdmin = `-- name: ListAllMarketplaceShipmentsAdmin :many
+SELECT s.id, s.order_id, s.carrier_name, s.tracking_number, s.tracking_url, s.status, s.dispatched_at, s.estimated_delivery_at, s.delivered_at, s.delivery_notes, s.proof_of_delivery_url, s.created_at, s.updated_at, s.business_id,
+       o.order_number,
+       o.buyer_name,
+       o.buyer_email,
+       o.shipping_address,
+       o.shipping_state_id,
+       o.shipping_lga_id,
+       o.pickup_branch_id,
+       o.payment_status,
+       o.order_status,
+       b.name as business_name,
+       b.owner_user_id as seller_user_id
+FROM marketplace_shipments s
+JOIN marketplace_orders o ON o.id = s.order_id
+JOIN marketplace_businesses b ON b.id = s.business_id
+WHERE ($1::text IS NULL OR $1 = '' OR s.status = $1)
+ORDER BY s.created_at DESC
+`
+
+type ListAllMarketplaceShipmentsAdminRow struct {
+	ID                  string             `json:"id"`
+	OrderID             string             `json:"order_id"`
+	CarrierName         string             `json:"carrier_name"`
+	TrackingNumber      string             `json:"tracking_number"`
+	TrackingUrl         pgtype.Text        `json:"tracking_url"`
+	Status              string             `json:"status"`
+	DispatchedAt        pgtype.Timestamptz `json:"dispatched_at"`
+	EstimatedDeliveryAt pgtype.Timestamptz `json:"estimated_delivery_at"`
+	DeliveredAt         pgtype.Timestamptz `json:"delivered_at"`
+	DeliveryNotes       pgtype.Text        `json:"delivery_notes"`
+	ProofOfDeliveryUrl  pgtype.Text        `json:"proof_of_delivery_url"`
+	CreatedAt           pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt           pgtype.Timestamptz `json:"updated_at"`
+	BusinessID          pgtype.Text        `json:"business_id"`
+	OrderNumber         string             `json:"order_number"`
+	BuyerName           string             `json:"buyer_name"`
+	BuyerEmail          string             `json:"buyer_email"`
+	ShippingAddress     string             `json:"shipping_address"`
+	ShippingStateID     pgtype.Text        `json:"shipping_state_id"`
+	ShippingLgaID       pgtype.Text        `json:"shipping_lga_id"`
+	PickupBranchID      pgtype.Text        `json:"pickup_branch_id"`
+	PaymentStatus       string             `json:"payment_status"`
+	OrderStatus         string             `json:"order_status"`
+	BusinessName        string             `json:"business_name"`
+	SellerUserID        string             `json:"seller_user_id"`
+}
+
+func (q *Queries) ListAllMarketplaceShipmentsAdmin(ctx context.Context, dollar_1 string) ([]ListAllMarketplaceShipmentsAdminRow, error) {
+	rows, err := q.db.Query(ctx, listAllMarketplaceShipmentsAdmin, dollar_1)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []ListAllMarketplaceShipmentsAdminRow
+	for rows.Next() {
+		var i ListAllMarketplaceShipmentsAdminRow
+		if err := rows.Scan(
+			&i.ID,
+			&i.OrderID,
+			&i.CarrierName,
+			&i.TrackingNumber,
+			&i.TrackingUrl,
+			&i.Status,
+			&i.DispatchedAt,
+			&i.EstimatedDeliveryAt,
+			&i.DeliveredAt,
+			&i.DeliveryNotes,
+			&i.ProofOfDeliveryUrl,
+			&i.CreatedAt,
+			&i.UpdatedAt,
+			&i.BusinessID,
+			&i.OrderNumber,
+			&i.BuyerName,
+			&i.BuyerEmail,
+			&i.ShippingAddress,
+			&i.ShippingStateID,
+			&i.ShippingLgaID,
+			&i.PickupBranchID,
+			&i.PaymentStatus,
+			&i.OrderStatus,
+			&i.BusinessName,
+			&i.SellerUserID,
 		); err != nil {
 			return nil, err
 		}
@@ -2524,7 +2857,7 @@ func (q *Queries) ListMarketplaceInventoryLogsByProduct(ctx context.Context, pro
 }
 
 const listMarketplaceOrderItemsByOrder = `-- name: ListMarketplaceOrderItemsByOrder :many
-SELECT oi.id, oi.order_id, oi.product_id, oi.business_id, oi.title_snapshot, oi.sku_snapshot, oi.price_kobo_snapshot, oi.quantity, oi.subtotal_kobo, oi.image_url_snapshot, oi.created_at,
+SELECT oi.id, oi.order_id, oi.product_id, oi.business_id, oi.title_snapshot, oi.sku_snapshot, oi.price_kobo_snapshot, oi.quantity, oi.subtotal_kobo, oi.image_url_snapshot, oi.created_at, oi.shipment_id,
        b.name as business_name,
        b.slug as business_slug
 FROM marketplace_order_items oi
@@ -2545,6 +2878,7 @@ type ListMarketplaceOrderItemsByOrderRow struct {
 	SubtotalKobo      int64              `json:"subtotal_kobo"`
 	ImageUrlSnapshot  pgtype.Text        `json:"image_url_snapshot"`
 	CreatedAt         pgtype.Timestamptz `json:"created_at"`
+	ShipmentID        pgtype.Text        `json:"shipment_id"`
 	BusinessName      string             `json:"business_name"`
 	BusinessSlug      string             `json:"business_slug"`
 }
@@ -2570,6 +2904,7 @@ func (q *Queries) ListMarketplaceOrderItemsByOrder(ctx context.Context, orderID 
 			&i.SubtotalKobo,
 			&i.ImageUrlSnapshot,
 			&i.CreatedAt,
+			&i.ShipmentID,
 			&i.BusinessName,
 			&i.BusinessSlug,
 		); err != nil {
@@ -2998,6 +3333,204 @@ func (q *Queries) ListMarketplaceRefundsByOrder(ctx context.Context, orderID str
 			&i.Metadata,
 			&i.CreatedAt,
 			&i.UpdatedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listMarketplaceShipmentItemsByShipment = `-- name: ListMarketplaceShipmentItemsByShipment :many
+SELECT msi.id, msi.shipment_id, msi.order_item_id, msi.quantity, msi.created_at,
+       oi.product_id,
+       oi.title_snapshot,
+       oi.sku_snapshot,
+       oi.price_kobo_snapshot,
+       oi.image_url_snapshot,
+       oi.business_id
+FROM marketplace_shipment_items msi
+JOIN marketplace_order_items oi ON oi.id = msi.order_item_id
+WHERE msi.shipment_id = $1
+ORDER BY msi.created_at ASC
+`
+
+type ListMarketplaceShipmentItemsByShipmentRow struct {
+	ID                string             `json:"id"`
+	ShipmentID        string             `json:"shipment_id"`
+	OrderItemID       string             `json:"order_item_id"`
+	Quantity          int32              `json:"quantity"`
+	CreatedAt         pgtype.Timestamptz `json:"created_at"`
+	ProductID         pgtype.Text        `json:"product_id"`
+	TitleSnapshot     string             `json:"title_snapshot"`
+	SkuSnapshot       string             `json:"sku_snapshot"`
+	PriceKoboSnapshot int64              `json:"price_kobo_snapshot"`
+	ImageUrlSnapshot  pgtype.Text        `json:"image_url_snapshot"`
+	BusinessID        string             `json:"business_id"`
+}
+
+func (q *Queries) ListMarketplaceShipmentItemsByShipment(ctx context.Context, shipmentID string) ([]ListMarketplaceShipmentItemsByShipmentRow, error) {
+	rows, err := q.db.Query(ctx, listMarketplaceShipmentItemsByShipment, shipmentID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []ListMarketplaceShipmentItemsByShipmentRow
+	for rows.Next() {
+		var i ListMarketplaceShipmentItemsByShipmentRow
+		if err := rows.Scan(
+			&i.ID,
+			&i.ShipmentID,
+			&i.OrderItemID,
+			&i.Quantity,
+			&i.CreatedAt,
+			&i.ProductID,
+			&i.TitleSnapshot,
+			&i.SkuSnapshot,
+			&i.PriceKoboSnapshot,
+			&i.ImageUrlSnapshot,
+			&i.BusinessID,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listMarketplaceShipmentsByBusiness = `-- name: ListMarketplaceShipmentsByBusiness :many
+SELECT s.id, s.order_id, s.carrier_name, s.tracking_number, s.tracking_url, s.status, s.dispatched_at, s.estimated_delivery_at, s.delivered_at, s.delivery_notes, s.proof_of_delivery_url, s.created_at, s.updated_at, s.business_id,
+       o.order_number,
+       o.buyer_name,
+       o.buyer_email,
+       o.buyer_phone,
+       o.shipping_address,
+       o.shipping_state_id,
+       o.shipping_lga_id,
+       o.payment_status,
+       o.order_status,
+       b.name as business_name
+FROM marketplace_shipments s
+JOIN marketplace_orders o ON o.id = s.order_id
+JOIN marketplace_businesses b ON b.id = s.business_id
+WHERE s.business_id = $1
+  AND ($2::text IS NULL OR $2 = '' OR s.status = $2)
+ORDER BY s.created_at DESC
+`
+
+type ListMarketplaceShipmentsByBusinessParams struct {
+	BusinessID pgtype.Text `json:"business_id"`
+	Column2    string      `json:"column_2"`
+}
+
+type ListMarketplaceShipmentsByBusinessRow struct {
+	ID                  string             `json:"id"`
+	OrderID             string             `json:"order_id"`
+	CarrierName         string             `json:"carrier_name"`
+	TrackingNumber      string             `json:"tracking_number"`
+	TrackingUrl         pgtype.Text        `json:"tracking_url"`
+	Status              string             `json:"status"`
+	DispatchedAt        pgtype.Timestamptz `json:"dispatched_at"`
+	EstimatedDeliveryAt pgtype.Timestamptz `json:"estimated_delivery_at"`
+	DeliveredAt         pgtype.Timestamptz `json:"delivered_at"`
+	DeliveryNotes       pgtype.Text        `json:"delivery_notes"`
+	ProofOfDeliveryUrl  pgtype.Text        `json:"proof_of_delivery_url"`
+	CreatedAt           pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt           pgtype.Timestamptz `json:"updated_at"`
+	BusinessID          pgtype.Text        `json:"business_id"`
+	OrderNumber         string             `json:"order_number"`
+	BuyerName           string             `json:"buyer_name"`
+	BuyerEmail          string             `json:"buyer_email"`
+	BuyerPhone          string             `json:"buyer_phone"`
+	ShippingAddress     string             `json:"shipping_address"`
+	ShippingStateID     pgtype.Text        `json:"shipping_state_id"`
+	ShippingLgaID       pgtype.Text        `json:"shipping_lga_id"`
+	PaymentStatus       string             `json:"payment_status"`
+	OrderStatus         string             `json:"order_status"`
+	BusinessName        string             `json:"business_name"`
+}
+
+func (q *Queries) ListMarketplaceShipmentsByBusiness(ctx context.Context, arg ListMarketplaceShipmentsByBusinessParams) ([]ListMarketplaceShipmentsByBusinessRow, error) {
+	rows, err := q.db.Query(ctx, listMarketplaceShipmentsByBusiness, arg.BusinessID, arg.Column2)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []ListMarketplaceShipmentsByBusinessRow
+	for rows.Next() {
+		var i ListMarketplaceShipmentsByBusinessRow
+		if err := rows.Scan(
+			&i.ID,
+			&i.OrderID,
+			&i.CarrierName,
+			&i.TrackingNumber,
+			&i.TrackingUrl,
+			&i.Status,
+			&i.DispatchedAt,
+			&i.EstimatedDeliveryAt,
+			&i.DeliveredAt,
+			&i.DeliveryNotes,
+			&i.ProofOfDeliveryUrl,
+			&i.CreatedAt,
+			&i.UpdatedAt,
+			&i.BusinessID,
+			&i.OrderNumber,
+			&i.BuyerName,
+			&i.BuyerEmail,
+			&i.BuyerPhone,
+			&i.ShippingAddress,
+			&i.ShippingStateID,
+			&i.ShippingLgaID,
+			&i.PaymentStatus,
+			&i.OrderStatus,
+			&i.BusinessName,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listMarketplaceShipmentsByOrder = `-- name: ListMarketplaceShipmentsByOrder :many
+SELECT id, order_id, carrier_name, tracking_number, tracking_url, status, dispatched_at, estimated_delivery_at, delivered_at, delivery_notes, proof_of_delivery_url, created_at, updated_at, business_id FROM marketplace_shipments
+WHERE order_id = $1
+ORDER BY created_at ASC
+`
+
+func (q *Queries) ListMarketplaceShipmentsByOrder(ctx context.Context, orderID string) ([]MarketplaceShipment, error) {
+	rows, err := q.db.Query(ctx, listMarketplaceShipmentsByOrder, orderID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []MarketplaceShipment
+	for rows.Next() {
+		var i MarketplaceShipment
+		if err := rows.Scan(
+			&i.ID,
+			&i.OrderID,
+			&i.CarrierName,
+			&i.TrackingNumber,
+			&i.TrackingUrl,
+			&i.Status,
+			&i.DispatchedAt,
+			&i.EstimatedDeliveryAt,
+			&i.DeliveredAt,
+			&i.DeliveryNotes,
+			&i.ProofOfDeliveryUrl,
+			&i.CreatedAt,
+			&i.UpdatedAt,
+			&i.BusinessID,
 		); err != nil {
 			return nil, err
 		}
@@ -3805,7 +4338,7 @@ SET status = $2,
     delivery_notes = $5,
     updated_at = CURRENT_TIMESTAMP
 WHERE id = $1
-RETURNING id, order_id, carrier_name, tracking_number, tracking_url, status, dispatched_at, estimated_delivery_at, delivered_at, delivery_notes, proof_of_delivery_url, created_at, updated_at
+RETURNING id, order_id, carrier_name, tracking_number, tracking_url, status, dispatched_at, estimated_delivery_at, delivered_at, delivery_notes, proof_of_delivery_url, created_at, updated_at, business_id
 `
 
 type UpdateMarketplaceShipmentStatusParams struct {
@@ -3839,6 +4372,70 @@ func (q *Queries) UpdateMarketplaceShipmentStatus(ctx context.Context, arg Updat
 		&i.ProofOfDeliveryUrl,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.BusinessID,
 	)
 	return i, err
+}
+
+const updateMarketplaceShipmentTracking = `-- name: UpdateMarketplaceShipmentTracking :one
+UPDATE marketplace_shipments
+SET carrier_name = $2,
+    tracking_number = $3,
+    tracking_url = $4,
+    delivery_notes = $5,
+    updated_at = CURRENT_TIMESTAMP
+WHERE id = $1
+RETURNING id, order_id, carrier_name, tracking_number, tracking_url, status, dispatched_at, estimated_delivery_at, delivered_at, delivery_notes, proof_of_delivery_url, created_at, updated_at, business_id
+`
+
+type UpdateMarketplaceShipmentTrackingParams struct {
+	ID             string      `json:"id"`
+	CarrierName    string      `json:"carrier_name"`
+	TrackingNumber string      `json:"tracking_number"`
+	TrackingUrl    pgtype.Text `json:"tracking_url"`
+	DeliveryNotes  pgtype.Text `json:"delivery_notes"`
+}
+
+func (q *Queries) UpdateMarketplaceShipmentTracking(ctx context.Context, arg UpdateMarketplaceShipmentTrackingParams) (MarketplaceShipment, error) {
+	row := q.db.QueryRow(ctx, updateMarketplaceShipmentTracking,
+		arg.ID,
+		arg.CarrierName,
+		arg.TrackingNumber,
+		arg.TrackingUrl,
+		arg.DeliveryNotes,
+	)
+	var i MarketplaceShipment
+	err := row.Scan(
+		&i.ID,
+		&i.OrderID,
+		&i.CarrierName,
+		&i.TrackingNumber,
+		&i.TrackingUrl,
+		&i.Status,
+		&i.DispatchedAt,
+		&i.EstimatedDeliveryAt,
+		&i.DeliveredAt,
+		&i.DeliveryNotes,
+		&i.ProofOfDeliveryUrl,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+		&i.BusinessID,
+	)
+	return i, err
+}
+
+const updateOrderItemShipmentID = `-- name: UpdateOrderItemShipmentID :exec
+UPDATE marketplace_order_items
+SET shipment_id = $2
+WHERE id = $1
+`
+
+type UpdateOrderItemShipmentIDParams struct {
+	ID         string      `json:"id"`
+	ShipmentID pgtype.Text `json:"shipment_id"`
+}
+
+func (q *Queries) UpdateOrderItemShipmentID(ctx context.Context, arg UpdateOrderItemShipmentIDParams) error {
+	_, err := q.db.Exec(ctx, updateOrderItemShipmentID, arg.ID, arg.ShipmentID)
+	return err
 }

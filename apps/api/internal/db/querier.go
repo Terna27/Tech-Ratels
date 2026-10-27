@@ -28,10 +28,12 @@ type Querier interface {
 	ApproveEventMedia(ctx context.Context, arg ApproveEventMediaParams) (EventMedium, error)
 	CalculateExternalInflowsAndOutflows(ctx context.Context, arg CalculateExternalInflowsAndOutflowsParams) (CalculateExternalInflowsAndOutflowsRow, error)
 	CalculateFundBalanceBeforeDate(ctx context.Context, arg CalculateFundBalanceBeforeDateParams) (int64, error)
+	CancelMarketplaceShipmentsByOrder(ctx context.Context, orderID string) error
 	CancelPendingSchedulesForEvent(ctx context.Context, eventID string) error
 	CheckReportSnapshotExists(ctx context.Context, arg CheckReportSnapshotExistsParams) (int64, error)
 	ClaimOutboxBatch(ctx context.Context, arg ClaimOutboxBatchParams) ([]NotificationOutbox, error)
 	CloseSafeguardingCase(ctx context.Context, id string) (SafeguardingCase, error)
+	ConfirmMarketplaceShipmentDelivery(ctx context.Context, arg ConfirmMarketplaceShipmentDeliveryParams) (MarketplaceShipment, error)
 	CountActiveAppointments(ctx context.Context) (int64, error)
 	CountActiveUsers(ctx context.Context) (int64, error)
 	CountAdminCommunityProjects(ctx context.Context, arg CountAdminCommunityProjectsParams) (int64, error)
@@ -172,6 +174,7 @@ type Querier interface {
 	// Marketplace Shipments
 	// -------------------------------------------------------------
 	CreateMarketplaceShipment(ctx context.Context, arg CreateMarketplaceShipmentParams) (MarketplaceShipment, error)
+	CreateMarketplaceShipmentItem(ctx context.Context, arg CreateMarketplaceShipmentItemParams) (MarketplaceShipmentItem, error)
 	CreateMaterialRequest(ctx context.Context, arg CreateMaterialRequestParams) (MaterialRequest, error)
 	CreateMaterialRequestItem(ctx context.Context, arg CreateMaterialRequestItemParams) (MaterialRequestItem, error)
 	CreateMaterialTransfer(ctx context.Context, arg CreateMaterialTransferParams) (MaterialTransfer, error)
@@ -247,6 +250,7 @@ type Querier interface {
 	DeleteReportExport(ctx context.Context, id string) error
 	DeleteReportExportsBySnapshot(ctx context.Context, snapshotID string) error
 	DeleteSafeguardingEvidence(ctx context.Context, id string) error
+	DispatchMarketplaceShipment(ctx context.Context, arg DispatchMarketplaceShipmentParams) (MarketplaceShipment, error)
 	// Transactional Outbox
 	EnqueueOutbox(ctx context.Context, arg EnqueueOutboxParams) (NotificationOutbox, error)
 	EscalateSafeguardingCase(ctx context.Context, arg EscalateSafeguardingCaseParams) (SafeguardingCase, error)
@@ -351,7 +355,10 @@ type Querier interface {
 	GetMarketplaceRefundByProviderReferenceForUpdate(ctx context.Context, providerRefundReference string) (MarketplaceRefund, error)
 	GetMarketplaceRefundSumsByOrder(ctx context.Context, orderID string) (GetMarketplaceRefundSumsByOrderRow, error)
 	GetMarketplaceSellerOverviewMetrics(ctx context.Context, businessID string) (GetMarketplaceSellerOverviewMetricsRow, error)
+	GetMarketplaceShipmentByID(ctx context.Context, id string) (MarketplaceShipment, error)
+	GetMarketplaceShipmentByIDForUpdate(ctx context.Context, id string) (MarketplaceShipment, error)
 	GetMarketplaceShipmentByOrder(ctx context.Context, orderID string) (MarketplaceShipment, error)
+	GetMarketplaceShipmentByOrderAndBusiness(ctx context.Context, arg GetMarketplaceShipmentByOrderAndBusinessParams) (MarketplaceShipment, error)
 	GetMaterialRequestByID(ctx context.Context, id string) (GetMaterialRequestByIDRow, error)
 	GetMaterialRequestByReference(ctx context.Context, reference string) (MaterialRequest, error)
 	GetMaterialTransferByID(ctx context.Context, id string) (GetMaterialTransferByIDRow, error)
@@ -424,6 +431,7 @@ type Querier interface {
 	ListAllEvents(ctx context.Context) ([]ListAllEventsRow, error)
 	ListAllMarketplaceDisputes(ctx context.Context, dollar_1 string) ([]ListAllMarketplaceDisputesRow, error)
 	ListAllMarketplaceOrders(ctx context.Context, arg ListAllMarketplaceOrdersParams) ([]ListAllMarketplaceOrdersRow, error)
+	ListAllMarketplaceShipmentsAdmin(ctx context.Context, dollar_1 string) ([]ListAllMarketplaceShipmentsAdminRow, error)
 	ListAllMessagesByCaseID(ctx context.Context, caseID string) ([]ListAllMessagesByCaseIDRow, error)
 	ListAllStockBalances(ctx context.Context, arg ListAllStockBalancesParams) ([]ListAllStockBalancesRow, error)
 	ListAllUpdatesByProjectID(ctx context.Context, projectID string) ([]ListAllUpdatesByProjectIDRow, error)
@@ -482,6 +490,9 @@ type Querier interface {
 	ListMarketplacePayments(ctx context.Context, arg ListMarketplacePaymentsParams) ([]ListMarketplacePaymentsRow, error)
 	ListMarketplaceProducts(ctx context.Context, arg ListMarketplaceProductsParams) ([]ListMarketplaceProductsRow, error)
 	ListMarketplaceRefundsByOrder(ctx context.Context, orderID string) ([]MarketplaceRefund, error)
+	ListMarketplaceShipmentItemsByShipment(ctx context.Context, shipmentID string) ([]ListMarketplaceShipmentItemsByShipmentRow, error)
+	ListMarketplaceShipmentsByBusiness(ctx context.Context, arg ListMarketplaceShipmentsByBusinessParams) ([]ListMarketplaceShipmentsByBusinessRow, error)
+	ListMarketplaceShipmentsByOrder(ctx context.Context, orderID string) ([]MarketplaceShipment, error)
 	ListMaterialRequestItemsByRequest(ctx context.Context, requestID string) ([]ListMaterialRequestItemsByRequestRow, error)
 	ListMaterialRequests(ctx context.Context, arg ListMaterialRequestsParams) ([]ListMaterialRequestsRow, error)
 	ListMaterialTransferItemsByTransfer(ctx context.Context, transferID string) ([]ListMaterialTransferItemsByTransferRow, error)
@@ -615,11 +626,13 @@ type Querier interface {
 	UpdateMarketplaceProduct(ctx context.Context, arg UpdateMarketplaceProductParams) (MarketplaceProduct, error)
 	UpdateMarketplaceRefundStatus(ctx context.Context, arg UpdateMarketplaceRefundStatusParams) (MarketplaceRefund, error)
 	UpdateMarketplaceShipmentStatus(ctx context.Context, arg UpdateMarketplaceShipmentStatusParams) (MarketplaceShipment, error)
+	UpdateMarketplaceShipmentTracking(ctx context.Context, arg UpdateMarketplaceShipmentTrackingParams) (MarketplaceShipment, error)
 	UpdateMaterialRequestItemApprovedQty(ctx context.Context, arg UpdateMaterialRequestItemApprovedQtyParams) (MaterialRequestItem, error)
 	UpdateMaterialRequestReview(ctx context.Context, arg UpdateMaterialRequestReviewParams) (MaterialRequest, error)
 	UpdateMaterialTransferItemReceipt(ctx context.Context, arg UpdateMaterialTransferItemReceiptParams) (MaterialTransferItem, error)
 	UpdateMemberProfile(ctx context.Context, arg UpdateMemberProfileParams) (MemberProfile, error)
 	UpdateNotificationTemplate(ctx context.Context, arg UpdateNotificationTemplateParams) (NotificationTemplate, error)
+	UpdateOrderItemShipmentID(ctx context.Context, arg UpdateOrderItemShipmentIDParams) error
 	UpdateProjectMilestone(ctx context.Context, arg UpdateProjectMilestoneParams) (CommunityProjectMilestone, error)
 	UpdateReconciliationPeriodStatus(ctx context.Context, arg UpdateReconciliationPeriodStatusParams) (FinancialReconciliationPeriod, error)
 	UpdateReportExportStatus(ctx context.Context, arg UpdateReportExportStatusParams) (PublicReportExport, error)

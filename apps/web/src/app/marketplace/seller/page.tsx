@@ -94,6 +94,8 @@ export default function SellerPortalPage() {
   // Dispatch Modal State
   const [showDispatchModal, setShowDispatchModal] = useState(false);
   const [dispatchOrderId, setDispatchOrderId] = useState<string | null>(null);
+  const [dispatchShipmentId, setDispatchShipmentId] = useState<string | null>(null);
+  const [sellerShipments, setSellerShipments] = useState<any[]>([]);
   const [carrierName, setCarrierName] = useState("GIG Logistics");
   const [trackingNumber, setTrackingNumber] = useState("");
   const [dispatchNotes, setDispatchNotes] = useState("");
@@ -147,18 +149,20 @@ export default function SellerPortalPage() {
       setHasNoBusiness(false);
 
       if (b && (b.status === "approved" || b.status === "active" || b.approval_status === "approved")) {
-        // Load metrics, products, orders, branches
-        const [mRes, pRes, oRes, brRes] = await Promise.allSettled([
+        // Load metrics, products, orders, branches, shipments
+        const [mRes, pRes, oRes, brRes, shRes] = await Promise.allSettled([
           apiRequest<any>("/marketplace/seller/metrics"),
           apiRequest<any[]>("/marketplace/seller/products"),
           apiRequest<any[]>("/marketplace/seller/orders"),
           apiRequest<any[]>(`/marketplace/businesses/${b.id}/branches`),
+          apiRequest<any[]>("/marketplace/seller/shipments"),
         ]);
 
         if (mRes.status === "fulfilled") setMetrics(mRes.value);
         if (pRes.status === "fulfilled") setProducts(pRes.value || []);
         if (oRes.status === "fulfilled") setOrders(oRes.value || []);
         if (brRes.status === "fulfilled") setBranches(brRes.value || []);
+        if (shRes.status === "fulfilled") setSellerShipments(shRes.value || []);
       }
     } catch (err: any) {
       if (err.message && (err.message.includes("404") || err.message.includes("No business profile"))) {
@@ -439,10 +443,13 @@ export default function SellerPortalPage() {
 
   const handleDispatchOrder = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!dispatchOrderId) return;
+    if (!dispatchOrderId && !dispatchShipmentId) return;
     setDispatchSubmitting(true);
     try {
-      await apiRequest(`/marketplace/seller/orders/${dispatchOrderId}/dispatch`, {
+      const url = dispatchShipmentId
+        ? `/marketplace/seller/shipments/${dispatchShipmentId}/dispatch`
+        : `/marketplace/seller/orders/${dispatchOrderId}/dispatch`;
+      await apiRequest(url, {
         method: "POST",
         body: JSON.stringify({
           carrier_name: carrierName.trim(),
@@ -450,26 +457,31 @@ export default function SellerPortalPage() {
           notes: dispatchNotes.trim(),
         }),
       });
-      setSuccess("Order marked as dispatched! Tracking details shared with buyer.");
+      setSuccess("Consignment marked as dispatched! Tracking details shared with buyer.");
       setShowDispatchModal(false);
+      setDispatchShipmentId(null);
+      setDispatchOrderId(null);
       loadSellerData();
     } catch (err: any) {
-      setError(err.message || "Failed to dispatch order");
+      setError(err.message || "Failed to dispatch consignment");
     } finally {
       setDispatchSubmitting(false);
     }
   };
 
-  const handleConfirmDelivery = async (orderId: string) => {
-    if (!confirm("Confirm delivery of this order?")) return;
+  const handleConfirmDelivery = async (id: string, isShipment?: boolean) => {
+    if (!confirm("Confirm delivery of this consignment?")) return;
     try {
-      await apiRequest(`/marketplace/seller/orders/${orderId}/delivered`, {
+      const url = isShipment
+        ? `/marketplace/seller/shipments/${id}/delivered`
+        : `/marketplace/seller/orders/${id}/delivered`;
+      await apiRequest(url, {
         method: "POST",
         body: JSON.stringify({
           notes: "Confirmed delivery by vendor",
         }),
       });
-      setSuccess("Order confirmed delivered!");
+      setSuccess("Consignment confirmed delivered!");
       loadSellerData();
     } catch (err: any) {
       setError(err.message || "Failed to confirm delivery");
@@ -1001,12 +1013,108 @@ export default function SellerPortalPage() {
         <div className="space-y-4">
           <h2 className="text-sm font-bold text-gray-900">Fulfilment & Dispatch Orders</h2>
 
-          {orders.length === 0 ? (
+          {sellerShipments.length === 0 && orders.length === 0 ? (
             <EmptyState
               icon={<ShoppingBag className="w-6 h-6" />}
               title="No Orders Received"
               description="Customer purchases of your products will appear here for fulfilment."
             />
+          ) : sellerShipments.length > 0 ? (
+            <div className="space-y-3">
+              {sellerShipments.map((s: any) => {
+                const sh = s.shipment;
+                const ord = s.order || {};
+                const shItems = s.items || [];
+                const isPending = sh.status === "pending" || sh.status === "processing";
+                const isDispatched = sh.status === "dispatched" || sh.status === "in_transit";
+                const isDelivered = sh.status === "delivered";
+
+                return (
+                  <div
+                    key={sh.id}
+                    className="bg-white rounded-2xl border border-gray-200 p-5 shadow-sm space-y-3"
+                  >
+                    <div className="flex flex-wrap items-center justify-between gap-2 border-b border-gray-100 pb-3">
+                      <div className="flex items-center gap-2">
+                        <span className="font-mono font-bold text-sm text-gray-900">
+                          {ord.order_number || "Order"}
+                        </span>
+                        <span className="text-xs text-gray-400">•</span>
+                        <span className="text-xs text-gray-500">
+                          Buyer: {ord.buyer_name || "Customer"} ({ord.buyer_phone || ""})
+                        </span>
+                      </div>
+
+                      <div className="flex gap-2">
+                        <Badge
+                          variant={ord.payment_status === "paid" ? "primary" : "neutral"}
+                          size="sm"
+                        >
+                          Payment: {ord.payment_status || "paid"}
+                        </Badge>
+                        <Badge
+                          variant={
+                            isDelivered
+                              ? "primary"
+                              : isDispatched
+                              ? "info"
+                              : "warning"
+                          }
+                          size="sm"
+                        >
+                          Shipment: {sh.status.toUpperCase()}
+                        </Badge>
+                      </div>
+                    </div>
+
+                    <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-3 text-xs">
+                      <div className="space-y-1">
+                        <div className="text-gray-500">
+                          Destination: <span className="font-semibold text-gray-900">{ord.shipping_address || "Standard Delivery"}</span>
+                        </div>
+                        {shItems.length > 0 && (
+                          <div className="text-gray-600">
+                            Your Products: <span className="font-semibold">{shItems.map((itm: any) => `${itm.quantity}x ${itm.title_snapshot}`).join(", ")}</span>
+                          </div>
+                        )}
+                        {sh.carrier_name && (
+                          <div className="text-gray-500 text-[11px]">
+                            Carrier: <span className="font-bold text-gray-900">{sh.carrier_name}</span>
+                            {sh.tracking_number && ` | Tracking: ${sh.tracking_number}`}
+                          </div>
+                        )}
+                      </div>
+
+                      <div className="flex items-center gap-3">
+                        {isPending && ord.payment_status === "paid" && (
+                          <button
+                            onClick={() => {
+                              setDispatchShipmentId(sh.id);
+                              setDispatchOrderId(sh.order_id);
+                              setShowDispatchModal(true);
+                            }}
+                            className="px-3.5 py-1.5 bg-emerald-800 hover:bg-emerald-700 text-white text-xs font-bold rounded-xl transition inline-flex items-center gap-1.5"
+                          >
+                            <Send className="w-3.5 h-3.5" />
+                            Dispatch Shipment
+                          </button>
+                        )}
+
+                        {isDispatched && (
+                          <button
+                            onClick={() => handleConfirmDelivery(sh.id, true)}
+                            className="px-3.5 py-1.5 bg-blue-700 hover:bg-blue-800 text-white text-xs font-bold rounded-xl transition inline-flex items-center gap-1.5"
+                          >
+                            <CheckCircle2 className="w-3.5 h-3.5" />
+                            Confirm Delivered
+                          </button>
+                        )}
+                      </div>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
           ) : (
             <div className="space-y-3">
               {orders.map((ord) => (

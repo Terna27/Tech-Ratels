@@ -452,20 +452,117 @@ ORDER BY p.created_at DESC;
 
 -- name: CreateMarketplaceShipment :one
 INSERT INTO marketplace_shipments (
-    id, order_id, carrier_name, tracking_number, tracking_url,
+    id, order_id, business_id, carrier_name, tracking_number, tracking_url,
     status, dispatched_at, estimated_delivery_at, delivered_at,
     delivery_notes, proof_of_delivery_url, created_at, updated_at
 ) VALUES (
-    $1, $2, $3, $4, $5,
-    $6, $7, $8, $9,
-    $10, $11, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP
+    $1, $2, $3, $4, $5, $6,
+    $7, $8, $9, $10,
+    $11, $12, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP
 ) RETURNING *;
+
+-- name: GetMarketplaceShipmentByID :one
+SELECT * FROM marketplace_shipments
+WHERE id = $1;
+
+-- name: GetMarketplaceShipmentByIDForUpdate :one
+SELECT * FROM marketplace_shipments
+WHERE id = $1
+FOR UPDATE;
+
+-- name: GetMarketplaceShipmentByOrderAndBusiness :one
+SELECT * FROM marketplace_shipments
+WHERE order_id = $1 AND business_id = $2
+LIMIT 1;
 
 -- name: GetMarketplaceShipmentByOrder :one
 SELECT * FROM marketplace_shipments
 WHERE order_id = $1
 ORDER BY created_at DESC
 LIMIT 1;
+
+-- name: ListMarketplaceShipmentsByOrder :many
+SELECT * FROM marketplace_shipments
+WHERE order_id = $1
+ORDER BY created_at ASC;
+
+-- name: ListMarketplaceShipmentsByBusiness :many
+SELECT s.*,
+       o.order_number,
+       o.buyer_name,
+       o.buyer_email,
+       o.buyer_phone,
+       o.shipping_address,
+       o.shipping_state_id,
+       o.shipping_lga_id,
+       o.payment_status,
+       o.order_status,
+       b.name as business_name
+FROM marketplace_shipments s
+JOIN marketplace_orders o ON o.id = s.order_id
+JOIN marketplace_businesses b ON b.id = s.business_id
+WHERE s.business_id = $1
+  AND ($2::text IS NULL OR $2 = '' OR s.status = $2)
+ORDER BY s.created_at DESC;
+
+-- name: ListAllMarketplaceShipmentsAdmin :many
+SELECT s.*,
+       o.order_number,
+       o.buyer_name,
+       o.buyer_email,
+       o.shipping_address,
+       o.shipping_state_id,
+       o.shipping_lga_id,
+       o.pickup_branch_id,
+       o.payment_status,
+       o.order_status,
+       b.name as business_name,
+       b.owner_user_id as seller_user_id
+FROM marketplace_shipments s
+JOIN marketplace_orders o ON o.id = s.order_id
+JOIN marketplace_businesses b ON b.id = s.business_id
+WHERE ($1::text IS NULL OR $1 = '' OR s.status = $1)
+ORDER BY s.created_at DESC;
+
+-- name: DispatchMarketplaceShipment :one
+UPDATE marketplace_shipments
+SET status = 'dispatched',
+    carrier_name = $2,
+    tracking_number = $3,
+    tracking_url = $4,
+    dispatched_at = $5,
+    estimated_delivery_at = $6,
+    delivery_notes = $7,
+    updated_at = CURRENT_TIMESTAMP
+WHERE id = $1
+RETURNING *;
+
+-- name: ConfirmMarketplaceShipmentDelivery :one
+UPDATE marketplace_shipments
+SET status = 'delivered',
+    delivered_at = $2,
+    proof_of_delivery_url = $3,
+    delivery_notes = $4,
+    updated_at = CURRENT_TIMESTAMP
+WHERE id = $1
+RETURNING *;
+
+-- name: UpdateMarketplaceShipmentTracking :one
+UPDATE marketplace_shipments
+SET carrier_name = $2,
+    tracking_number = $3,
+    tracking_url = $4,
+    delivery_notes = $5,
+    updated_at = CURRENT_TIMESTAMP
+WHERE id = $1
+RETURNING *;
+
+-- name: CancelMarketplaceShipmentsByOrder :exec
+UPDATE marketplace_shipments
+SET status = 'cancelled',
+    updated_at = CURRENT_TIMESTAMP
+WHERE order_id = $1
+  AND status IN ('pending', 'processing');
 
 -- name: UpdateMarketplaceShipmentStatus :one
 UPDATE marketplace_shipments
@@ -476,6 +573,32 @@ SET status = $2,
     updated_at = CURRENT_TIMESTAMP
 WHERE id = $1
 RETURNING *;
+
+-- name: CreateMarketplaceShipmentItem :one
+INSERT INTO marketplace_shipment_items (
+    id, shipment_id, order_item_id, quantity, created_at
+) VALUES (
+    $1, $2, $3, $4, CURRENT_TIMESTAMP
+) ON CONFLICT (shipment_id, order_item_id) DO NOTHING
+RETURNING *;
+
+-- name: ListMarketplaceShipmentItemsByShipment :many
+SELECT msi.*,
+       oi.product_id,
+       oi.title_snapshot,
+       oi.sku_snapshot,
+       oi.price_kobo_snapshot,
+       oi.image_url_snapshot,
+       oi.business_id
+FROM marketplace_shipment_items msi
+JOIN marketplace_order_items oi ON oi.id = msi.order_item_id
+WHERE msi.shipment_id = $1
+ORDER BY msi.created_at ASC;
+
+-- name: UpdateOrderItemShipmentID :exec
+UPDATE marketplace_order_items
+SET shipment_id = $2
+WHERE id = $1;
 
 -- -------------------------------------------------------------
 -- Marketplace Disputes
