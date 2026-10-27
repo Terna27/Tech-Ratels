@@ -5634,7 +5634,15 @@ func (s *MarketplaceService) ProcessPendingRefunds(ctx context.Context, batchSiz
 		// Before retrying a new refund request, authoritatively check the transaction via VerifyPayment
 		// to verify if the provider already accepted and recorded the refund during an ambiguous timeout.
 		verifyPay, vErr := s.paymentGateway.VerifyPayment(ctx, payRec.Reference)
-		if vErr == nil && verifyPay != nil && len(verifyPay.Refunds) > 0 {
+		if vErr != nil {
+			// Provider verification timed out or failed: do not assume absence of refund,
+			// leave pending for next reconciliation cycle to avoid duplicate refund.
+			result.PendingCount++
+			result.Errors = append(result.Errors, fmt.Sprintf("refund %s: payment verification unavailable for timeout reconciliation, skipping re-dispatch: %v", ref.ID, vErr))
+			continue
+		}
+
+		if verifyPay != nil && len(verifyPay.Refunds) > 0 {
 			var matchedRefund *payment.TransactionRefundSummary
 			for _, pr := range verifyPay.Refunds {
 				if strings.TrimSpace(pr.RefundReference) != "" {
@@ -5681,6 +5689,48 @@ func (s *MarketplaceService) ProcessPendingRefunds(ctx context.Context, batchSiz
 				}
 				continue
 			}
+		}
+
+		// Step 65 Requirement: For ambiguous Paystack refund timeouts, verify that absence from
+		// a single transaction lookup is not incorrectly treated as proof that no refund was submitted.
+		// Require a multi-check safe reconciliation strategy before permitting re-dispatch.
+		isAmbiguousTimeout := strings.Contains(ref.SettlementNotes, "timed out") || strings.Contains(string(ref.Metadata), "ambiguous_dispatch_error")
+		if isAmbiguousTimeout {
+			var metaMap map[string]interface{}
+			_ = json.Unmarshal(ref.Metadata, &metaMap)
+			if metaMap == nil {
+				metaMap = make(map[string]interface{})
+			}
+
+			checks := 0
+			if cVal, ok := metaMap["reconciliation_checks_count"].(float64); ok {
+				checks = int(cVal)
+			}
+
+			if checks < 2 {
+				metaMap["reconciliation_checks_count"] = checks + 1
+				metaMap["last_reconciliation_check_at"] = time.Now().UTC().Format(time.RFC3339)
+				metaMap["reconciliation_in_progress"] = true
+				newMeta, _ := json.Marshal(metaMap)
+
+				_ = s.repo.WithTx(ctx, func(q *db.Queries) error {
+					_, err := q.UpdateMarketplaceRefundStatus(ctx, db.UpdateMarketplaceRefundStatusParams{
+						ID:                      ref.ID,
+						Status:                  "pending",
+						ProviderRefundReference: "",
+						ConfirmedByUserID:       pgtype.Text{Valid: false},
+						SettlementNotes:         fmt.Sprintf("Reconciliation in progress (check %d/2: no provider refund detected yet)", checks+1),
+						Metadata:                newMeta,
+					})
+					return err
+				})
+
+				result.PendingCount++
+				continue
+			}
+
+			metaMap["reconciliation_confirmed_no_prior_refund"] = true
+			metaMap["reconciliation_cleared_for_redispatch"] = true
 		}
 
 		refundOut, pReqErr := s.paymentGateway.RefundPayment(ctx, payment.RefundPaymentInput{
