@@ -21,7 +21,14 @@ const getApiBase = (): string => {
   if (typeof window !== "undefined") {
     return "/api/v1";
   }
-  const raw = process.env.INTERNAL_API_URL || process.env.API_URL || process.env.BACKEND_URL || process.env.NEXT_PUBLIC_API_URL || "http://127.0.0.1:8000";
+  const serverTarget = process.env.INTERNAL_API_URL || process.env.API_URL || process.env.BACKEND_URL;
+  let raw = serverTarget;
+  if (!raw && process.env.NEXT_PUBLIC_API_URL && (process.env.NEXT_PUBLIC_API_URL.startsWith("http://") || process.env.NEXT_PUBLIC_API_URL.startsWith("https://"))) {
+    raw = process.env.NEXT_PUBLIC_API_URL;
+  }
+  if (!raw) {
+    raw = process.env.NODE_ENV === "production" ? "https://ratels.onrender.com" : "http://127.0.0.1:8000";
+  }
   const trimmed = raw.trim().replace(/\/+$/, "");
   return trimmed.endsWith("/api/v1") ? trimmed : `${trimmed}/api/v1`;
 };

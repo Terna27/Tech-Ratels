@@ -1,7 +1,21 @@
 /** @type {import('next').NextConfig} */
-const rawApiUrl = process.env.INTERNAL_API_URL || process.env.API_URL || process.env.BACKEND_URL || process.env.NEXT_PUBLIC_API_URL || "http://127.0.0.1:8000";
-const cleanApiUrl = rawApiUrl.trim().replace(/\/+$/, "");
-const apiHost = cleanApiUrl.replace(/\/api\/v1\/?$/, "");
+function getApiHost() {
+  const rawApiTarget = process.env.INTERNAL_API_URL || process.env.API_URL || process.env.BACKEND_URL;
+  let host = "";
+  if (rawApiTarget && rawApiTarget.trim()) {
+    const clean = rawApiTarget.trim().replace(/\/+$/, "");
+    host = clean.replace(/\/api\/v1\/?$/, "");
+  } else if (process.env.NEXT_PUBLIC_API_URL && (process.env.NEXT_PUBLIC_API_URL.startsWith("http://") || process.env.NEXT_PUBLIC_API_URL.startsWith("https://"))) {
+    const clean = process.env.NEXT_PUBLIC_API_URL.trim().replace(/\/+$/, "");
+    host = clean.replace(/\/api\/v1\/?$/, "");
+  }
+
+  // Fallback for native Render deployment when NEXT_PUBLIC_API_URL is relative (/api/v1)
+  if (!host || !host.startsWith("http")) {
+    host = process.env.NODE_ENV === "production" ? "https://ratels.onrender.com" : "http://127.0.0.1:8000";
+  }
+  return host;
+}
 
 const nextConfig = {
   reactStrictMode: true,
@@ -19,10 +33,11 @@ const nextConfig = {
     ],
   },
   async rewrites() {
+    const host = getApiHost();
     return [
       {
         source: "/api/v1/:path*",
-        destination: `${apiHost}/api/v1/:path*`,
+        destination: `${host}/api/v1/:path*`,
       },
     ];
   },
