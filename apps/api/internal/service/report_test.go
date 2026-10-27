@@ -1521,6 +1521,10 @@ func TestReportService_GeographicAggregationIntegrity(t *testing.T) {
 	// Insert foundation donations: 250,000 kobo in Zone A (state A), 750,000 kobo in Zone B (state B)
 	donIDA := security.GenerateUUID()
 	donIDB := security.GenerateUUID()
+	_, _ = env.Pool.Exec(ctx, "DELETE FROM financial_donations WHERE verified_at >= $1 AND verified_at <= $2", tStart, tEnd)
+	defer func() {
+		_, _ = env.Pool.Exec(ctx, "DELETE FROM financial_donations WHERE id IN ($1, $2)", donIDA, donIDB)
+	}()
 	_, err = env.Pool.Exec(ctx, `
 		INSERT INTO financial_donations (
 			id, reference, entity_type, donor_name, donor_email, amount_kobo,

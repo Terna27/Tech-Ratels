@@ -4029,6 +4029,25 @@ func (q *Queries) SetProductStockQuantity(ctx context.Context, arg SetProductSto
 	return i, err
 }
 
+const sumOrderInventoryRestockedQuantity = `-- name: SumOrderInventoryRestockedQuantity :one
+SELECT COALESCE(SUM(quantity_delta), 0)::int as total_restocked
+FROM marketplace_inventory_logs
+WHERE order_id = $1 AND product_id = $2
+  AND action_type IN ('reservation_release', 'cancellation_restock', 'refund_restock', 'dispute_restock')
+`
+
+type SumOrderInventoryRestockedQuantityParams struct {
+	OrderID   pgtype.Text `json:"order_id"`
+	ProductID string      `json:"product_id"`
+}
+
+func (q *Queries) SumOrderInventoryRestockedQuantity(ctx context.Context, arg SumOrderInventoryRestockedQuantityParams) (int32, error) {
+	row := q.db.QueryRow(ctx, sumOrderInventoryRestockedQuantity, arg.OrderID, arg.ProductID)
+	var total_restocked int32
+	err := row.Scan(&total_restocked)
+	return total_restocked, err
+}
+
 const updateBusinessBranch = `-- name: UpdateBusinessBranch :one
 UPDATE marketplace_business_branches
 SET branch_name = $2,

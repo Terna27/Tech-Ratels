@@ -874,6 +874,7 @@ func TestMarketplaceService_AdminRefundAndOverpaymentRejection(t *testing.T) {
 
 	seller := createRegisteredUser(t, env, "ref_seller", "member")
 	admin := createRegisteredUser(t, env, "ref_admin", "super_admin")
+	adminApprover := createRegisteredUser(t, env, "ref_admin_approver", "super_admin")
 	buyer := createRegisteredUser(t, env, "ref_buyer", "member")
 
 	b, _ := env.MarketplaceService.RegisterBusiness(ctx, seller, service.RegisterBusinessInput{
@@ -931,7 +932,7 @@ func TestMarketplaceService_AdminRefundAndOverpaymentRejection(t *testing.T) {
 		t.Errorf("Expected initial refund status 'pending', got %s", refInit1.Status)
 	}
 
-	refund1, partialOrder, err := env.MarketplaceService.ConfirmRefund(ctx, admin, refInit1.ID, service.ConfirmRefundInput{})
+	refund1, partialOrder, err := env.MarketplaceService.ConfirmRefund(ctx, adminApprover, refInit1.ID, service.ConfirmRefundInput{})
 	if err != nil {
 		t.Fatalf("ConfirmRefund (partial) failed: %v", err)
 	}
@@ -951,7 +952,7 @@ func TestMarketplaceService_AdminRefundAndOverpaymentRejection(t *testing.T) {
 		t.Fatalf("InitiateRefund failed: %v", err)
 	}
 
-	refund2, refundedOrder, err := env.MarketplaceService.ConfirmRefund(ctx, admin, refInit2.ID, service.ConfirmRefundInput{})
+	refund2, refundedOrder, err := env.MarketplaceService.ConfirmRefund(ctx, adminApprover, refInit2.ID, service.ConfirmRefundInput{})
 	if err != nil {
 		t.Fatalf("ConfirmRefund failed: %v", err)
 	}

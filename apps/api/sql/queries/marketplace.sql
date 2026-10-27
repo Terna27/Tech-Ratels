@@ -866,6 +866,12 @@ SELECT COUNT(*) FROM marketplace_inventory_logs
 WHERE order_id = $1 AND product_id = $2
   AND action_type IN ('reservation_release', 'cancellation_restock', 'refund_restock');
 
+-- name: SumOrderInventoryRestockedQuantity :one
+SELECT COALESCE(SUM(quantity_delta), 0)::int as total_restocked
+FROM marketplace_inventory_logs
+WHERE order_id = $1 AND product_id = $2
+  AND action_type IN ('reservation_release', 'cancellation_restock', 'refund_restock', 'dispute_restock');
+
 -- name: ListExpiredPendingMarketplaceOrders :many
 SELECT * FROM marketplace_orders
 WHERE payment_status IN ('pending', 'failed')

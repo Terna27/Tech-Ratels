@@ -12,6 +12,7 @@ import (
 type SandboxGateway struct {
 	frontendBaseURL string
 	amounts         sync.Map
+	refunds         sync.Map
 }
 
 func NewSandboxGateway(frontendBaseURL string) *SandboxGateway {
@@ -29,6 +30,15 @@ func (s *SandboxGateway) ProviderName() string {
 
 func (s *SandboxGateway) SetAmount(reference string, amountKobo int64) {
 	s.amounts.Store(reference, amountKobo)
+}
+
+func (s *SandboxGateway) AddSimulatedRefund(reference string, summary TransactionRefundSummary) {
+	var list []TransactionRefundSummary
+	if val, ok := s.refunds.Load(reference); ok {
+		list = val.([]TransactionRefundSummary)
+	}
+	list = append(list, summary)
+	s.refunds.Store(reference, list)
 }
 
 func (s *SandboxGateway) InitializePayment(ctx context.Context, input InitializePaymentInput) (*InitializePaymentOutput, error) {
@@ -69,6 +79,11 @@ func (s *SandboxGateway) VerifyPayment(ctx context.Context, reference string) (*
 		amountKobo = val.(int64)
 	}
 
+	var refundList []TransactionRefundSummary
+	if val, ok := s.refunds.Load(reference); ok {
+		refundList = val.([]TransactionRefundSummary)
+	}
+
 	return &VerifyPaymentOutput{
 		PaymentReference:  reference,
 		ProviderReference: "sandbox_txn_" + reference,
@@ -78,6 +93,7 @@ func (s *SandboxGateway) VerifyPayment(ctx context.Context, reference string) (*
 		PaidAt:            &now,
 		Channel:           "sandbox_transfer",
 		RawResponse:       []byte(`{"status":"success","sandbox":true}`),
+		Refunds:           refundList,
 	}, nil
 }
 
@@ -97,8 +113,15 @@ func (s *SandboxGateway) RefundPayment(ctx context.Context, input RefundPaymentI
 		}, nil
 	}
 
+	ref := "sandbox_ref_" + input.PaymentReference
+	s.AddSimulatedRefund(input.PaymentReference, TransactionRefundSummary{
+		RefundReference: ref,
+		AmountKobo:      input.AmountKobo,
+		Status:          "pending",
+	})
+
 	return &RefundPaymentOutput{
-		RefundReference: "sandbox_ref_" + input.PaymentReference,
+		RefundReference: ref,
 		Status:          "pending",
 		AmountKobo:      input.AmountKobo,
 		Currency:        input.Currency,

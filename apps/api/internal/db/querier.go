@@ -593,6 +593,7 @@ type Querier interface {
 	RevokeUserSession(ctx context.Context, tokenJti string) error
 	SetProductStockQuantity(ctx context.Context, arg SetProductStockQuantityParams) (MarketplaceProduct, error)
 	SetStockBalanceQuantities(ctx context.Context, arg SetStockBalanceQuantitiesParams) (StockBalance, error)
+	SumOrderInventoryRestockedQuantity(ctx context.Context, arg SumOrderInventoryRestockedQuantityParams) (int32, error)
 	ToggleHeroMediaPlayback(ctx context.Context, arg ToggleHeroMediaPlaybackParams) (HomepageHeroMedium, error)
 	ToggleHideEventMedia(ctx context.Context, arg ToggleHideEventMediaParams) (EventMedium, error)
 	UpdateAppointmentScopeAndDates(ctx context.Context, arg UpdateAppointmentScopeAndDatesParams) (Appointment, error)

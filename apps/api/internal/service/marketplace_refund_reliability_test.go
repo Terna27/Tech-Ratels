@@ -323,6 +323,7 @@ func TestRefundReliability_PartialRefundFollowedByRemainingSellerDispatch(t *tes
 	ctx := context.Background()
 
 	admin, sellerA, sellerB, prodA, prodB, orderRes := helperCreateMultiVendorOrder(t, env, ctx)
+	admin2 := createRegisteredUser(t, env, fmt.Sprintf("conf_adm_%d", time.Now().UnixNano()), "super_admin")
 	_, _ = env.MarketplaceService.ConfirmPayment(ctx, orderRes.Payment.Reference)
 
 	shipments, err := env.MarketplaceService.ListOrderShipments(ctx, admin, orderRes.Order.ID)
@@ -365,7 +366,7 @@ func TestRefundReliability_PartialRefundFollowedByRemainingSellerDispatch(t *tes
 	}
 
 	// Settle refund
-	_, _, err = env.MarketplaceService.ConfirmRefund(ctx, admin, refB.ID, service.ConfirmRefundInput{
+	_, _, err = env.MarketplaceService.ConfirmRefund(ctx, admin2, refB.ID, service.ConfirmRefundInput{
 		ProviderRefundReference: refB.ProviderRefundReference,
 	})
 	if err != nil {
@@ -624,6 +625,7 @@ func TestRefundReliability_ConcurrentRefundAndShipmentOperations(t *testing.T) {
 	ctx := context.Background()
 
 	admin, sellerA, _, prodA, _, orderRes := helperCreateMultiVendorOrder(t, env, ctx)
+	admin2 := createRegisteredUser(t, env, fmt.Sprintf("race_adm2_%d", time.Now().UnixNano()), "super_admin")
 	_, _ = env.MarketplaceService.ConfirmPayment(ctx, orderRes.Payment.Reference)
 
 	shipments, _ := env.MarketplaceService.ListOrderShipments(ctx, admin, orderRes.Order.ID)
@@ -657,7 +659,7 @@ func TestRefundReliability_ConcurrentRefundAndShipmentOperations(t *testing.T) {
 			ShipmentID: shipAId,
 		})
 		if err == nil && ref != nil {
-			_, _, err = env.MarketplaceService.ConfirmRefund(ctx, admin, ref.ID, service.ConfirmRefundInput{
+			_, _, err = env.MarketplaceService.ConfirmRefund(ctx, admin2, ref.ID, service.ConfirmRefundInput{
 				ProviderRefundReference: ref.ProviderRefundReference,
 			})
 		}
@@ -670,6 +672,7 @@ func TestRefundReliability_ConcurrentRefundAndShipmentOperations(t *testing.T) {
 	// Assert NO deadlocks occurred (Order-first lock hierarchy eliminates deadlocks)
 	for err := range errCh {
 		if err != nil {
+			t.Logf("Concurrent error received: %v", err)
 			errStr := strings.ToLower(err.Error())
 			if strings.Contains(errStr, "deadlock detected") || strings.Contains(errStr, "40p01") {
 				t.Fatalf("Deadlock detected during concurrent refund and shipment: %v", err)

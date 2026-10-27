@@ -47,6 +47,17 @@ export default function AdminMarketplacePage() {
   const router = useRouter();
   const { user, isCoordinator, isLoading: authLoading } = useAuth();
 
+  const hasStateOrZonalAuthority = Boolean(
+    user && (
+      ["super_admin", "national_admin", "zonal_coordinator", "state_coordinator"].includes(user.primary_role) ||
+      user.appointments?.some(
+        (a) =>
+          a.status === "active" &&
+          ["super_admin", "national_admin", "zonal_coordinator", "state_coordinator"].includes(a.role_type)
+      )
+    )
+  );
+
   const [activeTab, setActiveTab] = useState<AdminTab>("overview");
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
@@ -559,26 +570,32 @@ export default function AdminMarketplacePage() {
                           </Badge>
                         </td>
                         <td className="py-3.5 px-4 text-right space-x-2">
-                          <button
-                            onClick={() => {
-                              setSelectedBusiness(b);
-                              setApprovalAction("approve");
-                              setShowApprovalModal(true);
-                            }}
-                            className="px-2.5 py-1 bg-emerald-50 text-emerald-800 hover:bg-emerald-100 font-bold rounded-lg text-[11px] transition"
-                          >
-                            Approve
-                          </button>
-                          <button
-                            onClick={() => {
-                              setSelectedBusiness(b);
-                              setApprovalAction("reject");
-                              setShowApprovalModal(true);
-                            }}
-                            className="px-2.5 py-1 bg-red-50 text-red-700 hover:bg-red-100 font-bold rounded-lg text-[11px] transition"
-                          >
-                            Reject
-                          </button>
+                          {hasStateOrZonalAuthority ? (
+                            <>
+                              <button
+                                onClick={() => {
+                                  setSelectedBusiness(b);
+                                  setApprovalAction("approve");
+                                  setShowApprovalModal(true);
+                                }}
+                                className="px-2.5 py-1 bg-emerald-50 text-emerald-800 hover:bg-emerald-100 font-bold rounded-lg text-[11px] transition"
+                              >
+                                Approve
+                              </button>
+                              <button
+                                onClick={() => {
+                                  setSelectedBusiness(b);
+                                  setApprovalAction("reject");
+                                  setShowApprovalModal(true);
+                                }}
+                                className="px-2.5 py-1 bg-red-50 text-red-700 hover:bg-red-100 font-bold rounded-lg text-[11px] transition"
+                              >
+                                Reject
+                              </button>
+                            </>
+                          ) : (
+                            <span className="text-[11px] text-gray-400 italic">Oversight Only</span>
+                          )}
                         </td>
                       </tr>
                     ))}
@@ -667,16 +684,20 @@ export default function AdminMarketplacePage() {
                         </Badge>
                       </td>
                       <td className="py-3.5 px-4 text-right">
-                        <button
-                          onClick={() => {
-                            setSelectedProduct(p);
-                            setModerateStatus(p.status === "published" ? "archived" : "published");
-                            setShowModerateModal(true);
-                          }}
-                          className="px-2.5 py-1 bg-gray-100 hover:bg-gray-200 text-gray-800 font-bold rounded-lg text-[11px] transition"
-                        >
-                          Change Status
-                        </button>
+                        {hasStateOrZonalAuthority ? (
+                          <button
+                            onClick={() => {
+                              setSelectedProduct(p);
+                              setModerateStatus(p.status === "published" ? "archived" : "published");
+                              setShowModerateModal(true);
+                            }}
+                            className="px-2.5 py-1 bg-gray-100 hover:bg-gray-200 text-gray-800 font-bold rounded-lg text-[11px] transition"
+                          >
+                            Change Status
+                          </button>
+                        ) : (
+                          <span className="text-[11px] text-gray-400 italic">Oversight Only</span>
+                        )}
                       </td>
                     </tr>
                   ))}
@@ -768,30 +789,36 @@ export default function AdminMarketplacePage() {
                         {new Date(ord.created_at).toLocaleDateString("en-NG")}
                       </td>
                       <td className="py-3.5 px-4 text-right space-x-1.5 whitespace-nowrap">
-                        {ord.payment_status === "paid" && ord.order_status !== "refunded" && (
-                          <button
-                            onClick={() => {
-                              setSelectedOrderForRefund(ord);
-                              setRefundAmountNaira((ord.total_kobo / 100).toString());
-                              setRefundReason("Administrative customer refund");
-                              setShowRefundModal(true);
-                            }}
-                            className="px-2.5 py-1 text-[11px] font-bold text-red-700 bg-red-50 hover:bg-red-100 rounded-lg border border-red-200 transition"
-                          >
-                            Refund
-                          </button>
+                        {hasStateOrZonalAuthority ? (
+                          <>
+                            {ord.payment_status === "paid" && ord.order_status !== "refunded" && (
+                              <button
+                                onClick={() => {
+                                  setSelectedOrderForRefund(ord);
+                                  setRefundAmountNaira((ord.total_kobo / 100).toString());
+                                  setRefundReason("Administrative customer refund");
+                                  setShowRefundModal(true);
+                                }}
+                                className="px-2.5 py-1 text-[11px] font-bold text-red-700 bg-red-50 hover:bg-red-100 rounded-lg border border-red-200 transition"
+                              >
+                                Refund
+                              </button>
+                            )}
+                            {ord.order_status !== "cancelled" &&
+                              ord.order_status !== "refunded" &&
+                              ord.fulfilment_status !== "dispatched" &&
+                              ord.fulfilment_status !== "delivered" && (
+                                <button
+                                  onClick={() => handleAdminCancelOrder(ord.id, ord.order_number)}
+                                  className="px-2.5 py-1 text-[11px] font-bold text-gray-700 bg-gray-100 hover:bg-gray-200 rounded-lg border border-gray-200 transition"
+                                >
+                                  Cancel
+                                </button>
+                              )}
+                          </>
+                        ) : (
+                          <span className="text-[11px] text-gray-400 italic">Oversight Only</span>
                         )}
-                        {ord.order_status !== "cancelled" &&
-                          ord.order_status !== "refunded" &&
-                          ord.fulfilment_status !== "dispatched" &&
-                          ord.fulfilment_status !== "delivered" && (
-                            <button
-                              onClick={() => handleAdminCancelOrder(ord.id, ord.order_number)}
-                              className="px-2.5 py-1 text-[11px] font-bold text-gray-700 bg-gray-100 hover:bg-gray-200 rounded-lg border border-gray-200 transition"
-                            >
-                              Cancel
-                            </button>
-                          )}
                       </td>
                     </tr>
                   ))}
@@ -1007,15 +1034,19 @@ export default function AdminMarketplacePage() {
                         </td>
                         <td className="py-3.5 px-4 text-right">
                           {d.status !== "resolved_refunded" && d.status !== "rejected" ? (
-                            <button
-                              onClick={() => {
-                                setSelectedDispute(d);
-                                setShowResolveModal(true);
-                              }}
-                              className="px-2.5 py-1 bg-emerald-800 text-white font-bold rounded-lg text-[11px] hover:bg-emerald-700 transition"
-                            >
-                              Arbitrate
-                            </button>
+                            hasStateOrZonalAuthority ? (
+                              <button
+                                onClick={() => {
+                                  setSelectedDispute(d);
+                                  setShowResolveModal(true);
+                                }}
+                                className="px-2.5 py-1 bg-emerald-800 text-white font-bold rounded-lg text-[11px] hover:bg-emerald-700 transition"
+                              >
+                                Arbitrate
+                              </button>
+                            ) : (
+                              <span className="text-[11px] text-gray-400 italic">Oversight Only</span>
+                            )
                           ) : (
                             <span className="text-[11px] text-gray-400">Resolved</span>
                           )}

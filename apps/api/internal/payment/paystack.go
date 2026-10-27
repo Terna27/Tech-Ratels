@@ -163,6 +163,13 @@ func (p *PaystackGateway) VerifyPayment(ctx context.Context, reference string) (
 			Customer    struct {
 				Email string `json:"email"`
 			} `json:"customer"`
+			Refunds []struct {
+				ID              int64  `json:"id"`
+				RefundReference string `json:"refund_reference"`
+				Reference       string `json:"reference"`
+				Amount          int64  `json:"amount"`
+				Status          string `json:"status"`
+			} `json:"refunds"`
 		} `json:"data"`
 	}
 
@@ -203,6 +210,26 @@ func (p *PaystackGateway) VerifyPayment(ctx context.Context, reference string) (
 		}
 	}
 
+	var refundSummaries []TransactionRefundSummary
+	for _, r := range psResp.Data.Refunds {
+		refRef := r.RefundReference
+		if refRef == "" {
+			refRef = r.Reference
+		}
+		rStatus := "pending"
+		switch r.Status {
+		case "processed", "success", "successful":
+			rStatus = "successful"
+		case "failed":
+			rStatus = "failed"
+		}
+		refundSummaries = append(refundSummaries, TransactionRefundSummary{
+			RefundReference: refRef,
+			AmountKobo:      r.Amount,
+			Status:          rStatus,
+		})
+	}
+
 	return &VerifyPaymentOutput{
 		PaymentReference:  psResp.Data.Reference,
 		ProviderReference: psResp.Data.Reference,
@@ -213,6 +240,7 @@ func (p *PaystackGateway) VerifyPayment(ctx context.Context, reference string) (
 		Channel:           psResp.Data.Channel,
 		CustomerEmail:     psResp.Data.Customer.Email,
 		RawResponse:       bodyBytes,
+		Refunds:           refundSummaries,
 	}, nil
 }
 

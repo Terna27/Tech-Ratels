@@ -150,6 +150,7 @@ export function Sidebar({
         { href: "/admin/leadership", label: "Leadership", icon: Shield },
         { href: "/admin/activities", label: "Activities", icon: Calendar },
         { href: "/admin/finance", label: "Finance", icon: FileText },
+        { href: "/admin/marketplace", label: "Marketplace & Vendors", icon: Store },
         { href: "/admin/reports", label: "Reports & Transparency", icon: BarChart3 },
         { href: "/admin/inventory", label: "Supply Chain & Warehouses", icon: Boxes },
         { href: "/admin/safeguarding", label: "Safeguarding Cases", icon: ShieldAlert, badge: "Restricted" },

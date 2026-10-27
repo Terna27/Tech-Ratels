@@ -560,6 +560,7 @@ func TestMarketplaceRefund_PendingAndConfirmation(t *testing.T) {
 	ctx := context.Background()
 
 	admin := createRegisteredUser(t, env, fmt.Sprintf("admin_pen_%d", time.Now().UnixNano()), "super_admin")
+	adminApprover := createRegisteredUser(t, env, fmt.Sprintf("admin_pen_appr_%d", time.Now().UnixNano()), "super_admin")
 	gw := &mockCustomGateway{providerName: "paystack"}
 	mktSvc, orderRes, buyer := helperCreateOrderWithGateway(t, env, gw, 600000)
 
@@ -609,7 +610,7 @@ func TestMarketplaceRefund_PendingAndConfirmation(t *testing.T) {
 	}
 
 	// 2. Confirm refund (verified provider confirmation)
-	confirmedRefund, confirmedOrder, err := mktSvc.ConfirmRefund(ctx, admin, refund.ID, service.ConfirmRefundInput{
+	confirmedRefund, confirmedOrder, err := mktSvc.ConfirmRefund(ctx, adminApprover, refund.ID, service.ConfirmRefundInput{
 		ProviderRefundReference: refund.ProviderRefundReference,
 		SettlementNotes:         "Settlement confirmed with bank",
 	})
@@ -644,6 +645,7 @@ func TestMarketplaceRefund_MultiplePartialRefundsAndFull(t *testing.T) {
 	ctx := context.Background()
 
 	admin := createRegisteredUser(t, env, fmt.Sprintf("admin_mult_%d", time.Now().UnixNano()), "super_admin")
+	adminApprover := createRegisteredUser(t, env, fmt.Sprintf("admin_mult_appr_%d", time.Now().UnixNano()), "super_admin")
 	gw := &mockCustomGateway{providerName: "paystack"}
 	mktSvc, orderRes, _ := helperCreateOrderWithGateway(t, env, gw, 600000) // Total ₦6,000
 
@@ -671,7 +673,7 @@ func TestMarketplaceRefund_MultiplePartialRefundsAndFull(t *testing.T) {
 	if err != nil {
 		t.Fatalf("first partial refund initiation failed: %v", err)
 	}
-	_, _, err = mktSvc.ConfirmRefund(ctx, admin, r1.ID, service.ConfirmRefundInput{})
+	_, _, err = mktSvc.ConfirmRefund(ctx, adminApprover, r1.ID, service.ConfirmRefundInput{})
 	if err != nil {
 		t.Fatalf("first partial refund confirmation failed: %v", err)
 	}
@@ -684,7 +686,7 @@ func TestMarketplaceRefund_MultiplePartialRefundsAndFull(t *testing.T) {
 	if err != nil {
 		t.Fatalf("second partial refund initiation failed: %v", err)
 	}
-	_, o2, err := mktSvc.ConfirmRefund(ctx, admin, r2.ID, service.ConfirmRefundInput{})
+	_, o2, err := mktSvc.ConfirmRefund(ctx, adminApprover, r2.ID, service.ConfirmRefundInput{})
 	if err != nil {
 		t.Fatalf("second partial refund confirmation failed: %v", err)
 	}
@@ -709,7 +711,7 @@ func TestMarketplaceRefund_MultiplePartialRefundsAndFull(t *testing.T) {
 	if err != nil {
 		t.Fatalf("final settlement refund initiation failed: %v", err)
 	}
-	_, fullOrder, err := mktSvc.ConfirmRefund(ctx, admin, r3.ID, service.ConfirmRefundInput{})
+	_, fullOrder, err := mktSvc.ConfirmRefund(ctx, adminApprover, r3.ID, service.ConfirmRefundInput{})
 	if err != nil {
 		t.Fatalf("final settlement refund confirmation failed: %v", err)
 	}
@@ -954,6 +956,7 @@ func TestMarketplaceRefund_OriginalPaystackPayloadPreserved(t *testing.T) {
 	ctx := context.Background()
 
 	admin := createRegisteredUser(t, env, fmt.Sprintf("admin_pres_%d", time.Now().UnixNano()), "super_admin")
+	adminApprover := createRegisteredUser(t, env, fmt.Sprintf("admin_pres_appr_%d", time.Now().UnixNano()), "super_admin")
 	gw := &mockCustomGateway{providerName: "paystack"}
 	mktSvc, orderRes, _ := helperCreateOrderWithGateway(t, env, gw, 250000)
 
@@ -990,7 +993,7 @@ func TestMarketplaceRefund_OriginalPaystackPayloadPreserved(t *testing.T) {
 	if err != nil {
 		t.Fatalf("InitiateRefund failed: %v", err)
 	}
-	_, _, err = mktSvc.ConfirmRefund(ctx, admin, r.ID, service.ConfirmRefundInput{})
+	_, _, err = mktSvc.ConfirmRefund(ctx, adminApprover, r.ID, service.ConfirmRefundInput{})
 	if err != nil {
 		t.Fatalf("ConfirmRefund failed: %v", err)
 	}
@@ -1097,6 +1100,7 @@ func TestMarketplaceRefund_AdminConfirmationWithoutProviderProof(t *testing.T) {
 	ctx := context.Background()
 
 	admin := createRegisteredUser(t, env, fmt.Sprintf("admin_noproof_%d", time.Now().UnixNano()), "super_admin")
+	adminApprover := createRegisteredUser(t, env, fmt.Sprintf("admin_noproof_appr_%d", time.Now().UnixNano()), "super_admin")
 	gw := &mockCustomGateway{
 		providerName: "paystack",
 		refundFn: func(ctx context.Context, input payment.RefundPaymentInput) (*payment.RefundPaymentOutput, error) {
@@ -1127,7 +1131,7 @@ func TestMarketplaceRefund_AdminConfirmationWithoutProviderProof(t *testing.T) {
 	}
 
 	// Attempt confirmation without provider proof
-	_, _, err = mktSvc.ConfirmRefund(ctx, admin, r.ID, service.ConfirmRefundInput{})
+	_, _, err = mktSvc.ConfirmRefund(ctx, adminApprover, r.ID, service.ConfirmRefundInput{})
 	if err == nil {
 		t.Fatal("expected ConfirmRefund to fail without provider proof, got nil")
 	}
@@ -1149,6 +1153,7 @@ func TestMarketplaceRefund_EmptyConfirmationRequest(t *testing.T) {
 	ctx := context.Background()
 
 	admin := createRegisteredUser(t, env, fmt.Sprintf("admin_empty_%d", time.Now().UnixNano()), "super_admin")
+	adminApprover := createRegisteredUser(t, env, fmt.Sprintf("admin_empty_appr_%d", time.Now().UnixNano()), "super_admin")
 	gw := &mockCustomGateway{
 		providerName: "paystack",
 		refundFn: func(ctx context.Context, input payment.RefundPaymentInput) (*payment.RefundPaymentOutput, error) {
@@ -1175,7 +1180,7 @@ func TestMarketplaceRefund_EmptyConfirmationRequest(t *testing.T) {
 	}
 
 	// Calling ConfirmRefund with empty input {} must NOT blindly succeed
-	_, _, err = mktSvc.ConfirmRefund(ctx, admin, r.ID, service.ConfirmRefundInput{})
+	_, _, err = mktSvc.ConfirmRefund(ctx, adminApprover, r.ID, service.ConfirmRefundInput{})
 	if err == nil {
 		t.Fatal("expected empty confirmation request to be rejected without provider verification, got nil")
 	}
@@ -1188,6 +1193,7 @@ func TestMarketplaceRefund_ForgedProviderRefundReference(t *testing.T) {
 	ctx := context.Background()
 
 	admin := createRegisteredUser(t, env, fmt.Sprintf("admin_forge_%d", time.Now().UnixNano()), "super_admin")
+	adminApprover := createRegisteredUser(t, env, fmt.Sprintf("admin_forge_appr_%d", time.Now().UnixNano()), "super_admin")
 	gw := &mockCustomGateway{
 		providerName: "paystack",
 		refundFn: func(ctx context.Context, input payment.RefundPaymentInput) (*payment.RefundPaymentOutput, error) {
@@ -1211,7 +1217,7 @@ func TestMarketplaceRefund_ForgedProviderRefundReference(t *testing.T) {
 	}
 
 	// Admin supplies a forged reference that does not match the authoritative provider reference
-	_, _, err = mktSvc.ConfirmRefund(ctx, admin, r.ID, service.ConfirmRefundInput{
+	_, _, err = mktSvc.ConfirmRefund(ctx, adminApprover, r.ID, service.ConfirmRefundInput{
 		ProviderRefundReference: "FORGED_PROVIDER_REF_999",
 	})
 	if err == nil {
@@ -1462,6 +1468,7 @@ func TestMarketplaceRefund_PendingProviderStatus(t *testing.T) {
 	ctx := context.Background()
 
 	admin := createRegisteredUser(t, env, fmt.Sprintf("admin_provpen_%d", time.Now().UnixNano()), "super_admin")
+	adminApprover := createRegisteredUser(t, env, fmt.Sprintf("admin_provpen_appr_%d", time.Now().UnixNano()), "super_admin")
 	gw := &mockCustomGateway{
 		providerName: "paystack",
 		refundFn: func(ctx context.Context, input payment.RefundPaymentInput) (*payment.RefundPaymentOutput, error) {
@@ -1517,7 +1524,7 @@ func TestMarketplaceRefund_PendingProviderStatus(t *testing.T) {
 	}
 
 	// 2. Admin reconciliation checks against provider returning pending status
-	_, _, err = mktSvc.ConfirmRefund(ctx, admin, r.ID, service.ConfirmRefundInput{})
+	_, _, err = mktSvc.ConfirmRefund(ctx, adminApprover, r.ID, service.ConfirmRefundInput{})
 	if err == nil {
 		t.Fatal("expected ConfirmRefund to reject pending provider status, got nil")
 	}
@@ -1535,6 +1542,7 @@ func TestMarketplaceRefund_SuccessfulProviderSettlement(t *testing.T) {
 	ctx := context.Background()
 
 	admin := createRegisteredUser(t, env, fmt.Sprintf("admin_provok_%d", time.Now().UnixNano()), "super_admin")
+	adminApprover := createRegisteredUser(t, env, fmt.Sprintf("admin_provok_appr_%d", time.Now().UnixNano()), "super_admin")
 	gw := &mockCustomGateway{
 		providerName: "paystack",
 		refundFn: func(ctx context.Context, input payment.RefundPaymentInput) (*payment.RefundPaymentOutput, error) {
@@ -1577,7 +1585,7 @@ func TestMarketplaceRefund_SuccessfulProviderSettlement(t *testing.T) {
 		t.Fatalf("InitiateRefund failed: %v", err)
 	}
 
-	confirmedR, order, err := mktSvc.ConfirmRefund(ctx, admin, r.ID, service.ConfirmRefundInput{})
+	confirmedR, order, err := mktSvc.ConfirmRefund(ctx, adminApprover, r.ID, service.ConfirmRefundInput{})
 	if err != nil {
 		t.Fatalf("ConfirmRefund failed: %v", err)
 	}
@@ -1683,6 +1691,7 @@ func TestMarketplaceRefund_UnauthorizedSettlementAttempts(t *testing.T) {
 	member := createRegisteredUser(t, env, fmt.Sprintf("member_auth_%d", time.Now().UnixNano()), "member")
 	admin := createRegisteredUser(t, env, fmt.Sprintf("admin_auth_%d", time.Now().UnixNano()), "national_admin") // Not super_admin
 	superAdmin := createRegisteredUser(t, env, fmt.Sprintf("superadmin_auth_%d", time.Now().UnixNano()), "super_admin")
+	superAdmin2 := createRegisteredUser(t, env, fmt.Sprintf("superadmin_auth2_%d", time.Now().UnixNano()), "super_admin")
 
 	gw := &mockCustomGateway{
 		providerName: "manual",
@@ -1717,7 +1726,7 @@ func TestMarketplaceRefund_UnauthorizedSettlementAttempts(t *testing.T) {
 	}
 
 	// 3. Super Admin missing evidence
-	_, _, err = mktSvc.ManualSettleRefund(ctx, superAdmin, r.ID, service.ManualSettlementInput{
+	_, _, err = mktSvc.ManualSettleRefund(ctx, superAdmin2, r.ID, service.ManualSettlementInput{
 		Evidence: "",
 		Reason:   "Offline cash return",
 	})
@@ -1726,7 +1735,7 @@ func TestMarketplaceRefund_UnauthorizedSettlementAttempts(t *testing.T) {
 	}
 
 	// 4. Super Admin missing reason
-	_, _, err = mktSvc.ManualSettleRefund(ctx, superAdmin, r.ID, service.ManualSettlementInput{
+	_, _, err = mktSvc.ManualSettleRefund(ctx, superAdmin2, r.ID, service.ManualSettlementInput{
 		Evidence: "Receipt 123",
 		Reason:   "",
 	})
@@ -1735,7 +1744,7 @@ func TestMarketplaceRefund_UnauthorizedSettlementAttempts(t *testing.T) {
 	}
 
 	// 5. Authorized Super Admin with valid evidence and reason succeeds
-	settledRefund, _, err := mktSvc.ManualSettleRefund(ctx, superAdmin, r.ID, service.ManualSettlementInput{
+	settledRefund, _, err := mktSvc.ManualSettleRefund(ctx, superAdmin2, r.ID, service.ManualSettlementInput{
 		Evidence: "BANK_TRANSFER_SLIP_#998822",
 		Reason:   "Customer refunded via branch office cash transfer",
 		Notes:    "Authorized at Kaduna branch",

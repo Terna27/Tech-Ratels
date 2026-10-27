@@ -18,6 +18,8 @@ import {
   Shield,
   PanelLeftClose,
   PanelLeft,
+  ShoppingBag,
+  Store,
 } from "lucide-react";
 import { Badge } from "@/components/ui/Badge";
 
@@ -226,6 +228,24 @@ export function Header({
                       >
                         <Settings className="w-4 h-4 text-gray-500" aria-hidden="true" />
                         <span>Profile & Contact</span>
+                      </Link>
+
+                      <Link
+                        href="/marketplace/orders"
+                        className="flex items-center gap-2.5 px-4 py-2 text-xs font-medium text-gray-700 hover:bg-gray-100 hover:text-gray-900"
+                        role="menuitem"
+                      >
+                        <ShoppingBag className="w-4 h-4 text-emerald-700" aria-hidden="true" />
+                        <span>My Orders</span>
+                      </Link>
+
+                      <Link
+                        href="/marketplace/seller"
+                        className="flex items-center gap-2.5 px-4 py-2 text-xs font-medium text-gray-700 hover:bg-gray-100 hover:text-gray-900"
+                        role="menuitem"
+                      >
+                        <Store className="w-4 h-4 text-emerald-700" aria-hidden="true" />
+                        <span>Seller Portal</span>
                       </Link>
 
                       {isCoordinator && (

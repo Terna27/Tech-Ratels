@@ -36,16 +36,23 @@ type InitializePaymentOutput struct {
 	Provider         string `json:"provider"`
 }
 
+type TransactionRefundSummary struct {
+	RefundReference string `json:"refund_reference"`
+	AmountKobo      int64  `json:"amount_kobo"`
+	Status          string `json:"status"` // "successful", "pending", "failed"
+}
+
 type VerifyPaymentOutput struct {
-	PaymentReference  string     `json:"payment_reference"`
-	ProviderReference string     `json:"provider_reference"`
-	Status            string     `json:"status"` // "successful", "failed", "pending"
-	AmountKobo        int64      `json:"amount_kobo"`
-	Currency          string     `json:"currency"`
-	PaidAt            *time.Time `json:"paid_at,omitempty"`
-	Channel           string     `json:"channel,omitempty"`
-	CustomerEmail     string     `json:"customer_email,omitempty"`
-	RawResponse       []byte     `json:"raw_response,omitempty"`
+	PaymentReference  string                     `json:"payment_reference"`
+	ProviderReference string                     `json:"provider_reference"`
+	Status            string                     `json:"status"` // "successful", "failed", "pending"
+	AmountKobo        int64                      `json:"amount_kobo"`
+	Currency          string                     `json:"currency"`
+	PaidAt            *time.Time                 `json:"paid_at,omitempty"`
+	Channel           string                     `json:"channel,omitempty"`
+	CustomerEmail     string                     `json:"customer_email,omitempty"`
+	RawResponse       []byte                     `json:"raw_response,omitempty"`
+	Refunds           []TransactionRefundSummary `json:"refunds,omitempty"`
 }
 
 type RefundPaymentInput struct {

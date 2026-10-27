@@ -42,6 +42,7 @@ type TestEnv struct {
 	EmailSender             *delivery.DevSafeEmailSender
 	SMSSender               *delivery.DevSafeSMSSender
 	MockStorage             storage.StorageService
+	SandboxGateway          *payment.SandboxGateway
 }
 
 func setupTestEnv(t *testing.T) *TestEnv {
@@ -114,5 +115,6 @@ func setupTestEnv(t *testing.T) *TestEnv {
 		EmailSender:             devEmail,
 		SMSSender:               devSMS,
 		MockStorage:             mockStorage,
+		SandboxGateway:          sandboxGateway,
 	}
 }

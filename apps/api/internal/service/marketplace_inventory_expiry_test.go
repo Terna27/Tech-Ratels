@@ -93,6 +93,7 @@ func TestInventory_SuccessfulReservation(t *testing.T) {
 
 	gw := &mockInventoryExpiryGateway{providerName: "paystack"}
 	mktSvc := service.NewMarketplaceService(env.Repo, env.AuditService, gw)
+	_, _ = env.Pool.Exec(ctx, "UPDATE marketplace_orders SET reservation_expires_at = NOW() + INTERVAL '24 hours' WHERE order_status = 'placed' AND stock_released = FALSE")
 
 	orderRes, err := mktSvc.CreateOrder(ctx, buyer, service.CheckoutInput{
 		Items:        []service.CartItemInput{{ProductID: prod.ID, Quantity: 5}},
@@ -273,6 +274,7 @@ func TestInventory_AbandonedCheckoutExpiry(t *testing.T) {
 		},
 	}
 	mktSvc := service.NewMarketplaceService(env.Repo, env.AuditService, gw)
+	_, _ = env.Pool.Exec(ctx, "UPDATE marketplace_orders SET reservation_expires_at = NOW() + INTERVAL '24 hours' WHERE order_status = 'placed' AND stock_released = FALSE")
 
 	orderRes, err := mktSvc.CreateOrder(ctx, buyer, service.CheckoutInput{
 		Items:        []service.CartItemInput{{ProductID: prod.ID, Quantity: 3}},
@@ -364,6 +366,7 @@ func TestInventory_DuplicateExpiryIdempotency(t *testing.T) {
 		},
 	}
 	mktSvc := service.NewMarketplaceService(env.Repo, env.AuditService, gw)
+	_, _ = env.Pool.Exec(ctx, "UPDATE marketplace_orders SET reservation_expires_at = NOW() + INTERVAL '24 hours' WHERE order_status = 'placed' AND stock_released = FALSE")
 
 	orderRes, err := mktSvc.CreateOrder(ctx, buyer, service.CheckoutInput{
 		Items:        []service.CartItemInput{{ProductID: prod.ID, Quantity: 2}},
@@ -426,6 +429,7 @@ func TestInventory_SuccessfulPaymentBeforeExpiry(t *testing.T) {
 		},
 	}
 	mktSvc := service.NewMarketplaceService(env.Repo, env.AuditService, gw)
+	_, _ = env.Pool.Exec(ctx, "UPDATE marketplace_orders SET reservation_expires_at = NOW() + INTERVAL '24 hours' WHERE order_status = 'placed' AND stock_released = FALSE")
 
 	orderRes, err := mktSvc.CreateOrder(ctx, buyer, service.CheckoutInput{
 		Items:        []service.CartItemInput{{ProductID: prod.ID, Quantity: 1}},
@@ -511,6 +515,7 @@ func TestInventory_PaymentAndExpiryRace(t *testing.T) {
 		},
 	}
 	mktSvc := service.NewMarketplaceService(env.Repo, env.AuditService, gw)
+	_, _ = env.Pool.Exec(ctx, "UPDATE marketplace_orders SET reservation_expires_at = NOW() + INTERVAL '24 hours' WHERE order_status = 'placed' AND stock_released = FALSE")
 
 	orderRes, err := mktSvc.CreateOrder(ctx, buyer, service.CheckoutInput{
 		Items:        []service.CartItemInput{{ProductID: prod.ID, Quantity: 2}},
@@ -596,6 +601,7 @@ func TestInventory_DelayedPaymentAfterExpiry(t *testing.T) {
 		},
 	}
 	mktSvc := service.NewMarketplaceService(env.Repo, env.AuditService, gw)
+	_, _ = env.Pool.Exec(ctx, "UPDATE marketplace_orders SET reservation_expires_at = NOW() + INTERVAL '24 hours' WHERE order_status = 'placed' AND stock_released = FALSE")
 
 	orderRes, err := mktSvc.CreateOrder(ctx, buyer, service.CheckoutInput{
 		Items:        []service.CartItemInput{{ProductID: prod.ID, Quantity: 3}},
@@ -665,6 +671,7 @@ func TestInventory_ProviderUnreachableDuringExpiry(t *testing.T) {
 		},
 	}
 	mktSvc := service.NewMarketplaceService(env.Repo, env.AuditService, gw)
+	_, _ = env.Pool.Exec(ctx, "UPDATE marketplace_orders SET reservation_expires_at = NOW() + INTERVAL '24 hours' WHERE order_status = 'placed' AND stock_released = FALSE")
 
 	orderRes, err := mktSvc.CreateOrder(ctx, buyer, service.CheckoutInput{
 		Items:        []service.CartItemInput{{ProductID: prod.ID, Quantity: 2}},
@@ -731,6 +738,7 @@ func TestInventory_CancellationAndExpiryRace(t *testing.T) {
 		},
 	}
 	mktSvc := service.NewMarketplaceService(env.Repo, env.AuditService, gw)
+	_, _ = env.Pool.Exec(ctx, "UPDATE marketplace_orders SET reservation_expires_at = NOW() + INTERVAL '24 hours' WHERE order_status = 'placed' AND stock_released = FALSE")
 
 	orderRes, err := mktSvc.CreateOrder(ctx, buyer, service.CheckoutInput{
 		Items:        []service.CartItemInput{{ProductID: prod.ID, Quantity: 2}},
@@ -790,6 +798,7 @@ func TestInventory_RefundAndCancellationDoubleRestockPrevention(t *testing.T) {
 	ctx := context.Background()
 
 	admin := createRegisteredUser(t, env, "inv_admin_11", "super_admin")
+	adminApprover := createRegisteredUser(t, env, "inv_admin_11_appr", "super_admin")
 	_, _, prod := helperCreateSellerWithProduct(t, env, ctx, "inv_seller_11", "Store 11", "Tape Measure", 10, admin)
 	buyer := createRegisteredUser(t, env, "inv_buyer_11", "member")
 
@@ -809,6 +818,7 @@ func TestInventory_RefundAndCancellationDoubleRestockPrevention(t *testing.T) {
 		},
 	}
 	mktSvc := service.NewMarketplaceService(env.Repo, env.AuditService, gw)
+	_, _ = env.Pool.Exec(ctx, "UPDATE marketplace_orders SET reservation_expires_at = NOW() + INTERVAL '24 hours' WHERE order_status = 'placed' AND stock_released = FALSE")
 
 	orderRes, err := mktSvc.CreateOrder(ctx, buyer, service.CheckoutInput{
 		Items:        []service.CartItemInput{{ProductID: prod.ID, Quantity: 1}},
@@ -841,7 +851,7 @@ func TestInventory_RefundAndCancellationDoubleRestockPrevention(t *testing.T) {
 		t.Fatalf("InitiateRefund failed: %v", err)
 	}
 
-	_, _, err = mktSvc.ConfirmRefund(ctx, admin, refund.ID, service.ConfirmRefundInput{
+	_, _, err = mktSvc.ConfirmRefund(ctx, adminApprover, refund.ID, service.ConfirmRefundInput{
 		ProviderRefundReference: "mock_refund_ref",
 	})
 	if err != nil {
@@ -1121,6 +1131,7 @@ func TestInventory_PendingProviderVerificationPreservesReservation(t *testing.T)
 		},
 	}
 	mktSvc := service.NewMarketplaceService(env.Repo, env.AuditService, gw)
+	_, _ = env.Pool.Exec(ctx, "UPDATE marketplace_orders SET reservation_expires_at = NOW() + INTERVAL '24 hours' WHERE order_status = 'placed' AND stock_released = FALSE")
 
 	orderRes, err := mktSvc.CreateOrder(ctx, buyer, service.CheckoutInput{
 		Items:        []service.CartItemInput{{ProductID: prod.ID, Quantity: 3}},
@@ -1191,6 +1202,7 @@ func TestInventory_FailedPaymentCleanup(t *testing.T) {
 		},
 	}
 	mktSvc := service.NewMarketplaceService(env.Repo, env.AuditService, gw)
+	_, _ = env.Pool.Exec(ctx, "UPDATE marketplace_orders SET reservation_expires_at = NOW() + INTERVAL '24 hours' WHERE order_status = 'placed' AND stock_released = FALSE")
 
 	orderRes, err := mktSvc.CreateOrder(ctx, buyer, service.CheckoutInput{
 		Items:        []service.CartItemInput{{ProductID: prod.ID, Quantity: 2}},
@@ -1333,6 +1345,7 @@ func TestInventory_UnknownProviderStatusInconclusive(t *testing.T) {
 		},
 	}
 	mktSvc := service.NewMarketplaceService(env.Repo, env.AuditService, gw)
+	_, _ = env.Pool.Exec(ctx, "UPDATE marketplace_orders SET reservation_expires_at = NOW() + INTERVAL '24 hours' WHERE order_status = 'placed' AND stock_released = FALSE")
 
 	orderRes, err := mktSvc.CreateOrder(ctx, buyer, service.CheckoutInput{
 		Items:        []service.CartItemInput{{ProductID: prod.ID, Quantity: 2}},

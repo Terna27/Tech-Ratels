@@ -956,6 +956,7 @@ func (h *MarketplaceHandler) GetAdminOverview(w http.ResponseWriter, r *http.Req
 }
 
 func (h *MarketplaceHandler) ListAllBusinessesAdmin(w http.ResponseWriter, r *http.Request) {
+	user := GetCurrentUser(r.Context())
 	var statusPtr, catPtr *string
 	if s := r.URL.Query().Get("status"); s != "" {
 		statusPtr = &s
@@ -963,7 +964,7 @@ func (h *MarketplaceHandler) ListAllBusinessesAdmin(w http.ResponseWriter, r *ht
 	if c := r.URL.Query().Get("category"); c != "" {
 		catPtr = &c
 	}
-	businesses, err := h.marketplaceService.ListBusinesses(r.Context(), statusPtr, catPtr, nil, nil)
+	businesses, err := h.marketplaceService.ListBusinessesAdmin(r.Context(), user, statusPtr, catPtr)
 	if err != nil {
 		ErrorJSON(w, http.StatusInternalServerError, "INTERNAL_ERROR", err.Error(), nil)
 		return
@@ -989,13 +990,66 @@ func (h *MarketplaceHandler) ApproveBusiness(w http.ResponseWriter, r *http.Requ
 
 	b, err := h.marketplaceService.ApproveBusiness(r.Context(), user, id, req.Approve, req.Reason)
 	if err != nil {
+		if errors.Is(err, service.ErrScopeUnauthorized) {
+			ErrorJSON(w, http.StatusForbidden, "SCOPE_UNAUTHORIZED", err.Error(), nil)
+			return
+		}
 		ErrorJSON(w, http.StatusBadRequest, "APPROVAL_FAILED", err.Error(), nil)
 		return
 	}
 	JSON(w, http.StatusOK, b)
 }
 
+func (h *MarketplaceHandler) SuspendBusiness(w http.ResponseWriter, r *http.Request) {
+	user := GetCurrentUser(r.Context())
+	id := chi.URLParam(r, "id")
+
+	var req struct {
+		Reason string `json:"reason"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		ErrorJSON(w, http.StatusBadRequest, "INVALID_REQUEST", "Malformed JSON payload", nil)
+		return
+	}
+
+	b, err := h.marketplaceService.SuspendBusiness(r.Context(), user, id, req.Reason)
+	if err != nil {
+		if errors.Is(err, service.ErrScopeUnauthorized) {
+			ErrorJSON(w, http.StatusForbidden, "SCOPE_UNAUTHORIZED", err.Error(), nil)
+			return
+		}
+		ErrorJSON(w, http.StatusBadRequest, "SUSPENSION_FAILED", err.Error(), nil)
+		return
+	}
+	JSON(w, http.StatusOK, b)
+}
+
+func (h *MarketplaceHandler) RestoreBusiness(w http.ResponseWriter, r *http.Request) {
+	user := GetCurrentUser(r.Context())
+	id := chi.URLParam(r, "id")
+
+	var req struct {
+		Reason string `json:"reason"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		ErrorJSON(w, http.StatusBadRequest, "INVALID_REQUEST", "Malformed JSON payload", nil)
+		return
+	}
+
+	b, err := h.marketplaceService.RestoreBusiness(r.Context(), user, id, req.Reason)
+	if err != nil {
+		if errors.Is(err, service.ErrScopeUnauthorized) {
+			ErrorJSON(w, http.StatusForbidden, "SCOPE_UNAUTHORIZED", err.Error(), nil)
+			return
+		}
+		ErrorJSON(w, http.StatusBadRequest, "RESTORATION_FAILED", err.Error(), nil)
+		return
+	}
+	JSON(w, http.StatusOK, b)
+}
+
 func (h *MarketplaceHandler) ListAllProductsAdmin(w http.ResponseWriter, r *http.Request) {
+	user := GetCurrentUser(r.Context())
 	var catPtr, statusPtr, searchPtr *string
 	if c := r.URL.Query().Get("category"); c != "" {
 		catPtr = &c
@@ -1007,7 +1061,7 @@ func (h *MarketplaceHandler) ListAllProductsAdmin(w http.ResponseWriter, r *http
 		searchPtr = &q
 	}
 
-	products, err := h.marketplaceService.ListProducts(r.Context(), service.ProductFilter{
+	products, err := h.marketplaceService.ListProductsAdmin(r.Context(), user, service.ProductFilter{
 		Category:    catPtr,
 		Status:      statusPtr,
 		SearchQuery: searchPtr,
@@ -1176,6 +1230,14 @@ func (h *MarketplaceHandler) ResolveDispute(w http.ResponseWriter, r *http.Reque
 
 	d, err := h.marketplaceService.ResolveDispute(r.Context(), user, id, req.Resolution, req.Notes)
 	if err != nil {
+		if errors.Is(err, service.ErrScopeUnauthorized) {
+			ErrorJSON(w, http.StatusForbidden, "SCOPE_UNAUTHORIZED", err.Error(), nil)
+			return
+		}
+		if errors.Is(err, service.ErrSelfApprovalProhibited) {
+			ErrorJSON(w, http.StatusForbidden, "SELF_APPROVAL_PROHIBITED", err.Error(), nil)
+			return
+		}
 		ErrorJSON(w, http.StatusBadRequest, "RESOLVE_FAILED", err.Error(), nil)
 		return
 	}
@@ -1228,6 +1290,10 @@ func (h *MarketplaceHandler) AdminConfirmRefund(w http.ResponseWriter, r *http.R
 			ErrorJSON(w, http.StatusForbidden, "SCOPE_UNAUTHORIZED", err.Error(), nil)
 			return
 		}
+		if errors.Is(err, service.ErrSelfApprovalProhibited) {
+			ErrorJSON(w, http.StatusForbidden, "SELF_APPROVAL_PROHIBITED", err.Error(), nil)
+			return
+		}
 		ErrorJSON(w, http.StatusBadRequest, "CONFIRM_FAILED", err.Error(), nil)
 		return
 	}
@@ -1250,6 +1316,10 @@ func (h *MarketplaceHandler) AdminManualSettleRefund(w http.ResponseWriter, r *h
 
 	refund, order, err := h.marketplaceService.ManualSettleRefund(r.Context(), admin, refundID, req)
 	if err != nil {
+		if errors.Is(err, service.ErrSelfApprovalProhibited) {
+			ErrorJSON(w, http.StatusForbidden, "SELF_APPROVAL_PROHIBITED", err.Error(), nil)
+			return
+		}
 		if strings.Contains(strings.ToLower(err.Error()), "unauthorized") {
 			ErrorJSON(w, http.StatusForbidden, "UNAUTHORIZED", err.Error(), nil)
 			return

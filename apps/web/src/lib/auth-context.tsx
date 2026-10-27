@@ -98,6 +98,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         "national_admin",
         "zonal_coordinator",
         "state_coordinator",
+        "lga_coordinator",
         "lga_representative",
       ].includes(user.primary_role) ||
       user.appointments?.some(
@@ -108,6 +109,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
             "national_admin",
             "zonal_coordinator",
             "state_coordinator",
+            "lga_coordinator",
             "lga_representative",
           ].includes(a.role_type)
       )

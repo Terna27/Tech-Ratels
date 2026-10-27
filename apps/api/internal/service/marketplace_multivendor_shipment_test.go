@@ -879,6 +879,7 @@ func TestMultiVendor_PartialRefundAllowsRemainingSellerDispatch(t *testing.T) {
 	ctx := context.Background()
 
 	admin, sellerA, _, prodA, prodB, orderRes := helperCreateMultiVendorOrder(t, env, ctx)
+	adminApprover := createRegisteredUser(t, env, fmt.Sprintf("mv_appr1_%d", time.Now().UnixNano()), "super_admin")
 	_, err := env.MarketplaceService.ConfirmPayment(ctx, orderRes.Payment.Reference)
 	if err != nil {
 		t.Fatalf("ConfirmPayment failed: %v", err)
@@ -912,7 +913,7 @@ func TestMultiVendor_PartialRefundAllowsRemainingSellerDispatch(t *testing.T) {
 	}
 
 	// Settle refund
-	_, _, err = env.MarketplaceService.ConfirmRefund(ctx, admin, refB.ID, service.ConfirmRefundInput{
+	_, _, err = env.MarketplaceService.ConfirmRefund(ctx, adminApprover, refB.ID, service.ConfirmRefundInput{
 		ProviderRefundReference: refB.ProviderRefundReference,
 	})
 	if err != nil {
@@ -964,6 +965,7 @@ func TestMultiVendor_RefundedShipmentDispatchRejection(t *testing.T) {
 	ctx := context.Background()
 
 	admin, _, sellerB, _, prodB, orderRes := helperCreateMultiVendorOrder(t, env, ctx)
+	adminApprover := createRegisteredUser(t, env, fmt.Sprintf("mv_appr2_%d", time.Now().UnixNano()), "super_admin")
 	_, _ = env.MarketplaceService.ConfirmPayment(ctx, orderRes.Payment.Reference)
 
 	shipments, _ := env.MarketplaceService.ListOrderShipments(ctx, admin, orderRes.Order.ID)
@@ -983,7 +985,7 @@ func TestMultiVendor_RefundedShipmentDispatchRejection(t *testing.T) {
 	if err != nil {
 		t.Fatalf("InitiateRefund failed: %v", err)
 	}
-	_, _, err = env.MarketplaceService.ConfirmRefund(ctx, admin, refB.ID, service.ConfirmRefundInput{
+	_, _, err = env.MarketplaceService.ConfirmRefund(ctx, adminApprover, refB.ID, service.ConfirmRefundInput{
 		ProviderRefundReference: refB.ProviderRefundReference,
 	})
 	if err != nil {
@@ -1007,6 +1009,7 @@ func TestMultiVendor_UnattributedPartialRefundFailsClosed(t *testing.T) {
 	ctx := context.Background()
 
 	admin, sellerA, _, prodA, prodB, orderRes := helperCreateMultiVendorOrder(t, env, ctx)
+	adminApprover := createRegisteredUser(t, env, fmt.Sprintf("mv_appr3_%d", time.Now().UnixNano()), "super_admin")
 	_, _ = env.MarketplaceService.ConfirmPayment(ctx, orderRes.Payment.Reference)
 
 	shipments, _ := env.MarketplaceService.ListOrderShipments(ctx, admin, orderRes.Order.ID)
@@ -1025,7 +1028,7 @@ func TestMultiVendor_UnattributedPartialRefundFailsClosed(t *testing.T) {
 	if err != nil {
 		t.Fatalf("InitiateRefund failed: %v", err)
 	}
-	_, _, err = env.MarketplaceService.ConfirmRefund(ctx, admin, refUnattr.ID, service.ConfirmRefundInput{
+	_, _, err = env.MarketplaceService.ConfirmRefund(ctx, adminApprover, refUnattr.ID, service.ConfirmRefundInput{
 		ProviderRefundReference: refUnattr.ProviderRefundReference,
 	})
 	if err != nil {
