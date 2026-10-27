@@ -12,9 +12,11 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 	"ratels-api/internal/config"
 	"ratels-api/internal/delivery"
+	"ratels-api/internal/payment"
 	"ratels-api/internal/repository"
 	"ratels-api/internal/security"
 	"ratels-api/internal/service"
+	"ratels-api/internal/storage"
 	"ratels-api/internal/worker"
 )
 
@@ -70,16 +72,50 @@ func main() {
 	notifService := service.NewNotificationService(repo, auditService, emailSender, smsSender, cfg.FrontendBaseURL)
 	reportService := service.NewReportService(repo, notifService, auditService)
 
+	var paymentGateway payment.PaymentGateway
+	if cfg.PaystackSecretKey != "" {
+		paymentGateway = payment.NewPaystackGateway(cfg.PaystackSecretKey, cfg.PaystackPublicKey)
+	} else if !isProduction && (cfg.PaymentProvider == "sandbox" || cfg.PaymentProvider == "dev_sandbox") {
+		paymentGateway = payment.NewSandboxGateway(cfg.FrontendBaseURL)
+	} else {
+		paymentGateway = payment.NewUnconfiguredGateway()
+	}
+
+	var storageService storage.StorageService
+	if cfg.R2AccessKeyID != "" && cfg.R2SecretAccessKey != "" && cfg.R2BucketName != "" {
+		r2, err := storage.NewR2StorageService(ctx, storage.R2Config{
+			AccountID:       cfg.R2AccountID,
+			AccessKeyID:     cfg.R2AccessKeyID,
+			SecretAccessKey: cfg.R2SecretAccessKey,
+			BucketName:      cfg.R2BucketName,
+			PublicDomain:    cfg.R2PublicDomain,
+			Endpoint:        cfg.R2Endpoint,
+		})
+		if err == nil {
+			storageService = r2
+		} else {
+			storageService = storage.NewUnconfiguredStorageService()
+		}
+	} else {
+		storageService = storage.NewUnconfiguredStorageService()
+	}
+
+	marketplaceService := service.NewMarketplaceService(repo, auditService, paymentGateway, storageService)
+
 	outboxWorker := worker.NewOutboxWorker(repo, notifService, emailSender, smsSender, nil)
 	outboxWorker.Start(ctx)
 
 	reportScheduler := worker.NewReportScheduler(repo, reportService, nil)
 	reportScheduler.Start(ctx)
 
-	log.Println("Standalone Notification Outbox & Reports Scheduler Worker running. Waiting for events...")
+	refundWorker := worker.NewRefundWorker(marketplaceService, nil)
+	refundWorker.Start(ctx)
+
+	log.Println("Standalone Notification Outbox, Reports Scheduler & Marketplace Refund Recovery Worker running. Waiting for events...")
 	<-ctx.Done()
 
 	log.Println("Shutting down workers gracefully...")
+	refundWorker.Stop()
 	reportScheduler.Stop()
 	outboxWorker.Stop()
 	log.Println("Worker terminated.")

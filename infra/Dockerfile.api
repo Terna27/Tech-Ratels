@@ -15,6 +15,8 @@ COPY apps/api/ ./
 
 # Build binaries
 RUN CGO_ENABLED=0 GOOS=linux go build -ldflags="-s -w" -o /bin/server ./cmd/server
+RUN CGO_ENABLED=0 GOOS=linux go build -ldflags="-s -w" -o /bin/worker ./cmd/worker
+RUN CGO_ENABLED=0 GOOS=linux go build -ldflags="-s -w" -o /bin/report-cron ./cmd/report-cron
 RUN CGO_ENABLED=0 GOOS=linux go build -ldflags="-s -w" -o /bin/seed ./cmd/seed
 RUN CGO_ENABLED=0 GOOS=linux go build -ldflags="-s -w" -o /bin/admin ./cmd/admin
 
@@ -28,6 +30,8 @@ RUN apk --no-cache add ca-certificates tzdata curl
 
 # Copy compiled binaries and migrations
 COPY --from=builder /bin/server /app/server
+COPY --from=builder /bin/worker /app/worker
+COPY --from=builder /bin/report-cron /app/report-cron
 COPY --from=builder /bin/seed /app/seed
 COPY --from=builder /bin/admin /app/admin
 COPY apps/api/migrations /app/migrations

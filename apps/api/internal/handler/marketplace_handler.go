@@ -1334,6 +1334,41 @@ func (h *MarketplaceHandler) AdminManualSettleRefund(w http.ResponseWriter, r *h
 	})
 }
 
+type AuthorizeRefundRedispatchRequest struct {
+	Notes string `json:"notes"`
+}
+
+func (h *MarketplaceHandler) AdminAuthorizeRefundRedispatch(w http.ResponseWriter, r *http.Request) {
+	admin := GetCurrentUser(r.Context())
+	if admin == nil {
+		ErrorJSON(w, http.StatusUnauthorized, "UNAUTHORIZED", "Authentication required", nil)
+		return
+	}
+
+	refundID := chi.URLParam(r, "refundId")
+	var req AuthorizeRefundRedispatchRequest
+	_ = json.NewDecoder(r.Body).Decode(&req)
+
+	refund, err := h.marketplaceService.AuthorizeAmbiguousRefundRedispatch(r.Context(), admin, refundID, req.Notes)
+	if err != nil {
+		if errors.Is(err, service.ErrSelfApprovalProhibited) {
+			ErrorJSON(w, http.StatusForbidden, "SELF_APPROVAL_PROHIBITED", err.Error(), nil)
+			return
+		}
+		if errors.Is(err, service.ErrScopeUnauthorized) {
+			ErrorJSON(w, http.StatusForbidden, "SCOPE_UNAUTHORIZED", err.Error(), nil)
+			return
+		}
+		ErrorJSON(w, http.StatusBadRequest, "AUTHORIZE_REDISPATCH_FAILED", err.Error(), nil)
+		return
+	}
+
+	JSON(w, http.StatusOK, map[string]interface{}{
+		"status": "redispatch_authorized",
+		"refund": refund,
+	})
+}
+
 // -------------------------------------------------------------
 // Inventory Ledger & Reservation Expiry Endpoints
 // -------------------------------------------------------------

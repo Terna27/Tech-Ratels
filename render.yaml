@@ -1,0 +1,197 @@
+# ==============================================================================
+# RENDER BLUEPRINT SPECIFICATION — RATELS WORLDWIDE PRODUCTION INFRASTRUCTURE
+# ==============================================================================
+# Declares web services, background workers, PostgreSQL database, and cron jobs.
+# Do not trigger auto-deployment or merge without user approval.
+
+services:
+  # ----------------------------------------------------------------------------
+  # 1. Backend Go API Web Service
+  # ----------------------------------------------------------------------------
+  - type: web
+    name: ratels-api
+    runtime: docker
+    dockerfilePath: ./infra/Dockerfile.api
+    plan: standard
+    region: frankfurt
+    healthCheckPath: /health
+    autoDeploy: false
+    envVars:
+      - key: APP_ENV
+        value: production
+      - key: PORT
+        value: "8000"
+      - key: TZ
+        value: Africa/Lagos
+      - key: DATABASE_URL
+        fromDatabase:
+          name: ratels-postgres
+          property: connectionString
+      - key: JWT_SECRET
+        generateValue: true
+      - key: JWT_EXPIRY_HOURS
+        value: "24"
+      - key: ALLOWED_ORIGINS
+        value: https://app.ratelsworldwide.org,https://ratelsworldwide.org
+      - key: FRONTEND_BASE_URL
+        value: https://app.ratelsworldwide.org
+      - key: DEV_DELIVERY_SAFE_MODE
+        value: "false"
+      - key: EMAIL_PROVIDER
+        value: brevo
+      - key: BREVO_API_KEY
+        sync: false
+      - key: EMAIL_FROM_NAME
+        value: "Ratels Worldwide"
+      - key: EMAIL_FROM_ADDRESS
+        value: "notifications@ratelsworldwide.org"
+      - key: EMAIL_FROM
+        value: "Ratels Worldwide <notifications@ratelsworldwide.org>"
+      - key: TERMII_API_KEY
+        sync: false
+      - key: TERMII_SENDER_ID
+        value: RATELS
+      - key: ENABLE_OUTBOX_WORKER
+        value: "true"
+      - key: PAYMENT_PROVIDER
+        value: paystack
+      - key: PAYSTACK_SECRET_KEY
+        sync: false
+      - key: PAYSTACK_PUBLIC_KEY
+        sync: false
+      - key: R2_ACCOUNT_ID
+        sync: false
+      - key: R2_ACCESS_KEY_ID
+        sync: false
+      - key: R2_SECRET_ACCESS_KEY
+        sync: false
+      - key: R2_BUCKET_NAME
+        value: ratels-marketplace-assets-prod
+      - key: R2_PUBLIC_DOMAIN
+        value: https://media.ratelsworldwide.org
+      - key: R2_REPORTS_ACCOUNT_ID
+        sync: false
+      - key: R2_REPORTS_ACCESS_KEY_ID
+        sync: false
+      - key: R2_REPORTS_SECRET_ACCESS_KEY
+        sync: false
+      - key: R2_REPORTS_BUCKET_NAME
+        value: ratels-private-reports-prod
+      - key: SAFEGUARDING_REPORTING_ENABLED
+        value: "true"
+      - key: SAFEGUARDING_ENCRYPTION_KEY
+        sync: false
+      - key: REPORT_CRON_SECRET
+        generateValue: true
+      - key: MARKETPLACE_CRON_SECRET
+        generateValue: true
+      - key: FOUNDATION_PROVISIONAL_NAME
+        value: "Martins Vincent Otse Foundation"
+
+  # ----------------------------------------------------------------------------
+  # 2. Frontend Next.js Web Service
+  # ----------------------------------------------------------------------------
+  - type: web
+    name: ratels-web
+    runtime: docker
+    dockerfilePath: ./infra/Dockerfile.web
+    plan: standard
+    region: frankfurt
+    autoDeploy: false
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: PORT
+        value: "3000"
+      - key: NEXT_PUBLIC_API_URL
+        value: https://api.ratelsworldwide.org/api/v1
+
+  # ----------------------------------------------------------------------------
+  # 3. Standalone Background Worker Service
+  # ----------------------------------------------------------------------------
+  - type: worker
+    name: ratels-worker
+    runtime: docker
+    dockerfilePath: ./infra/Dockerfile.api
+    dockerCommand: /app/worker
+    plan: standard
+    region: frankfurt
+    autoDeploy: false
+    envVars:
+      - key: APP_ENV
+        value: production
+      - key: TZ
+        value: Africa/Lagos
+      - key: DATABASE_URL
+        fromDatabase:
+          name: ratels-postgres
+          property: connectionString
+      - key: JWT_SECRET
+        fromService:
+          type: web
+          name: ratels-api
+          envVarKey: JWT_SECRET
+      - key: FRONTEND_BASE_URL
+        value: https://app.ratelsworldwide.org
+      - key: DEV_DELIVERY_SAFE_MODE
+        value: "false"
+      - key: EMAIL_PROVIDER
+        value: brevo
+      - key: BREVO_API_KEY
+        sync: false
+      - key: EMAIL_FROM_NAME
+        value: "Ratels Worldwide"
+      - key: EMAIL_FROM_ADDRESS
+        value: "notifications@ratelsworldwide.org"
+      - key: TERMII_API_KEY
+        sync: false
+      - key: TERMII_SENDER_ID
+        value: RATELS
+      - key: PAYMENT_PROVIDER
+        value: paystack
+      - key: PAYSTACK_SECRET_KEY
+        sync: false
+      - key: PAYSTACK_PUBLIC_KEY
+        sync: false
+      - key: R2_ACCOUNT_ID
+        sync: false
+      - key: R2_ACCESS_KEY_ID
+        sync: false
+      - key: R2_SECRET_ACCESS_KEY
+        sync: false
+      - key: R2_BUCKET_NAME
+        value: ratels-marketplace-assets-prod
+      - key: R2_PUBLIC_DOMAIN
+        value: https://media.ratelsworldwide.org
+
+  # ----------------------------------------------------------------------------
+  # 4. Scheduled Report Generation Cron Job
+  # ----------------------------------------------------------------------------
+  - type: cron
+    name: ratels-report-cron
+    runtime: docker
+    dockerfilePath: ./infra/Dockerfile.api
+    dockerCommand: /app/report-cron
+    schedule: "0 0 1 * *"
+    plan: starter
+    region: frankfurt
+    envVars:
+      - key: APP_ENV
+        value: production
+      - key: DATABASE_URL
+        fromDatabase:
+          name: ratels-postgres
+          property: connectionString
+      - key: TZ
+        value: Africa/Lagos
+
+# ------------------------------------------------------------------------------
+# 5. Managed PostgreSQL 16 Database
+# ------------------------------------------------------------------------------
+databases:
+  - name: ratels-postgres
+    databaseName: ratels_production
+    user: ratels_admin
+    plan: standard
+    region: frankfurt
+    postgresMajorVersion: "16"

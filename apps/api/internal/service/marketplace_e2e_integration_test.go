@@ -719,13 +719,35 @@ func TestE2E_Phase5_PaymentAndRefund_AmbiguousTimeoutMultiCheckReconciliation(t 
 		t.Errorf("Pass 3: Expected reconciliation_checks_count = 2, got %v", meta3["reconciliation_checks_count"])
 	}
 
-	// PASS 4: Multi-check threshold satisfied -> Re-dispatch is safely permitted and succeeds!
+	// Step 66 Release Gate: Automatic re-dispatch based only on negative transaction lookup is strictly blocked!
+	wResBlocked, err := env.MarketplaceService.ProcessPendingRefunds(ctx, 50)
+	if err != nil {
+		t.Fatalf("ProcessPendingRefunds blocked check failed: %v", err)
+	}
+	if wResBlocked.RetriedCount != 0 || wResBlocked.SettledCount != 0 {
+		t.Errorf("Expected 0 retried and 0 settled without privileged manual review, got retried: %d, settled: %d", wResBlocked.RetriedCount, wResBlocked.SettledCount)
+	}
+
+	// Anti-Self-Approval: The initiating admin cannot authorize re-dispatch
+	_, err = env.MarketplaceService.AuthorizeAmbiguousRefundRedispatch(ctx, admin, refundID, "Self-approval attempt")
+	if !errors.Is(err, service.ErrSelfApprovalProhibited) {
+		t.Errorf("Expected ErrSelfApprovalProhibited when initiator authorizes re-dispatch, got: %v", err)
+	}
+
+	// Privileged Manual Review: An independent super admin reviews and authorizes re-dispatch
+	independentAdmin := createRegisteredUser(t, env, fmt.Sprintf("indep_adm_%d", time.Now().UnixNano()), "super_admin")
+	_, err = env.MarketplaceService.AuthorizeAmbiguousRefundRedispatch(ctx, independentAdmin, refundID, "Verified Paystack dashboard; no prior chargeback recorded")
+	if err != nil {
+		t.Fatalf("AuthorizeAmbiguousRefundRedispatch failed: %v", err)
+	}
+
+	// PASS 4: With privileged manual review authorized -> Re-dispatch is safely executed and succeeds!
 	wRes4, err := env.MarketplaceService.ProcessPendingRefunds(ctx, 50)
 	if err != nil {
 		t.Fatalf("Pass 4 ProcessPendingRefunds failed: %v", err)
 	}
-	if wRes4.SettledCount < 1 && wRes4.PendingCount < 1 {
-		t.Errorf("Pass 4: Expected refund processed, got settled: %d, pending: %d", wRes4.SettledCount, wRes4.PendingCount)
+	if wRes4.SettledCount < 1 && wRes4.PendingCount < 1 && wRes4.RetriedCount < 1 {
+		t.Errorf("Pass 4: Expected refund processed, got settled: %d, pending: %d, retried: %d", wRes4.SettledCount, wRes4.PendingCount, wRes4.RetriedCount)
 	}
 
 	// Verify refund record adopted a valid provider reference

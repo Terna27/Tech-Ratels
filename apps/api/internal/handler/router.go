@@ -326,6 +326,7 @@ func NewRouter(p RouterParams) http.Handler {
 				mktAdm.With(RequireRole("national_admin", "super_admin", "zonal_coordinator", "state_coordinator")).Post("/orders/{id}/cancel", p.MarketplaceHandler.CancelOrder)
 				mktAdm.With(RequireRole("national_admin", "super_admin", "zonal_coordinator", "state_coordinator")).Post("/orders/{id}/refund", p.MarketplaceHandler.AdminRefundOrder)
 				mktAdm.With(RequireRole("national_admin", "super_admin", "zonal_coordinator", "state_coordinator")).Post("/refunds/{refundId}/confirm", p.MarketplaceHandler.AdminConfirmRefund)
+				mktAdm.With(RequireRole("national_admin", "super_admin")).Post("/refunds/{refundId}/authorize-redispatch", p.MarketplaceHandler.AdminAuthorizeRefundRedispatch)
 				mktAdm.With(RequireRole("super_admin")).Post("/refunds/{refundId}/manual-settle", p.MarketplaceHandler.AdminManualSettleRefund)
 				mktAdm.Get("/payments", p.MarketplaceHandler.ListPaymentsAdmin)
 				mktAdm.Get("/shipments", p.MarketplaceHandler.ListAdminShipments)

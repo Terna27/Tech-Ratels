@@ -3904,6 +3904,69 @@ func (s *MarketplaceService) ConfirmRefund(ctx context.Context, admin *db.User, 
 	return nil, nil, errors.New("unsupported refund provider for automated confirmation; manual settlement required")
 }
 
+// AuthorizeAmbiguousRefundRedispatch authorizes re-dispatch of a pending refund that suffered an ambiguous provider timeout.
+// Strict invariants: requires privileged admin authority, enforces anti-self-approval (cannot be approved by the initiating user),
+// and logs an immutable audit trail entry.
+func (s *MarketplaceService) AuthorizeAmbiguousRefundRedispatch(ctx context.Context, admin *db.User, refundID string, notes string) (*db.MarketplaceRefund, error) {
+	if admin == nil {
+		return nil, errors.New("authentication required")
+	}
+
+	apps := s.getActiveAppointments(ctx, admin.ID)
+	isNationwide := s.isNationwideAdmin(admin, apps)
+	hasStateOrZonal := s.hasStateOrZonalAuthority(admin, apps)
+	if !isNationwide && !hasStateOrZonal {
+		return nil, ErrScopeUnauthorized
+	}
+
+	var updatedRef db.MarketplaceRefund
+	err := s.repo.WithTx(ctx, func(q *db.Queries) error {
+		lockedRefund, err := q.GetMarketplaceRefundByID(ctx, refundID)
+		if err != nil {
+			return errors.New("marketplace refund not found")
+		}
+
+		if lockedRefund.Status != "pending" {
+			return fmt.Errorf("cannot authorize re-dispatch for refund with status %q", lockedRefund.Status)
+		}
+
+		// Anti-Self-Approval: The user who initiated the refund cannot approve its re-dispatch
+		if lockedRefund.InitiatedByUserID == admin.ID {
+			return ErrSelfApprovalProhibited
+		}
+
+		var metaMap map[string]interface{}
+		_ = json.Unmarshal(lockedRefund.Metadata, &metaMap)
+		if metaMap == nil {
+			metaMap = make(map[string]interface{})
+		}
+
+		metaMap["privileged_manual_review_approved"] = true
+		metaMap["privileged_reviewer_id"] = admin.ID
+		metaMap["privileged_reviewer_role"] = admin.PrimaryRole
+		metaMap["privileged_review_notes"] = notes
+		metaMap["privileged_reviewed_at"] = time.Now().UTC().Format(time.RFC3339)
+
+		newMeta, _ := json.Marshal(metaMap)
+
+		updatedRef, err = q.UpdateMarketplaceRefundStatus(ctx, db.UpdateMarketplaceRefundStatusParams{
+			ID:                      lockedRefund.ID,
+			Status:                  "pending",
+			ProviderRefundReference: "",
+			ConfirmedByUserID:       pgtype.Text{Valid: false},
+			SettlementNotes:         fmt.Sprintf("Privileged manual review authorized by %s (%s): %s", admin.DisplayName, admin.PrimaryRole, notes),
+			Metadata:                newMeta,
+		})
+		return err
+	})
+	if err != nil {
+		return nil, err
+	}
+
+	_ = s.audit.Log(ctx, &admin.ID, &admin.PrimaryRole, "authorize_ambiguous_refund_redispatch", "marketplace_refund", refundID, nil, nil, &notes, nil)
+	return &updatedRef, nil
+}
+
 func (s *MarketplaceService) ManualSettleRefund(ctx context.Context, admin *db.User, refundID string, input ManualSettlementInput) (*db.MarketplaceRefund, *db.GetMarketplaceOrderByIDRow, error) {
 	// Restrict this workflow strictly to Super Admin
 	if admin == nil {
@@ -5691,9 +5754,11 @@ func (s *MarketplaceService) ProcessPendingRefunds(ctx context.Context, batchSiz
 			}
 		}
 
-		// Step 65 Requirement: For ambiguous Paystack refund timeouts, verify that absence from
+		// Step 65 & 66 Requirement: For ambiguous Paystack refund timeouts, verify that absence from
 		// a single transaction lookup is not incorrectly treated as proof that no refund was submitted.
-		// Require a multi-check safe reconciliation strategy before permitting re-dispatch.
+		// Never trigger an automatic second provider refund request based only on negative transaction lookups.
+		// Use authoritative provider reconciliation where available. Otherwise retain the refund as pending
+		// and require privileged manual review before permitting re-dispatch.
 		isAmbiguousTimeout := strings.Contains(ref.SettlementNotes, "timed out") || strings.Contains(string(ref.Metadata), "ambiguous_dispatch_error")
 		if isAmbiguousTimeout {
 			var metaMap map[string]interface{}
@@ -5707,10 +5772,14 @@ func (s *MarketplaceService) ProcessPendingRefunds(ctx context.Context, batchSiz
 				checks = int(cVal)
 			}
 
-			if checks < 2 {
+			isPrivilegedAuthorized := metaMap["privileged_manual_review_approved"] == true || metaMap["manual_redispatch_authorized"] == true
+
+			if !isPrivilegedAuthorized {
 				metaMap["reconciliation_checks_count"] = checks + 1
 				metaMap["last_reconciliation_check_at"] = time.Now().UTC().Format(time.RFC3339)
 				metaMap["reconciliation_in_progress"] = true
+				metaMap["requires_privileged_manual_review"] = true
+				metaMap["automatic_redispatch_blocked"] = true
 				newMeta, _ := json.Marshal(metaMap)
 
 				_ = s.repo.WithTx(ctx, func(q *db.Queries) error {
@@ -5719,7 +5788,7 @@ func (s *MarketplaceService) ProcessPendingRefunds(ctx context.Context, batchSiz
 						Status:                  "pending",
 						ProviderRefundReference: "",
 						ConfirmedByUserID:       pgtype.Text{Valid: false},
-						SettlementNotes:         fmt.Sprintf("Reconciliation in progress (check %d/2: no provider refund detected yet)", checks+1),
+						SettlementNotes:         fmt.Sprintf("Ambiguous timeout: provider transaction has no refund record. Automatic re-dispatch blocked (check %d); privileged manual review required.", checks+1),
 						Metadata:                newMeta,
 					})
 					return err
@@ -5729,7 +5798,6 @@ func (s *MarketplaceService) ProcessPendingRefunds(ctx context.Context, batchSiz
 				continue
 			}
 
-			metaMap["reconciliation_confirmed_no_prior_refund"] = true
 			metaMap["reconciliation_cleared_for_redispatch"] = true
 		}
 

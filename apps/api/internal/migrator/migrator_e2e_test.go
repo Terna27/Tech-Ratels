@@ -122,3 +122,65 @@ func TestMigrations_Migration22ForwardBackwardAndDataPreservation(t *testing.T) 
 		t.Errorf("expected order_item_id column to exist after re-applying migration 22")
 	}
 }
+
+func TestMigrations_HistoricalDataForwardApplicationAndLedgerConsistency(t *testing.T) {
+	testDBURL := os.Getenv("TEST_DATABASE_URL")
+	if testDBURL == "" {
+		testDBURL = "postgres://postgres@127.0.0.1:5432/ratels_migration_audit_db?sslmode=disable"
+	}
+
+	ctx := context.Background()
+	pool, err := pgxpool.New(ctx, testDBURL)
+	if err != nil {
+		t.Fatalf("failed connecting to migration test database: %v", err)
+	}
+	defer pool.Close()
+
+	if err := migrator.RunMigrations(ctx, pool); err != nil {
+		t.Fatalf("migrator.RunMigrations failed: %v", err)
+	}
+
+	// Verify inventory ledger invariants:
+	// 1. balance_after must never be negative
+	var negativeCount int
+	err = pool.QueryRow(ctx, "SELECT count(*) FROM marketplace_inventory_logs WHERE balance_after < 0").Scan(&negativeCount)
+	if err != nil || negativeCount > 0 {
+		t.Errorf("Expected 0 negative ledger balances, got %d (err: %v)", negativeCount, err)
+	}
+
+	// 2. All products must have an opening balance ledger entry
+	var unseededProducts int
+	err = pool.QueryRow(ctx, `
+		SELECT count(*) FROM marketplace_products p
+		WHERE NOT EXISTS (
+			SELECT 1 FROM marketplace_inventory_logs l WHERE l.product_id = p.id
+		)
+	`).Scan(&unseededProducts)
+	if err != nil || unseededProducts > 0 {
+		t.Errorf("Expected all products to have opening balance ledger logs, unseeded count: %d (err: %v)", unseededProducts, err)
+	}
+
+	// 3. Historical cancelled/refunded orders must have stock_released = TRUE
+	var unreleasedCount int
+	err = pool.QueryRow(ctx, `
+		SELECT count(*) FROM marketplace_orders
+		WHERE order_status IN ('cancelled', 'refunded') AND stock_released = FALSE
+	`).Scan(&unreleasedCount)
+	if err != nil || unreleasedCount > 0 {
+		t.Errorf("Expected 0 historical cancelled/refunded orders with stock_released=FALSE, got %d", unreleasedCount)
+	}
+
+	// 4. Verify composite uniqueness on marketplace_shipments(order_id, business_id) NULLS NOT DISTINCT
+	var duplicateShipments int
+	err = pool.QueryRow(ctx, `
+		SELECT count(*) FROM (
+			SELECT order_id, business_id, count(*)
+			FROM marketplace_shipments
+			GROUP BY order_id, business_id
+			HAVING count(*) > 1
+		) dupes
+	`).Scan(&duplicateShipments)
+	if err != nil || duplicateShipments > 0 {
+		t.Errorf("Expected 0 duplicate shipments per order-business pair, got %d", duplicateShipments)
+	}
+}
