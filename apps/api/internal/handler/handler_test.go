@@ -72,7 +72,7 @@ func setupTestHarness(t *testing.T) *TestHarness {
 	cleanupSvc := service.NewCleanupService(repo, auditSvc)
 	partSvc := service.NewParticipationService(repo, auditSvc)
 	foundSvc := service.NewFoundationService(repo, cfg, auditSvc)
-	adminSvc := service.NewAdminService(repo)
+	adminSvc := service.NewAdminService(repo, auditSvc)
 	mockStorage := storage.NewDevSandboxStorageService("http://localhost:3000")
 	paymentGw := payment.NewSandboxGateway(cfg.FrontendBaseURL)
 	financeSvc := service.NewFinanceService(repo, auditSvc, paymentGw, mockStorage)

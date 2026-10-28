@@ -202,6 +202,103 @@ export interface AdminOverview {
   pending_appeals_queue: number;
 }
 
+export interface SuperAdminDashboardStats {
+  total_members: number;
+  verified_members: number;
+  pending_member_verifications: number;
+  total_registrations: number;
+  active_coordinators: number;
+  zonal_coordinators_count: number;
+  state_coordinators_count: number;
+  lga_coordinators_count: number;
+  national_admins_count: number;
+  active_zones: number;
+  total_zones: number;
+  covered_states: number;
+  total_states: number;
+  covered_lgas: number;
+  total_lgas: number;
+  upcoming_cleanups_count: number;
+  published_activities: number;
+  draft_venues_review_queue: number;
+  unverified_participations_queue: number;
+  pending_appeals_queue: number;
+  upcoming_activities: {
+    id: string;
+    title: string;
+    programme_type: string;
+    state_id: string;
+    state_name: string;
+    lga_id: string;
+    lga_name: string;
+    address: string;
+    start_time: string;
+    end_time: string;
+    capacity: number;
+    registered_count: number;
+    status: string;
+    coordinator_name: string;
+  }[];
+  recent_audit_actions: {
+    id: string;
+    actor_id?: string;
+    actor_name: string;
+    actor_email: string;
+    actor_role?: string;
+    action: string;
+    resource_type: string;
+    resource_id: string;
+    scope_type?: string;
+    scope_id?: string;
+    details?: string;
+    ip_address?: string;
+    created_at: string;
+  }[];
+  zone_coverage: {
+    zone_id: string;
+    zone_code: string;
+    zone_name: string;
+    appointment_id?: string;
+    user_id?: string;
+    coordinator_name?: string;
+    coordinator_email?: string;
+    coordinator_phone?: string;
+    start_date?: string;
+    appointment_status?: string;
+  }[];
+}
+
+export interface StateCoverageRow {
+  state_id: string;
+  state_code: string;
+  state_name: string;
+  is_fct: boolean;
+  zone_id: string;
+  zone_code: string;
+  zone_name: string;
+  appointment_id?: string;
+  user_id?: string;
+  coordinator_name?: string;
+  coordinator_email?: string;
+  coordinator_phone?: string;
+  start_date?: string;
+  appointment_status?: string;
+}
+
+export interface LGACoverageRow {
+  lga_id: string;
+  lga_name: string;
+  is_area_council: boolean;
+  state_id: string;
+  appointment_id?: string;
+  user_id?: string;
+  coordinator_name?: string;
+  coordinator_email?: string;
+  coordinator_phone?: string;
+  start_date?: string;
+  appointment_status?: string;
+}
+
 export interface AuditEvent {
   id: string;
   actor_id?: string;

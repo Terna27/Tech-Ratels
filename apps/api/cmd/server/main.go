@@ -114,7 +114,7 @@ func main() {
 	cleanupService := service.NewCleanupService(repo, auditService)
 	partService := service.NewParticipationService(repo, auditService)
 	foundService := service.NewFoundationService(repo, cfg, auditService)
-	adminService := service.NewAdminService(repo)
+	adminService := service.NewAdminService(repo, auditService)
 	inventoryService := service.NewInventoryService(repo, auditService)
 
 	var paymentGateway payment.PaymentGateway

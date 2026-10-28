@@ -28,452 +28,1303 @@ import {
   Send,
   ShieldAlert,
   BarChart3,
+  Globe,
+  UserCheck,
+  UserX,
+  Search,
+  Filter,
+  RefreshCw,
+  ChevronRight,
+  Settings,
+  Database,
+  Check,
+  XCircle,
 } from "lucide-react";
 import { useAuth } from "@/lib/auth-context";
 import { apiRequest } from "@/lib/api";
-import { AdminOverview } from "@/lib/types";
+import {
+  AdminOverview,
+  SuperAdminDashboardStats,
+  StateCoverageRow,
+  LGACoverageRow,
+} from "@/lib/types";
 import { Badge } from "@/components/ui/Badge";
 import { Spinner } from "@/components/ui/Spinner";
 import { Alert } from "@/components/ui/Alert";
 
+type AdminTab =
+  | "overview"
+  | "members"
+  | "zones"
+  | "states"
+  | "lgas"
+  | "activities"
+  | "marketplace"
+  | "finance"
+  | "audit"
+  | "system";
+
 export default function AdminOverviewPage() {
   const router = useRouter();
-  const { user, isCoordinator, isLoading } = useAuth();
+  const { user, isCoordinator, isSuperAdmin, isLoading } = useAuth();
 
+  // Active view tab for Super Admin
+  const [activeTab, setActiveTab] = useState<AdminTab>("overview");
+
+  // Super Admin statistics and coverage states
+  const [stats, setStats] = useState<SuperAdminDashboardStats | null>(null);
+  const [stateCoverage, setStateCoverage] = useState<StateCoverageRow[]>([]);
+  const [lgaCoverage, setLgaCoverage] = useState<LGACoverageRow[]>([]);
+  const [selectedStateForLga, setSelectedStateForLga] = useState<string>("");
+  const [loadingLgas, setLoadingLgas] = useState(false);
+
+  // Regional Coordinator fallback overview
   const [overview, setOverview] = useState<AdminOverview | null>(null);
+
   const [loading, setLoading] = useState(true);
+  const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
+  // Search & Filter state for lists
+  const [stateSearch, setStateSearch] = useState("");
+  const [selectedZoneFilter, setSelectedZoneFilter] = useState("all");
+  const [lgaSearch, setLgaSearch] = useState("");
+
+  // System Seeding Status
+  const [seedingGeography, setSeedingGeography] = useState(false);
+  const [seedSuccessMessage, setSeedSuccessMessage] = useState<string | null>(null);
+
+  const loadData = async () => {
+    try {
+      setError(null);
+      if (isSuperAdmin || user?.primary_role === "super_admin") {
+        const [statsData, statesData] = await Promise.all([
+          apiRequest<SuperAdminDashboardStats>("/admin/super/dashboard"),
+          apiRequest<StateCoverageRow[]>("/admin/super/coverage/states").catch(() => []),
+        ]);
+        setStats(statsData);
+        setStateCoverage(statesData || []);
+        if (statesData && statesData.length > 0 && !selectedStateForLga) {
+          setSelectedStateForLga(statesData[0].state_id);
+        }
+      } else {
+        const data = await apiRequest<AdminOverview>("/admin/overview");
+        setOverview(data);
+      }
+    } catch (err: any) {
+      setError(err.message || "Failed to load admin dashboard metrics");
+    } finally {
+      setLoading(false);
+      setRefreshing(false);
+    }
+  };
+
   useEffect(() => {
-    if (!isLoading && (!user || !isCoordinator)) {
+    if (!isLoading && (!user || (!isCoordinator && !isSuperAdmin && user.primary_role !== "super_admin"))) {
       router.push("/login?redirect=/admin");
       return;
     }
 
-    if (user && isCoordinator) {
-      async function fetchOverview() {
+    if (user) {
+      loadData();
+    }
+  }, [user, isCoordinator, isSuperAdmin, isLoading, router]);
+
+  // Load LGAs when state selection changes in LGA Tab
+  useEffect(() => {
+    if (activeTab === "lgas" && selectedStateForLga) {
+      async function fetchLgas() {
+        setLoadingLgas(true);
         try {
-          const data = await apiRequest<AdminOverview>("/admin/overview");
-          setOverview(data);
+          const data = await apiRequest<LGACoverageRow[]>(
+            `/admin/super/coverage/lgas?state_id=${encodeURIComponent(selectedStateForLga)}`
+          );
+          setLgaCoverage(data || []);
         } catch (err: any) {
-          setError(err.message || "Failed to load admin overview metrics");
+          console.error("Failed to load LGA coverage", err);
         } finally {
-          setLoading(false);
+          setLoadingLgas(false);
         }
       }
-      fetchOverview();
+      fetchLgas();
     }
-  }, [user, isCoordinator, isLoading, router]);
+  }, [activeTab, selectedStateForLga]);
+
+  const handleSeedGeography = async () => {
+    setSeedingGeography(true);
+    setSeedSuccessMessage(null);
+    try {
+      const res = await apiRequest<{ status: string; message: string; zones: number; states: number; lgas: number }>(
+        "/admin/geography/seed",
+        { method: "POST" }
+      );
+      setSeedSuccessMessage(
+        `Authoritative reference geography verified: ${res.zones} Zones, ${res.states} States/FCT, ${res.lgas} LGAs successfully synced.`
+      );
+      // Reload stats
+      const updated = await apiRequest<SuperAdminDashboardStats>("/admin/super/dashboard");
+      setStats(updated);
+    } catch (err: any) {
+      setError(err.message || "Failed to seed authoritative reference geography");
+    } finally {
+      setSeedingGeography(false);
+    }
+  };
 
   if (isLoading || loading) return <Spinner text="Loading administration workspace..." />;
-  if (!user || !overview) return null;
+  if (!user) return null;
 
-  const unverifiedQueue = overview.unverified_participations_queue ?? (overview as any).pending_reviews ?? 0;
-  const draftQueue = overview.draft_venues_review_queue ?? 0;
-  const appealsQueue = overview.pending_appeals_queue ?? 0;
-  const totalMembers = overview.total_members ?? 0;
-  const pendingVerifications = overview.pending_member_verifications ?? 0;
-  const activeCoordinators = overview.active_coordinators ?? (overview as any).active_appointments ?? 0;
-  const publishedVenues = overview.published_activities ?? (overview as any).published_cleanups ?? 0;
+  const isSuper = isSuperAdmin || user.primary_role === "super_admin";
+
+  // ---------------------------------------------------------------------------
+  // RENDER: Regional Coordinator Fallback View (Non-Super Admin)
+  // ---------------------------------------------------------------------------
+  if (!isSuper && overview) {
+    const unverifiedQueue = overview.unverified_participations_queue ?? 0;
+    const draftQueue = overview.draft_venues_review_queue ?? 0;
+    const appealsQueue = overview.pending_appeals_queue ?? 0;
+    const totalMembers = overview.total_members ?? 0;
+    const pendingVerifications = overview.pending_member_verifications ?? 0;
+    const activeCoordinators = overview.active_coordinators ?? 0;
+    const publishedVenues = overview.published_activities ?? 0;
+
+    return (
+      <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-10 space-y-8">
+        <div className="bg-emerald-950 text-white rounded-2xl p-6 sm:p-8 shadow-sm flex flex-col md:flex-row justify-between items-start md:items-center gap-4 border border-emerald-800">
+          <div className="space-y-1">
+            <div className="flex items-center gap-2">
+              <span className="text-xs uppercase font-bold tracking-wider text-emerald-400">
+                Administrative Context
+              </span>
+              <Badge variant="primary" size="sm">
+                {(overview.current_role || user.primary_role || "COORDINATOR")
+                  .replace(/_/g, " ")
+                  .toUpperCase()}
+              </Badge>
+            </div>
+            <h1 className="text-2xl sm:text-3xl font-extrabold flex items-center gap-2">
+              <MapPin className="w-6 h-6 text-emerald-400" />
+              {overview.current_jurisdiction_name || "Regional Jurisdiction"}
+            </h1>
+            <p className="text-xs text-emerald-200">
+              Coordinator: {user.display_name} ({user.membership_reference})
+            </p>
+          </div>
+
+          <div className="flex flex-wrap gap-2">
+            <Link
+              href="/admin/activities"
+              className="px-4 py-2 bg-emerald-800 hover:bg-emerald-700 text-white text-xs font-semibold rounded-lg transition"
+            >
+              Create Venue
+            </Link>
+            <Link
+              href="/admin/reviews"
+              className="px-4 py-2 bg-emerald-400 hover:bg-emerald-300 text-emerald-950 text-xs font-bold rounded-lg transition"
+            >
+              Review Queue ({unverifiedQueue})
+            </Link>
+          </div>
+        </div>
+
+        {error && <Alert type="error">{error}</Alert>}
+
+        {/* Attention Section */}
+        <div className="space-y-4">
+          <h2 className="text-lg font-bold text-gray-900 flex items-center gap-2">
+            <Clock className="w-5 h-5 text-emerald-700" />
+            Needs Your Attention
+          </h2>
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+            <div className="bg-white p-5 rounded-xl border border-gray-200 shadow-sm space-y-3">
+              <span className="text-xs text-gray-500 font-semibold uppercase">Participation Queue</span>
+              <div className="text-2xl font-black text-gray-900">{unverifiedQueue}</div>
+              <p className="text-xs text-gray-600">Volunteer activity attendance submissions awaiting review.</p>
+              <Link href="/admin/reviews" className="inline-flex items-center text-xs font-bold text-emerald-800 hover:text-emerald-950">
+                Open Review Queue <ArrowRight className="w-3.5 h-3.5 ml-1" />
+              </Link>
+            </div>
+            <div className="bg-white p-5 rounded-xl border border-gray-200 shadow-sm space-y-3">
+              <span className="text-xs text-gray-500 font-semibold uppercase">Draft Cleanup Venues</span>
+              <div className="text-2xl font-black text-gray-900">{draftQueue}</div>
+              <p className="text-xs text-gray-600">Proposed local venues awaiting inspection & publish.</p>
+              <Link href="/admin/activities" className="inline-flex items-center text-xs font-bold text-emerald-800 hover:text-emerald-950">
+                Inspect Venues <ArrowRight className="w-3.5 h-3.5 ml-1" />
+              </Link>
+            </div>
+            <div className="bg-white p-5 rounded-xl border border-gray-200 shadow-sm space-y-3">
+              <span className="text-xs text-gray-500 font-semibold uppercase">Appeals Queue</span>
+              <div className="text-2xl font-black text-gray-900">{appealsQueue}</div>
+              <p className="text-xs text-gray-600">Rejected claims appealed by members in jurisdiction.</p>
+              <Link href="/admin/reviews" className="inline-flex items-center text-xs font-bold text-emerald-800 hover:text-emerald-950">
+                Review Appeals <ArrowRight className="w-3.5 h-3.5 ml-1" />
+              </Link>
+            </div>
+          </div>
+        </div>
+
+        {/* Real Metrics */}
+        <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+          <div className="bg-white p-4 rounded-xl border border-gray-200 shadow-sm text-xs space-y-1">
+            <span className="text-gray-500">Registered Members</span>
+            <div className="text-xl font-bold text-gray-900">{totalMembers}</div>
+          </div>
+          <div className="bg-white p-4 rounded-xl border border-gray-200 shadow-sm text-xs space-y-1">
+            <span className="text-gray-500">Pending Verification</span>
+            <div className="text-xl font-bold text-gray-900">{pendingVerifications}</div>
+          </div>
+          <div className="bg-white p-4 rounded-xl border border-gray-200 shadow-sm text-xs space-y-1">
+            <span className="text-gray-500">Active Coordinators</span>
+            <div className="text-xl font-bold text-gray-900">{activeCoordinators}</div>
+          </div>
+          <div className="bg-white p-4 rounded-xl border border-gray-200 shadow-sm text-xs space-y-1">
+            <span className="text-gray-500">Published Venues</span>
+            <div className="text-xl font-bold text-gray-900">{publishedVenues}</div>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  // ---------------------------------------------------------------------------
+  // RENDER: Nationwide Super Admin Dashboard (Full Foundation)
+  // ---------------------------------------------------------------------------
+  if (!stats) return null;
+
+  // Filtered States list
+  const filteredStates = stateCoverage.filter((st) => {
+    const matchesSearch =
+      st.state_name.toLowerCase().includes(stateSearch.toLowerCase()) ||
+      st.state_code.toLowerCase().includes(stateSearch.toLowerCase()) ||
+      (st.coordinator_name || "").toLowerCase().includes(stateSearch.toLowerCase());
+    const matchesZone = selectedZoneFilter === "all" || st.zone_code === selectedZoneFilter;
+    return matchesSearch && matchesZone;
+  });
+
+  // Filtered LGAs list
+  const filteredLgas = lgaCoverage.filter((lg) => {
+    return (
+      lg.lga_name.toLowerCase().includes(lgaSearch.toLowerCase()) ||
+      (lg.coordinator_name || "").toLowerCase().includes(lgaSearch.toLowerCase())
+    );
+  });
 
   return (
-    <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-10 space-y-8">
-      {/* Role & Geographic Jurisdiction Context Banner */}
-      <div className="bg-emerald-950 text-white rounded-2xl p-6 sm:p-8 shadow-sm flex flex-col md:flex-row justify-between items-start md:items-center gap-4 border border-emerald-800">
-        <div className="space-y-1">
-          <div className="flex items-center gap-2">
-            <span className="text-xs uppercase font-bold tracking-wider text-emerald-400">
-              Administrative Context
+    <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8 space-y-8">
+      {/* 1. Header Banner & Identity */}
+      <div className="bg-gradient-to-r from-emerald-950 via-emerald-900 to-emerald-950 text-white rounded-2xl p-6 sm:p-8 shadow-md border border-emerald-800 flex flex-col md:flex-row justify-between items-start md:items-center gap-6">
+        <div className="space-y-2">
+          <div className="flex flex-wrap items-center gap-2">
+            <span className="px-2.5 py-0.5 rounded-full text-[10px] font-black uppercase tracking-wider bg-emerald-500 text-emerald-950">
+              National Command
             </span>
-            <Badge variant="primary" size="sm">
-              {(overview.current_role || user.primary_role || "ADMIN")
-                .replace(/_/g, " ")
-                .toUpperCase()}
+            <Badge variant="warning" size="sm">
+              SUPER ADMIN PRIVILEGED
             </Badge>
+            <span className="text-xs text-emerald-300 font-medium">
+              Ratels Worldwide Management Platform
+            </span>
           </div>
-          <h1 className="text-2xl sm:text-3xl font-extrabold flex items-center gap-2">
-            <MapPin className="w-6 h-6 text-emerald-400" />
-            {overview.current_jurisdiction_name ||
-              (user.primary_role === "super_admin"
-                ? "National Command (All Nigeria)"
-                : "National Jurisdiction")}
+          <h1 className="text-2xl sm:text-4xl font-extrabold tracking-tight flex items-center gap-2">
+            <Globe className="w-8 h-8 text-emerald-400" />
+            Nationwide Operational Command Center
           </h1>
-          <p className="text-xs text-emerald-200">
-            Coordinator: {user.display_name} ({user.membership_reference})
+          <p className="text-xs sm:text-sm text-emerald-200">
+            Authoritative national oversight: 6 Geopolitical Zones, 36 States + FCT, and 774 Local Government Areas.
           </p>
         </div>
 
-        <div className="flex flex-wrap gap-2">
-          <Link
-            href="/admin/activities"
-            className="px-4 py-2 bg-emerald-800 hover:bg-emerald-700 text-white text-xs font-semibold rounded-lg transition"
+        <div className="flex flex-wrap items-center gap-3">
+          <button
+            onClick={() => {
+              setRefreshing(true);
+              loadData();
+            }}
+            disabled={refreshing}
+            className="inline-flex items-center px-3.5 py-2 rounded-lg bg-emerald-800/80 hover:bg-emerald-700 text-white text-xs font-semibold transition border border-emerald-700 disabled:opacity-50"
           >
-            Create Venue
-          </Link>
+            <RefreshCw className={`w-3.5 h-3.5 mr-1.5 ${refreshing ? "animate-spin" : ""}`} />
+            Refresh Live Metrics
+          </button>
           <Link
-            href="/admin/reviews"
-            className="px-4 py-2 bg-emerald-400 hover:bg-emerald-300 text-emerald-950 text-xs font-bold rounded-lg transition"
+            href="/admin/leadership"
+            className="inline-flex items-center px-4 py-2 rounded-lg bg-emerald-400 hover:bg-emerald-300 text-emerald-950 text-xs font-bold transition shadow-sm"
           >
-            Review Queue ({unverifiedQueue})
+            <ShieldCheck className="w-4 h-4 mr-1.5" />
+            Appoint / Replace Coordinators
           </Link>
         </div>
       </div>
 
       {error && <Alert type="error">{error}</Alert>}
+      {seedSuccessMessage && <Alert type="success">{seedSuccessMessage}</Alert>}
 
-      {/* "Needs Your Attention" Section */}
-      <div className="space-y-4">
-        <h2 className="text-lg font-bold text-gray-900 flex items-center gap-2">
-          <Clock className="w-5 h-5 text-emerald-700" />
-          Needs Your Attention
-        </h2>
+      {/* 2. Navigation Tabs (Desktop, Tablet, Mobile responsive) */}
+      <div className="border-b border-gray-200 overflow-x-auto scrollbar-none">
+        <nav className="flex space-x-2 sm:space-x-4 min-w-max pb-2" aria-label="Tabs">
+          {[
+            { id: "overview", label: "National Overview", icon: LayoutDashboard },
+            { id: "zones", label: `Zones (${stats.active_zones}/6)`, icon: Globe },
+            { id: "states", label: `States (${stats.covered_states}/37)`, icon: MapPin },
+            { id: "lgas", label: `LGAs (${stats.covered_lgas}/774)`, icon: Building },
+            { id: "members", label: `Members (${stats.total_members})`, icon: Users },
+            { id: "activities", label: `Cleanups (${stats.upcoming_cleanups_count})`, icon: Calendar },
+            { id: "marketplace", label: "Marketplace & Inventory", icon: Store },
+            { id: "finance", label: "Financial Ledger", icon: DollarSign },
+            { id: "audit", label: "Privileged Audit Logs", icon: History },
+            { id: "system", label: "System Administration", icon: Settings },
+          ].map((tab) => {
+            const Icon = tab.icon;
+            const isActive = activeTab === tab.id;
+            return (
+              <button
+                key={tab.id}
+                onClick={() => setActiveTab(tab.id as AdminTab)}
+                className={`flex items-center gap-2 px-3.5 py-2.5 rounded-xl text-xs font-bold transition-all ${
+                  isActive
+                    ? "bg-emerald-800 text-white shadow-sm"
+                    : "text-gray-600 hover:text-gray-900 hover:bg-gray-100"
+                }`}
+              >
+                <Icon className={`w-4 h-4 ${isActive ? "text-emerald-300" : "text-gray-400"}`} />
+                {tab.label}
+              </button>
+            );
+          })}
+        </nav>
+      </div>
 
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-          <div className="bg-white p-5 rounded-xl border border-gray-200 shadow-sm space-y-3">
-            <div className="flex justify-between items-start">
-              <span className="text-xs text-gray-500 font-semibold uppercase">
-                Participation Queue
-              </span>
-              <Badge variant={unverifiedQueue > 0 ? "warning" : "neutral"}>
-                {unverifiedQueue} pending
-              </Badge>
+      {/* 3. TAB CONTENT: Overview */}
+      {activeTab === "overview" && (
+        <div className="space-y-8">
+          {/* Top Line Vital Statistics */}
+          <div className="grid grid-cols-2 lg:grid-cols-4 gap-4 sm:gap-6">
+            {/* Total Members */}
+            <div className="bg-white p-5 rounded-2xl border border-gray-200 shadow-sm space-y-2">
+              <div className="flex justify-between items-center text-xs text-gray-500 font-semibold">
+                <span>Total Registered Members</span>
+                <Users className="w-4 h-4 text-emerald-600" />
+              </div>
+              <div className="text-3xl font-black text-gray-900 tracking-tight">
+                {stats.total_members.toLocaleString()}
+              </div>
+              <div className="flex items-center gap-2 text-[11px]">
+                <span className="text-emerald-700 font-semibold">
+                  {stats.verified_members.toLocaleString()} verified
+                </span>
+                <span className="text-gray-300">•</span>
+                <span className="text-amber-700">
+                  {stats.pending_member_verifications.toLocaleString()} pending
+                </span>
+              </div>
             </div>
-            <div className="text-2xl font-black text-gray-900">
-              {unverifiedQueue}
+
+            {/* Active Coordinators */}
+            <div className="bg-white p-5 rounded-2xl border border-gray-200 shadow-sm space-y-2">
+              <div className="flex justify-between items-center text-xs text-gray-500 font-semibold">
+                <span>Active Coordinators</span>
+                <ShieldCheck className="w-4 h-4 text-emerald-600" />
+              </div>
+              <div className="text-3xl font-black text-gray-900 tracking-tight">
+                {stats.active_coordinators.toLocaleString()}
+              </div>
+              <div className="flex flex-wrap items-center gap-1.5 text-[10px] text-gray-500">
+                <span className="bg-gray-100 px-1.5 py-0.5 rounded font-medium">
+                  {stats.zonal_coordinators_count} Zonal
+                </span>
+                <span className="bg-gray-100 px-1.5 py-0.5 rounded font-medium">
+                  {stats.state_coordinators_count} State
+                </span>
+                <span className="bg-gray-100 px-1.5 py-0.5 rounded font-medium">
+                  {stats.lga_coordinators_count} LGA
+                </span>
+              </div>
             </div>
-            <p className="text-xs text-gray-600">
-              Volunteer activity attendance submissions awaiting coordinator review.
-            </p>
+
+            {/* Geographic Coverage */}
+            <div className="bg-white p-5 rounded-2xl border border-gray-200 shadow-sm space-y-2">
+              <div className="flex justify-between items-center text-xs text-gray-500 font-semibold">
+                <span>State & FCT Coverage</span>
+                <MapPin className="w-4 h-4 text-emerald-600" />
+              </div>
+              <div className="text-3xl font-black text-gray-900 tracking-tight">
+                {stats.covered_states} <span className="text-sm font-normal text-gray-500">/ 37</span>
+              </div>
+              <div className="w-full bg-gray-100 rounded-full h-1.5">
+                <div
+                  className="bg-emerald-600 h-1.5 rounded-full"
+                  style={{ width: `${Math.min(100, (stats.covered_states / 37) * 100)}%` }}
+                />
+              </div>
+              <div className="flex justify-between text-[10px] text-gray-400">
+                <span>{stats.covered_lgas} of 774 LGAs represented</span>
+                <span>{Math.round((stats.covered_states / 37) * 100)}%</span>
+              </div>
+            </div>
+
+            {/* Upcoming Activities */}
+            <div className="bg-white p-5 rounded-2xl border border-gray-200 shadow-sm space-y-2">
+              <div className="flex justify-between items-center text-xs text-gray-500 font-semibold">
+                <span>Upcoming Cleanups</span>
+                <Calendar className="w-4 h-4 text-emerald-600" />
+              </div>
+              <div className="text-3xl font-black text-gray-900 tracking-tight">
+                {stats.upcoming_cleanups_count}
+              </div>
+              <div className="flex items-center gap-2 text-[11px] text-gray-500">
+                <span>{stats.published_activities} published total</span>
+                <span className="text-gray-300">•</span>
+                <span className="text-amber-700 font-medium">
+                  {stats.draft_venues_review_queue} drafts pending
+                </span>
+              </div>
+            </div>
+          </div>
+
+          {/* Operational Review Queues Grid */}
+          <div className="bg-gray-50 p-6 rounded-2xl border border-gray-200 space-y-4">
+            <h2 className="text-sm font-bold text-gray-900 flex items-center gap-2 uppercase tracking-wider">
+              <Clock className="w-4 h-4 text-emerald-700" />
+              Nationwide Operational Queues Requiring Triage
+            </h2>
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+              <div className="bg-white p-4 rounded-xl border border-gray-200 shadow-sm flex items-center justify-between">
+                <div>
+                  <div className="text-xs text-gray-500 font-semibold">Participation Claims Queue</div>
+                  <div className="text-2xl font-black text-gray-900">{stats.unverified_participations_queue}</div>
+                  <div className="text-[11px] text-gray-500">Volunteer cleanup attendance claims</div>
+                </div>
+                <Link
+                  href="/admin/reviews"
+                  className="px-3 py-1.5 rounded-lg bg-emerald-50 text-emerald-800 hover:bg-emerald-100 text-xs font-bold transition"
+                >
+                  Review
+                </Link>
+              </div>
+
+              <div className="bg-white p-4 rounded-xl border border-gray-200 shadow-sm flex items-center justify-between">
+                <div>
+                  <div className="text-xs text-gray-500 font-semibold">Draft Venue Proposals</div>
+                  <div className="text-2xl font-black text-gray-900">{stats.draft_venues_review_queue}</div>
+                  <div className="text-[11px] text-gray-500">Proposed local cleanup venues</div>
+                </div>
+                <Link
+                  href="/admin/activities"
+                  className="px-3 py-1.5 rounded-lg bg-emerald-50 text-emerald-800 hover:bg-emerald-100 text-xs font-bold transition"
+                >
+                  Inspect
+                </Link>
+              </div>
+
+              <div className="bg-white p-4 rounded-xl border border-gray-200 shadow-sm flex items-center justify-between">
+                <div>
+                  <div className="text-xs text-gray-500 font-semibold">Member Appeals Queue</div>
+                  <div className="text-2xl font-black text-gray-900">{stats.pending_appeals_queue}</div>
+                  <div className="text-[11px] text-gray-500">Contested participation claims</div>
+                </div>
+                <Link
+                  href="/admin/reviews"
+                  className="px-3 py-1.5 rounded-lg bg-amber-50 text-amber-800 hover:bg-amber-100 text-xs font-bold transition"
+                >
+                  Appeals
+                </Link>
+              </div>
+            </div>
+          </div>
+
+          {/* Upcoming Cleanup Campaigns Table */}
+          <div className="bg-white rounded-2xl border border-gray-200 shadow-sm p-6 space-y-4">
+            <div className="flex justify-between items-center">
+              <div>
+                <h3 className="text-base font-bold text-gray-900 flex items-center gap-2">
+                  <Calendar className="w-5 h-5 text-emerald-700" />
+                  Upcoming Published Cleanup Venues Across Nigeria
+                </h3>
+                <p className="text-xs text-gray-500">
+                  Approved, public-facing cleanup activities scheduled across Nigerian States and LGAs.
+                </p>
+              </div>
+              <Link
+                href="/admin/activities"
+                className="text-xs font-bold text-emerald-700 hover:text-emerald-900 inline-flex items-center"
+              >
+                Manage All Venues <ArrowRight className="w-3.5 h-3.5 ml-1" />
+              </Link>
+            </div>
+
+            {stats.upcoming_activities.length === 0 ? (
+              <div className="text-center py-8 text-xs text-gray-500 bg-gray-50 rounded-xl">
+                No upcoming published cleanups scheduled at this time.
+              </div>
+            ) : (
+              <div className="overflow-x-auto">
+                <table className="min-w-full divide-y divide-gray-200 text-xs">
+                  <thead className="bg-gray-50 text-gray-500 font-bold uppercase">
+                    <tr>
+                      <th className="px-4 py-3 text-left">Activity / Venue</th>
+                      <th className="px-4 py-3 text-left">Jurisdiction (State / LGA)</th>
+                      <th className="px-4 py-3 text-left">Scheduled Date & Time</th>
+                      <th className="px-4 py-3 text-left">Coordinator</th>
+                      <th className="px-4 py-3 text-right">Volunteers</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-gray-100">
+                    {stats.upcoming_activities.map((act) => (
+                      <tr key={act.id} className="hover:bg-gray-50 transition">
+                        <td className="px-4 py-3 font-semibold text-gray-900">
+                          {act.title}
+                          <div className="text-[10px] text-gray-500 font-normal">{act.address}</div>
+                        </td>
+                        <td className="px-4 py-3 text-gray-700">
+                          {act.state_name} — <span className="text-gray-500">{act.lga_name}</span>
+                        </td>
+                        <td className="px-4 py-3 text-gray-600">
+                          {new Date(act.start_time).toLocaleDateString("en-NG", {
+                            weekday: "short",
+                            year: "numeric",
+                            month: "short",
+                            day: "numeric",
+                            hour: "2-digit",
+                            minute: "2-digit",
+                          })}
+                        </td>
+                        <td className="px-4 py-3 text-gray-700">{act.coordinator_name}</td>
+                        <td className="px-4 py-3 text-right font-bold text-emerald-700">
+                          {act.registered_count} / {act.capacity}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
+          </div>
+
+          {/* Recent Privileged Administrative Audit Stream */}
+          <div className="bg-white rounded-2xl border border-gray-200 shadow-sm p-6 space-y-4">
+            <div className="flex justify-between items-center">
+              <div>
+                <h3 className="text-base font-bold text-gray-900 flex items-center gap-2">
+                  <History className="w-5 h-5 text-emerald-700" />
+                  Recent Privileged Administrative Actions
+                </h3>
+                <p className="text-xs text-gray-500">
+                  Immutable audit records of coordinator appointments, status transitions, and administrative approvals.
+                </p>
+              </div>
+              <Link
+                href="/admin/audit"
+                className="text-xs font-bold text-emerald-700 hover:text-emerald-900 inline-flex items-center"
+              >
+                Full Audit Trail <ArrowRight className="w-3.5 h-3.5 ml-1" />
+              </Link>
+            </div>
+
+            {stats.recent_audit_actions.length === 0 ? (
+              <div className="text-center py-8 text-xs text-gray-500 bg-gray-50 rounded-xl">
+                No recent administrative actions recorded.
+              </div>
+            ) : (
+              <div className="overflow-x-auto">
+                <table className="min-w-full divide-y divide-gray-200 text-xs">
+                  <thead className="bg-gray-50 text-gray-500 font-bold uppercase">
+                    <tr>
+                      <th className="px-4 py-3 text-left">Timestamp</th>
+                      <th className="px-4 py-3 text-left">Acting Administrator</th>
+                      <th className="px-4 py-3 text-left">Action</th>
+                      <th className="px-4 py-3 text-left">Target Entity</th>
+                      <th className="px-4 py-3 text-left">Details</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-gray-100 font-mono text-[11px]">
+                    {stats.recent_audit_actions.map((ev) => (
+                      <tr key={ev.id} className="hover:bg-gray-50 transition">
+                        <td className="px-4 py-3 text-gray-500 whitespace-nowrap">
+                          {new Date(ev.created_at).toLocaleTimeString("en-NG", {
+                            month: "short",
+                            day: "numeric",
+                            hour: "2-digit",
+                            minute: "2-digit",
+                            second: "2-digit",
+                          })}
+                        </td>
+                        <td className="px-4 py-3 text-gray-900 font-sans font-semibold">
+                          {ev.actor_name}
+                          {ev.actor_role && (
+                            <span className="block text-[10px] text-emerald-700 font-mono">
+                              [{ev.actor_role}]
+                            </span>
+                          )}
+                        </td>
+                        <td className="px-4 py-3">
+                          <span className="px-2 py-0.5 rounded bg-gray-100 text-gray-800 font-bold">
+                            {ev.action}
+                          </span>
+                        </td>
+                        <td className="px-4 py-3 text-gray-700">
+                          {ev.resource_type}: <span className="text-gray-500">{ev.resource_id.slice(0, 8)}...</span>
+                        </td>
+                        <td className="px-4 py-3 text-gray-600 font-sans max-w-xs truncate" title={ev.details || ""}>
+                          {ev.details || "—"}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+
+      {/* 4. TAB CONTENT: Zonal Coordinators (6 Zones) */}
+      {activeTab === "zones" && (
+        <div className="space-y-6">
+          <div className="flex flex-col sm:flex-row justify-between sm:items-center gap-4">
+            <div>
+              <h2 className="text-xl font-bold text-gray-900">
+                Geopolitical Zonal Leadership (6 Geopolitical Zones)
+              </h2>
+              <p className="text-xs text-gray-600">
+                Direct oversight of the 6 Nigerian Geopolitical Zones. Only Super Admin may appoint or replace zonal coordinators.
+              </p>
+            </div>
             <Link
-              href="/admin/reviews"
-              className="inline-flex items-center text-xs font-bold text-emerald-800 hover:text-emerald-950 pt-2"
+              href="/admin/leadership"
+              className="inline-flex items-center px-4 py-2 bg-emerald-800 hover:bg-emerald-700 text-white text-xs font-bold rounded-lg transition"
             >
-              Open Review Queue
-              <ArrowRight className="w-3.5 h-3.5 ml-1" />
+              <ShieldCheck className="w-4 h-4 mr-1.5" />
+              Manage Zonal Appointments
             </Link>
           </div>
 
-          <div className="bg-white p-5 rounded-xl border border-gray-200 shadow-sm space-y-3">
-            <div className="flex justify-between items-start">
-              <span className="text-xs text-gray-500 font-semibold uppercase">
-                Draft Cleanup Venues
-              </span>
-              <Badge variant={draftQueue > 0 ? "warning" : "neutral"}>
-                {draftQueue} drafts
-              </Badge>
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+            {stats.zone_coverage.map((z) => {
+              const isAssigned = Boolean(z.coordinator_name);
+              return (
+                <div
+                  key={z.zone_id}
+                  className={`p-6 rounded-2xl border transition shadow-sm space-y-4 ${
+                    isAssigned
+                      ? "bg-white border-gray-200"
+                      : "bg-amber-50/40 border-amber-300"
+                  }`}
+                >
+                  <div className="flex justify-between items-start">
+                    <div>
+                      <span className="text-xs font-bold text-emerald-800 uppercase tracking-wider">
+                        Zone {z.zone_code}
+                      </span>
+                      <h3 className="text-lg font-black text-gray-900">{z.zone_name}</h3>
+                    </div>
+                    <Badge variant={isAssigned ? "success" : "warning"} size="sm">
+                      {isAssigned ? "COORDINATOR APPOINTED" : "VACANT"}
+                    </Badge>
+                  </div>
+
+                  {isAssigned ? (
+                    <div className="space-y-2 text-xs border-t border-gray-100 pt-3">
+                      <div className="flex items-center gap-2 text-gray-900 font-semibold">
+                        <UserCheck className="w-4 h-4 text-emerald-700" />
+                        <span>{z.coordinator_name}</span>
+                      </div>
+                      {z.coordinator_email && (
+                        <div className="text-gray-500 text-[11px] pl-6">{z.coordinator_email}</div>
+                      )}
+                      {z.coordinator_phone && (
+                        <div className="text-gray-500 text-[11px] pl-6">{z.coordinator_phone}</div>
+                      )}
+                      {z.start_date && (
+                        <div className="text-gray-400 text-[10px] pl-6">
+                          Appointed: {new Date(z.start_date).toLocaleDateString("en-NG")}
+                        </div>
+                      )}
+                    </div>
+                  ) : (
+                    <div className="space-y-3 text-xs border-t border-amber-200 pt-3 text-amber-900">
+                      <p className="text-[11px] text-amber-800">
+                        No active zonal coordinator is assigned to {z.zone_name}.
+                      </p>
+                      <Link
+                        href="/admin/leadership"
+                        className="inline-flex items-center px-3 py-1.5 rounded-lg bg-amber-600 hover:bg-amber-700 text-white font-bold text-xs transition"
+                      >
+                        Appoint Zonal Leader <ArrowRight className="w-3.5 h-3.5 ml-1" />
+                      </Link>
+                    </div>
+                  )}
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      )}
+
+      {/* 5. TAB CONTENT: State Coordinators (36 States + FCT) */}
+      {activeTab === "states" && (
+        <div className="space-y-6">
+          <div className="flex flex-col sm:flex-row justify-between sm:items-center gap-4">
+            <div>
+              <h2 className="text-xl font-bold text-gray-900">
+                State & FCT Leadership Oversight ({stats.covered_states} of 37 Assigned)
+              </h2>
+              <p className="text-xs text-gray-600">
+                Complete roster of state coordinators across all 36 States and the Federal Capital Territory.
+              </p>
             </div>
-            <div className="text-2xl font-black text-gray-900">
-              {draftQueue}
+            <Link
+              href="/admin/leadership"
+              className="inline-flex items-center px-4 py-2 bg-emerald-800 hover:bg-emerald-700 text-white text-xs font-bold rounded-lg transition"
+            >
+              <ShieldCheck className="w-4 h-4 mr-1.5" />
+              Appoint / Replace State Coordinators
+            </Link>
+          </div>
+
+          {/* Search & Zone Filter Bar */}
+          <div className="flex flex-col sm:flex-row gap-4 bg-white p-4 rounded-xl border border-gray-200 shadow-sm">
+            <div className="relative flex-1">
+              <Search className="w-4 h-4 text-gray-400 absolute left-3 top-3" />
+              <input
+                type="text"
+                placeholder="Search state name, code, or coordinator..."
+                value={stateSearch}
+                onChange={(e) => setStateSearch(e.target.value)}
+                className="w-full pl-9 pr-4 py-2 border border-gray-200 rounded-lg text-xs focus:ring-emerald-500 focus:border-emerald-500"
+              />
             </div>
-            <p className="text-xs text-gray-600">
-              Proposed local sanitation venues awaiting review and publication.
-            </p>
+            <div className="flex items-center gap-2">
+              <Filter className="w-4 h-4 text-gray-500" />
+              <select
+                value={selectedZoneFilter}
+                onChange={(e) => setSelectedZoneFilter(e.target.value)}
+                className="border border-gray-200 rounded-lg text-xs py-2 px-3 focus:ring-emerald-500 focus:border-emerald-500 bg-white"
+              >
+                <option value="all">All Geopolitical Zones</option>
+                <option value="NC">North Central (NC)</option>
+                <option value="NE">North East (NE)</option>
+                <option value="NW">North West (NW)</option>
+                <option value="SE">South East (SE)</option>
+                <option value="SS">South South (SS)</option>
+                <option value="SW">South West (SW)</option>
+              </select>
+            </div>
+          </div>
+
+          {/* States Table */}
+          <div className="bg-white rounded-2xl border border-gray-200 shadow-sm overflow-hidden">
+            <table className="min-w-full divide-y divide-gray-200 text-xs">
+              <thead className="bg-gray-50 text-gray-500 font-bold uppercase">
+                <tr>
+                  <th className="px-4 py-3 text-left">State / Territory</th>
+                  <th className="px-4 py-3 text-left">Zone</th>
+                  <th className="px-4 py-3 text-left">Status</th>
+                  <th className="px-4 py-3 text-left">Appointed Coordinator</th>
+                  <th className="px-4 py-3 text-left">Contact Info</th>
+                  <th className="px-4 py-3 text-right">Action</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-gray-100">
+                {filteredStates.map((st) => {
+                  const isAssigned = Boolean(st.coordinator_name);
+                  return (
+                    <tr key={st.state_id} className="hover:bg-gray-50 transition">
+                      <td className="px-4 py-3 font-bold text-gray-900">
+                        {st.state_name}
+                        {st.is_fct && (
+                          <span className="ml-1.5 px-1.5 py-0.5 rounded text-[10px] bg-emerald-100 text-emerald-800 font-semibold">
+                            FCT
+                          </span>
+                        )}
+                        <div className="text-[10px] text-gray-400 font-normal">Code: {st.state_code}</div>
+                      </td>
+                      <td className="px-4 py-3 font-semibold text-gray-600">{st.zone_code}</td>
+                      <td className="px-4 py-3">
+                        <Badge variant={isAssigned ? "success" : "warning"} size="sm">
+                          {isAssigned ? "ASSIGNED" : "VACANT"}
+                        </Badge>
+                      </td>
+                      <td className="px-4 py-3 font-medium text-gray-800">
+                        {st.coordinator_name || <span className="text-gray-400 italic">No coordinator assigned</span>}
+                      </td>
+                      <td className="px-4 py-3 text-gray-500">
+                        {st.coordinator_email && <div>{st.coordinator_email}</div>}
+                        {st.coordinator_phone && <div>{st.coordinator_phone}</div>}
+                      </td>
+                      <td className="px-4 py-3 text-right">
+                        <Link
+                          href="/admin/leadership"
+                          className="text-xs font-bold text-emerald-700 hover:text-emerald-900"
+                        >
+                          {isAssigned ? "Replace" : "Appoint"}
+                        </Link>
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      )}
+
+      {/* 6. TAB CONTENT: LGA Coordinators (774 LGAs) */}
+      {activeTab === "lgas" && (
+        <div className="space-y-6">
+          <div className="flex flex-col sm:flex-row justify-between sm:items-center gap-4">
+            <div>
+              <h2 className="text-xl font-bold text-gray-900">
+                Local Government Area Leadership ({stats.covered_lgas} of 774 Represented)
+              </h2>
+              <p className="text-xs text-gray-600">
+                Grassroots coordinator and representative coverage across Nigeria's 774 Local Government Areas.
+              </p>
+            </div>
+            <Link
+              href="/admin/leadership"
+              className="inline-flex items-center px-4 py-2 bg-emerald-800 hover:bg-emerald-700 text-white text-xs font-bold rounded-lg transition"
+            >
+              <ShieldCheck className="w-4 h-4 mr-1.5" />
+              Manage LGA Appointments
+            </Link>
+          </div>
+
+          {/* State Selector & LGA Search */}
+          <div className="flex flex-col sm:flex-row gap-4 bg-white p-4 rounded-xl border border-gray-200 shadow-sm">
+            <div className="w-full sm:w-72">
+              <label className="block text-[11px] font-bold text-gray-700 uppercase mb-1">
+                Select State to Inspect LGAs:
+              </label>
+              <select
+                value={selectedStateForLga}
+                onChange={(e) => setSelectedStateForLga(e.target.value)}
+                className="w-full border border-gray-200 rounded-lg text-xs py-2 px-3 focus:ring-emerald-500 focus:border-emerald-500 bg-white"
+              >
+                {stateCoverage.map((st) => (
+                  <option key={st.state_id} value={st.state_id}>
+                    {st.state_name} ({st.zone_code})
+                  </option>
+                ))}
+              </select>
+            </div>
+
+            <div className="flex-1">
+              <label className="block text-[11px] font-bold text-gray-700 uppercase mb-1">
+                Filter LGA by Name / Coordinator:
+              </label>
+              <div className="relative">
+                <Search className="w-4 h-4 text-gray-400 absolute left-3 top-2.5" />
+                <input
+                  type="text"
+                  placeholder="Filter local councils..."
+                  value={lgaSearch}
+                  onChange={(e) => setLgaSearch(e.target.value)}
+                  className="w-full pl-9 pr-4 py-2 border border-gray-200 rounded-lg text-xs focus:ring-emerald-500 focus:border-emerald-500"
+                />
+              </div>
+            </div>
+          </div>
+
+          {/* LGA Table */}
+          <div className="bg-white rounded-2xl border border-gray-200 shadow-sm overflow-hidden">
+            {loadingLgas ? (
+              <div className="p-8">
+                <Spinner text="Loading local government councils..." />
+              </div>
+            ) : filteredLgas.length === 0 ? (
+              <div className="p-8 text-center text-xs text-gray-500">
+                No local government councils match your search query.
+              </div>
+            ) : (
+              <table className="min-w-full divide-y divide-gray-200 text-xs">
+                <thead className="bg-gray-50 text-gray-500 font-bold uppercase">
+                  <tr>
+                    <th className="px-4 py-3 text-left">Local Council Name</th>
+                    <th className="px-4 py-3 text-left">Type</th>
+                    <th className="px-4 py-3 text-left">Status</th>
+                    <th className="px-4 py-3 text-left">Coordinator / Representative</th>
+                    <th className="px-4 py-3 text-left">Contact Info</th>
+                    <th className="px-4 py-3 text-right">Action</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-gray-100">
+                  {filteredLgas.map((lg) => {
+                    const isAssigned = Boolean(lg.coordinator_name);
+                    return (
+                      <tr key={lg.lga_id} className="hover:bg-gray-50 transition">
+                        <td className="px-4 py-3 font-bold text-gray-900">{lg.lga_name}</td>
+                        <td className="px-4 py-3 text-gray-500">
+                          {lg.is_area_council ? "Area Council" : "LGA"}
+                        </td>
+                        <td className="px-4 py-3">
+                          <Badge variant={isAssigned ? "success" : "warning"} size="sm">
+                            {isAssigned ? "ASSIGNED" : "VACANT"}
+                          </Badge>
+                        </td>
+                        <td className="px-4 py-3 font-medium text-gray-800">
+                          {lg.coordinator_name || (
+                            <span className="text-gray-400 italic">No representative</span>
+                          )}
+                        </td>
+                        <td className="px-4 py-3 text-gray-500">
+                          {lg.coordinator_email && <div>{lg.coordinator_email}</div>}
+                          {lg.coordinator_phone && <div>{lg.coordinator_phone}</div>}
+                        </td>
+                        <td className="px-4 py-3 text-right">
+                          <Link
+                            href="/admin/leadership"
+                            className="text-xs font-bold text-emerald-700 hover:text-emerald-900"
+                          >
+                            {isAssigned ? "Replace" : "Appoint"}
+                          </Link>
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            )}
+          </div>
+        </div>
+      )}
+
+      {/* 7. TAB CONTENT: Member Management */}
+      {activeTab === "members" && (
+        <div className="space-y-6">
+          <div className="flex justify-between items-center">
+            <div>
+              <h2 className="text-xl font-bold text-gray-900">Member Management Navigation</h2>
+              <p className="text-xs text-gray-600">
+                Nationwide member verification, identity safeguarding, and geographic registration distribution.
+              </p>
+            </div>
+            <Link
+              href="/admin/audit"
+              className="inline-flex items-center text-xs font-bold text-emerald-700 hover:text-emerald-900"
+            >
+              View Member Audit Events <ArrowRight className="w-3.5 h-3.5 ml-1" />
+            </Link>
+          </div>
+
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+            <div className="bg-white p-6 rounded-2xl border border-gray-200 shadow-sm space-y-3">
+              <span className="text-xs text-gray-500 font-bold uppercase">Total Registered</span>
+              <div className="text-4xl font-black text-gray-900">{stats.total_members.toLocaleString()}</div>
+              <p className="text-xs text-gray-600">All member accounts created across Nigeria.</p>
+            </div>
+
+            <div className="bg-white p-6 rounded-2xl border border-gray-200 shadow-sm space-y-3">
+              <span className="text-xs text-emerald-600 font-bold uppercase">Fully Verified</span>
+              <div className="text-4xl font-black text-emerald-700">{stats.verified_members.toLocaleString()}</div>
+              <p className="text-xs text-gray-600">Verified via contact OTP or secure email confirmation.</p>
+            </div>
+
+            <div className="bg-white p-6 rounded-2xl border border-gray-200 shadow-sm space-y-3">
+              <span className="text-xs text-amber-600 font-bold uppercase">Pending Verification</span>
+              <div className="text-4xl font-black text-amber-600">
+                {stats.pending_member_verifications.toLocaleString()}
+              </div>
+              <p className="text-xs text-gray-600">Members awaiting phone or email token verification.</p>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* 8. TAB CONTENT: Activities & Cleanups */}
+      {activeTab === "activities" && (
+        <div className="space-y-6">
+          <div className="flex justify-between items-center">
+            <div>
+              <h2 className="text-xl font-bold text-gray-900">Activities & Cleanups Oversight</h2>
+              <p className="text-xs text-gray-600">
+                Direct access to environmental cleanup campaigns, venue proposals, and volunteer participation reviews.
+              </p>
+            </div>
             <Link
               href="/admin/activities"
-              className="inline-flex items-center text-xs font-bold text-emerald-800 hover:text-emerald-950 pt-2"
+              className="inline-flex items-center px-4 py-2 bg-emerald-800 hover:bg-emerald-700 text-white text-xs font-bold rounded-lg transition"
             >
-              Inspect & Publish Venues
-              <ArrowRight className="w-3.5 h-3.5 ml-1" />
+              Open Venue Manager <ArrowRight className="w-3.5 h-3.5 ml-1.5" />
             </Link>
           </div>
 
-          <div className="bg-white p-5 rounded-xl border border-gray-200 shadow-sm space-y-3">
-            <div className="flex justify-between items-start">
-              <span className="text-xs text-gray-500 font-semibold uppercase">
-                Appeals Queue
-              </span>
-              <Badge variant={appealsQueue > 0 ? "danger" : "neutral"}>
-                {appealsQueue} appeals
-              </Badge>
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+            <div className="bg-white p-6 rounded-2xl border border-gray-200 shadow-sm space-y-3">
+              <span className="text-xs text-gray-500 font-bold uppercase">Upcoming Cleanups</span>
+              <div className="text-3xl font-black text-gray-900">{stats.upcoming_cleanups_count}</div>
+              <p className="text-xs text-gray-600">Scheduled activities open for public volunteer sign-up.</p>
+              <Link href="/admin/activities" className="text-xs font-bold text-emerald-700 hover:text-emerald-900">
+                View Venues &rarr;
+              </Link>
             </div>
-            <div className="text-2xl font-black text-gray-900">
-              {appealsQueue}
+
+            <div className="bg-white p-6 rounded-2xl border border-gray-200 shadow-sm space-y-3">
+              <span className="text-xs text-gray-500 font-bold uppercase">Draft Venues In Review</span>
+              <div className="text-3xl font-black text-gray-900">{stats.draft_venues_review_queue}</div>
+              <p className="text-xs text-gray-600">Local venue proposals awaiting coordinator publication.</p>
+              <Link href="/admin/activities" className="text-xs font-bold text-emerald-700 hover:text-emerald-900">
+                Inspect Drafts &rarr;
+              </Link>
             </div>
-            <p className="text-xs text-gray-600">
-              Rejected attendance claims appealed by members.
-            </p>
+
+            <div className="bg-white p-6 rounded-2xl border border-gray-200 shadow-sm space-y-3">
+              <span className="text-xs text-gray-500 font-bold uppercase">Participation Review Queue</span>
+              <div className="text-3xl font-black text-gray-900">{stats.unverified_participations_queue}</div>
+              <p className="text-xs text-gray-600">Volunteer attendance claims pending verification.</p>
+              <Link href="/admin/reviews" className="text-xs font-bold text-emerald-700 hover:text-emerald-900">
+                Review Claims &rarr;
+              </Link>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* 9. TAB CONTENT: Marketplace & Inventory */}
+      {activeTab === "marketplace" && (
+        <div className="space-y-6">
+          <div className="flex justify-between items-center">
+            <div>
+              <h2 className="text-xl font-bold text-gray-900">Marketplace & Inventory Oversight</h2>
+              <p className="text-xs text-gray-600">
+                Multi-vendor enterprise governance, movement sanitation supplies, warehouse stock, and dispute arbitration.
+              </p>
+            </div>
+            <div className="flex gap-2">
+              <Link
+                href="/admin/marketplace"
+                className="px-3.5 py-2 bg-emerald-800 hover:bg-emerald-700 text-white text-xs font-bold rounded-lg transition"
+              >
+                Marketplace Workspace
+              </Link>
+              <Link
+                href="/admin/inventory"
+                className="px-3.5 py-2 bg-emerald-100 hover:bg-emerald-200 text-emerald-900 text-xs font-bold rounded-lg transition"
+              >
+                Inventory Logistics
+              </Link>
+            </div>
+          </div>
+
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+            <div className="bg-white p-6 rounded-2xl border border-gray-200 shadow-sm space-y-3">
+              <div className="flex items-center gap-2">
+                <Store className="w-5 h-5 text-emerald-700" />
+                <h3 className="font-bold text-gray-900 text-sm">Ratels Multi-Vendor Marketplace</h3>
+              </div>
+              <p className="text-xs text-gray-600 leading-relaxed">
+                Vendor business onboarding, product approvals, order fulfillment tracking, multi-vendor shipments, and customer dispute resolution.
+              </p>
+              <Link href="/admin/marketplace" className="inline-flex items-center text-xs font-bold text-emerald-700 hover:text-emerald-900">
+                Open Marketplace Oversight <ArrowRight className="w-3.5 h-3.5 ml-1" />
+              </Link>
+            </div>
+
+            <div className="bg-white p-6 rounded-2xl border border-gray-200 shadow-sm space-y-3">
+              <div className="flex items-center gap-2">
+                <Boxes className="w-5 h-5 text-emerald-700" />
+                <h3 className="font-bold text-gray-900 text-sm">Inventory & Materials Distribution</h3>
+              </div>
+              <p className="text-xs text-gray-600 leading-relaxed">
+                Central movement supplies, warehouse stock monitoring, LGA branch allocations, and delivery transit verification.
+              </p>
+              <Link href="/admin/inventory" className="inline-flex items-center text-xs font-bold text-emerald-700 hover:text-emerald-900">
+                Open Inventory Logistics <ArrowRight className="w-3.5 h-3.5 ml-1" />
+              </Link>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* 10. TAB CONTENT: Financial Reporting */}
+      {activeTab === "finance" && (
+        <div className="space-y-6">
+          <div className="flex justify-between items-center">
+            <div>
+              <h2 className="text-xl font-bold text-gray-900">Financial Reporting & Accountability</h2>
+              <p className="text-xs text-gray-600">
+                Official double-entry general ledger, restricted financial statements, budget approvals, and audit trail.
+              </p>
+            </div>
             <Link
-              href="/admin/reviews"
-              className="inline-flex items-center text-xs font-bold text-emerald-800 hover:text-emerald-950 pt-2"
+              href="/admin/finance"
+              className="inline-flex items-center px-4 py-2 bg-emerald-800 hover:bg-emerald-700 text-white text-xs font-bold rounded-lg transition"
             >
-              Review Appeals
-              <ArrowRight className="w-3.5 h-3.5 ml-1" />
+              <DollarSign className="w-4 h-4 mr-1.5" />
+              General Ledger Workspace
             </Link>
           </div>
-        </div>
-      </div>
 
-      {/* Real Metric Totals */}
-      <div className="space-y-4">
-        <h2 className="text-lg font-bold text-gray-900 flex items-center gap-2">
-          <LayoutDashboard className="w-5 h-5 text-emerald-700" />
-          Jurisdiction Metrics (Derived from Live Database)
-        </h2>
-
-        <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-          <div className="bg-white p-4 rounded-xl border border-gray-200 shadow-sm text-xs space-y-1">
-            <span className="text-gray-500">Registered Members</span>
-            <div className="text-xl font-bold text-gray-900">{totalMembers}</div>
-            <span className="text-[10px] text-gray-400">Total movement members</span>
-          </div>
-
-          <div className="bg-white p-4 rounded-xl border border-gray-200 shadow-sm text-xs space-y-1">
-            <span className="text-gray-500">Pending Verification</span>
-            <div className="text-xl font-bold text-gray-900">{pendingVerifications}</div>
-            <span className="text-[10px] text-gray-400">Awaiting contact verify</span>
-          </div>
-
-          <div className="bg-white p-4 rounded-xl border border-gray-200 shadow-sm text-xs space-y-1">
-            <span className="text-gray-500">Active Coordinators</span>
-            <div className="text-xl font-bold text-gray-900">{activeCoordinators}</div>
-            <span className="text-[10px] text-gray-400">Authorized appointments</span>
-          </div>
-
-          <div className="bg-white p-4 rounded-xl border border-gray-200 shadow-sm text-xs space-y-1">
-            <span className="text-gray-500">Published Venues</span>
-            <div className="text-xl font-bold text-gray-900">{publishedVenues}</div>
-            <span className="text-[10px] text-gray-400">Confirmed activities</span>
-          </div>
-        </div>
-      </div>
-
-      {/* Admin Modules Navigation */}
-      <div className="space-y-4">
-        <h2 className="text-lg font-bold text-gray-900">Administration Sections</h2>
-
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-6">
-          <Link
-            href="/admin/activities"
-            className="p-5 bg-white rounded-xl border border-gray-200 hover:border-emerald-500 shadow-sm space-y-2 group transition"
-          >
-            <div className="w-9 h-9 rounded-lg bg-emerald-50 text-emerald-800 flex items-center justify-center font-bold">
-              <Calendar className="w-5 h-5" />
-            </div>
-            <h3 className="font-bold text-gray-900 text-sm group-hover:text-emerald-800 transition">
-              Cleanups & Venue Management
-            </h3>
-            <p className="text-xs text-gray-600 leading-relaxed">
-              Create venue drafts, verify local facilities, reschedule instances, and publish activities for member sign-up.
-            </p>
-          </Link>
-
-          <Link
-            href="/admin/reviews"
-            className="p-5 bg-white rounded-xl border border-gray-200 hover:border-emerald-500 shadow-sm space-y-2 group transition"
-          >
-            <div className="w-9 h-9 rounded-lg bg-emerald-50 text-emerald-800 flex items-center justify-center font-bold">
-              <FileCheck2 className="w-5 h-5" />
-            </div>
-            <h3 className="font-bold text-gray-900 text-sm group-hover:text-emerald-800 transition">
-              Participation Review Queue
-            </h3>
-            <p className="text-xs text-gray-600 leading-relaxed">
-              Verify attendance claims, record reasons for rejections, resolve appeals, and manage First Participation badges.
-            </p>
-          </Link>
-
-          <Link
-            href="/admin/leadership"
-            className="p-5 bg-white rounded-xl border border-gray-200 hover:border-emerald-500 shadow-sm space-y-2 group transition"
-          >
-            <div className="w-9 h-9 rounded-lg bg-emerald-50 text-emerald-800 flex items-center justify-center font-bold">
-              <ShieldCheck className="w-5 h-5" />
-            </div>
-            <h3 className="font-bold text-gray-900 text-sm group-hover:text-emerald-800 transition">
-              Leadership & Appointments
-            </h3>
-            <p className="text-xs text-gray-600 leading-relaxed">
-              View appointments by state and zone, track term dates, record handovers, and change active/acting/revoked statuses.
-            </p>
-          </Link>
-
-          <Link
-            href="/admin/finance"
-            className="p-5 bg-white rounded-xl border border-gray-200 hover:border-emerald-500 shadow-sm space-y-2 group transition"
-          >
-            <div className="w-9 h-9 rounded-lg bg-emerald-50 text-emerald-800 flex items-center justify-center font-bold">
-              <DollarSign className="w-5 h-5" />
-            </div>
-            <h3 className="font-bold text-gray-900 text-sm group-hover:text-emerald-800 transition">
-              Financial Documentation & Ledger
-            </h3>
-            <p className="text-xs text-gray-600 leading-relaxed">
-              Official double-entry fund movements, balanced general ledger, cash commitments, printable vouchers, and Super Admin clearances.
-            </p>
-          </Link>
-
-          <Link
-            href="/admin/inventory"
-            className="p-5 bg-white rounded-xl border border-gray-200 hover:border-emerald-500 shadow-sm space-y-2 group transition"
-          >
-            <div className="w-9 h-9 rounded-lg bg-emerald-50 text-emerald-800 flex items-center justify-center font-bold">
-              <Boxes className="w-5 h-5" />
-            </div>
-            <h3 className="font-bold text-gray-900 text-sm group-hover:text-emerald-800 transition">
-              Inventory & Material Distribution
-            </h3>
-            <p className="text-xs text-gray-600 leading-relaxed">
-              Manage operational movement supplies, track nationwide warehouses, allocate stock, monitor shipments in transit, and resolve discrepancies.
-            </p>
-          </Link>
-
-          <Link
-            href="/admin/marketplace"
-            className="p-5 bg-white rounded-xl border border-gray-200 hover:border-emerald-500 shadow-sm space-y-2 group transition"
-          >
-            <div className="w-9 h-9 rounded-lg bg-emerald-50 text-emerald-800 flex items-center justify-center font-bold">
-              <Store className="w-5 h-5" />
-            </div>
-            <h3 className="font-bold text-gray-900 text-sm group-hover:text-emerald-800 transition">
-              Ratels Marketplace
-            </h3>
-            <p className="text-xs text-gray-600 leading-relaxed">
-              Nationwide vendor governance, multi-seller product catalogue, order tracking, escrow reconciliations, and dispute arbitration.
-            </p>
-          </Link>
-
-          <Link
-            href="/admin/careers"
-            className="p-5 bg-white rounded-xl border border-gray-200 hover:border-emerald-500 shadow-sm space-y-2 group transition"
-          >
-            <div className="w-9 h-9 rounded-lg bg-emerald-50 text-emerald-800 flex items-center justify-center font-bold">
-              <Briefcase className="w-5 h-5" />
-            </div>
-            <h3 className="font-bold text-gray-900 text-sm group-hover:text-emerald-800 transition">
-              Ratels Careers & Job Opportunities
-            </h3>
-            <p className="text-xs text-gray-600 leading-relaxed">
-              Employer verification, job vacancy moderation, transparent recruitment oversight, and fair rules-based candidate matching.
-            </p>
-          </Link>
-
-          <Link
-            href="/admin/audit"
-            className="p-5 bg-white rounded-xl border border-gray-200 hover:border-emerald-500 shadow-sm space-y-2 group transition"
-          >
-            <div className="w-9 h-9 rounded-lg bg-emerald-50 text-emerald-800 flex items-center justify-center font-bold">
-              <History className="w-5 h-5" />
-            </div>
-            <h3 className="font-bold text-gray-900 text-sm group-hover:text-emerald-800 transition">
-              System Audit History
-            </h3>
-            <p className="text-xs text-gray-600 leading-relaxed">
-              Inspect immutable audit records of administrative approvals, venue updates, and access controls.
-            </p>
-          </Link>
-
-          <Link
-            href="/admin/foundation"
-            className="p-5 bg-white rounded-xl border border-gray-200 hover:border-emerald-500 shadow-sm space-y-2 group transition"
-          >
-            <div className="w-9 h-9 rounded-lg bg-emerald-50 text-emerald-800 flex items-center justify-center font-bold">
-              <Building className="w-5 h-5" />
-            </div>
-            <h3 className="font-bold text-gray-900 text-sm group-hover:text-emerald-800 transition">
-              Foundation & Bank Accounts
-            </h3>
-            <p className="text-xs text-gray-600 leading-relaxed">
-              Configure Martins Vincent Otse Foundation settings and submit bank account versions for dual verification.
-            </p>
-          </Link>
-
-          <Link
-            href="/admin/hero"
-            className="p-5 bg-white rounded-xl border border-gray-200 hover:border-emerald-500 shadow-sm space-y-2 group transition"
-          >
-            <div className="w-9 h-9 rounded-lg bg-emerald-50 text-emerald-800 flex items-center justify-center font-bold">
-              <Film className="w-5 h-5" />
-            </div>
-            <h3 className="font-bold text-gray-900 text-sm group-hover:text-emerald-800 transition">
-              Homepage Hero Media
-            </h3>
-            <p className="text-xs text-gray-600 leading-relaxed">
-              Upload, preview, publish, toggle, or remove the dynamic HTML5 video background for the public homepage hero section.
-            </p>
-          </Link>
-
-          <Link
-            href="/admin/projects"
-            className="p-5 bg-white rounded-xl border border-gray-200 hover:border-emerald-500 shadow-sm space-y-2 group transition"
-          >
-            <div className="w-9 h-9 rounded-lg bg-emerald-50 text-emerald-800 flex items-center justify-center font-bold">
-              <FolderKanban className="w-5 h-5" />
-            </div>
-            <h3 className="font-bold text-gray-900 text-sm group-hover:text-emerald-800 transition">
-              Community Projects & Requests
-            </h3>
-            <p className="text-xs text-gray-600 leading-relaxed">
-              Review neighborhood requests, authorize projects, manage verified milestones, and audit double-entry project funding.
-            </p>
-          </Link>
-
-          <Link
-            href="/admin/gallery"
-            className="p-5 bg-white rounded-xl border border-gray-200 hover:border-emerald-500 shadow-sm space-y-2 group transition"
-          >
-            <div className="w-9 h-9 rounded-lg bg-emerald-50 text-emerald-800 flex items-center justify-center font-bold">
-              <Camera className="w-5 h-5" />
-            </div>
-            <h3 className="font-bold text-gray-900 text-sm group-hover:text-emerald-800 transition">
-              Event Media Gallery & Moderation
-            </h3>
-            <p className="text-xs text-gray-600 leading-relaxed">
-              Moderate volunteer cleanup photos and videos, verify consent, perform automated EXIF/GPS metadata sanitization, and resolve takedowns.
-            </p>
-          </Link>
-
-          <Link
-            href="/admin/communications"
-            className="p-5 bg-white rounded-xl border border-gray-200 hover:border-emerald-500 shadow-sm space-y-2 group transition"
-          >
-            <div className="w-9 h-9 rounded-lg bg-emerald-50 text-emerald-800 flex items-center justify-center font-bold">
-              <Send className="w-5 h-5" />
-            </div>
-            <h3 className="font-bold text-gray-900 text-sm group-hover:text-emerald-800 transition">
-              Communications & Delivery Operations
-            </h3>
-            <p className="text-xs text-gray-600 leading-relaxed">
-              Monitor the transactional outbox queue, Brevo email & Termii SMS delivery logs, failed message retries, and cleanup reminder schedules.
-            </p>
-          </Link>
-
-          <Link
-            href="/admin/safeguarding"
-            className="p-5 bg-white rounded-xl border border-amber-300 hover:border-amber-500 shadow-sm space-y-2 group transition ring-1 ring-amber-200"
-          >
-            <div className="w-9 h-9 rounded-lg bg-amber-50 text-amber-800 flex items-center justify-center font-bold">
-              <ShieldAlert className="w-5 h-5 text-amber-700" />
-            </div>
-            <div className="flex items-center gap-2">
-              <h3 className="font-bold text-gray-900 text-sm group-hover:text-amber-800 transition">
-                Confidential Safeguarding & Cases
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+            <div className="bg-white p-6 rounded-2xl border border-gray-200 shadow-sm space-y-3">
+              <h3 className="font-bold text-gray-900 text-sm flex items-center gap-2">
+                <DollarSign className="w-5 h-5 text-emerald-700" />
+                Super Admin Financial Authorizations
               </h3>
-              <Badge variant="warning" size="sm">RESTRICTED</Badge>
+              <p className="text-xs text-gray-600 leading-relaxed">
+                Only the Super Admin may authorize staff disbursements, approve expenditure commitments, activate bank accounts, and certify reconciliation periods.
+              </p>
+              <Link href="/admin/finance" className="inline-flex items-center text-xs font-bold text-emerald-700 hover:text-emerald-900">
+                Review Financial Approvals <ArrowRight className="w-3.5 h-3.5 ml-1" />
+              </Link>
             </div>
-            <p className="text-xs text-gray-600 leading-relaxed">
-              Triage confidential member and public incident reports, manage encrypted case narratives, assign investigating officers, and enforce conflict recusal.
-            </p>
-          </Link>
 
-          <Link
-            href="/admin/reports"
-            className="p-5 bg-white rounded-xl border border-gray-200 hover:border-emerald-500 shadow-sm space-y-2 group transition"
-          >
-            <div className="w-9 h-9 rounded-lg bg-emerald-50 text-emerald-800 flex items-center justify-center font-bold">
-              <BarChart3 className="w-5 h-5" />
-            </div>
-            <div className="flex items-center gap-2">
-              <h3 className="font-bold text-gray-900 text-sm group-hover:text-emerald-800 transition">
-                Public Transparency & Reports
+            <div className="bg-white p-6 rounded-2xl border border-gray-200 shadow-sm space-y-3">
+              <h3 className="font-bold text-gray-900 text-sm flex items-center gap-2">
+                <BarChart3 className="w-5 h-5 text-emerald-700" />
+                Public Transparency Disclosures
               </h3>
-              <Badge variant="primary" size="sm">PHASE D</Badge>
+              <p className="text-xs text-gray-600 leading-relaxed">
+                Certified public disclosure reports generated from immutable general ledger balances across Nigeria.
+              </p>
+              <Link href="/admin/reports" className="inline-flex items-center text-xs font-bold text-emerald-700 hover:text-emerald-900">
+                Public Reports Subsystem <ArrowRight className="w-3.5 h-3.5 ml-1" />
+              </Link>
             </div>
-            <p className="text-xs text-gray-600 leading-relaxed">
-              Prepare, review, approve, and publish certified transparency reports across Nigeria, 6 Zones, 36 States, and 774 LGAs.
-            </p>
-          </Link>
+          </div>
         </div>
-      </div>
+      )}
+
+      {/* 11. TAB CONTENT: Audit Logs */}
+      {activeTab === "audit" && (
+        <div className="space-y-6">
+          <div className="flex justify-between items-center">
+            <div>
+              <h2 className="text-xl font-bold text-gray-900">Privileged System Audit Trail</h2>
+              <p className="text-xs text-gray-600">
+                Cryptographically recorded, append-only audit stream of administrative approvals and security events.
+              </p>
+            </div>
+            <Link
+              href="/admin/audit"
+              className="inline-flex items-center px-4 py-2 bg-emerald-800 hover:bg-emerald-700 text-white text-xs font-bold rounded-lg transition"
+            >
+              Full Interactive Audit Log <ArrowRight className="w-3.5 h-3.5 ml-1.5" />
+            </Link>
+          </div>
+
+          <div className="bg-white rounded-2xl border border-gray-200 shadow-sm overflow-hidden">
+            <table className="min-w-full divide-y divide-gray-200 text-xs">
+              <thead className="bg-gray-50 text-gray-500 font-bold uppercase">
+                <tr>
+                  <th className="px-4 py-3 text-left">Timestamp</th>
+                  <th className="px-4 py-3 text-left">Acting Administrator</th>
+                  <th className="px-4 py-3 text-left">Action</th>
+                  <th className="px-4 py-3 text-left">Target Entity</th>
+                  <th className="px-4 py-3 text-left">Scope / Jurisdiction</th>
+                  <th className="px-4 py-3 text-left">Details</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-gray-100 font-mono text-[11px]">
+                {stats.recent_audit_actions.map((ev) => (
+                  <tr key={ev.id} className="hover:bg-gray-50 transition">
+                    <td className="px-4 py-3 text-gray-500 whitespace-nowrap font-mono">
+                      {new Date(ev.created_at).toLocaleString("en-NG")}
+                    </td>
+                    <td className="px-4 py-3 font-sans font-semibold text-gray-900">
+                      {ev.actor_name}
+                      {ev.actor_role && (
+                        <span className="block text-[10px] text-emerald-700 font-mono">
+                          [{ev.actor_role}]
+                        </span>
+                      )}
+                    </td>
+                    <td className="px-4 py-3">
+                      <span className="px-2 py-0.5 rounded bg-gray-100 text-gray-800 font-bold">
+                        {ev.action}
+                      </span>
+                    </td>
+                    <td className="px-4 py-3 text-gray-700 font-mono">
+                      {ev.resource_type}: {ev.resource_id.slice(0, 8)}...
+                    </td>
+                    <td className="px-4 py-3 text-gray-600 font-sans">
+                      {ev.scope_type ? `${ev.scope_type} (${ev.scope_id || "national"})` : "National"}
+                    </td>
+                    <td className="px-4 py-3 text-gray-600 font-sans max-w-sm truncate" title={ev.details || ""}>
+                      {ev.details || "—"}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      )}
+
+      {/* 12. TAB CONTENT: System Administration */}
+      {activeTab === "system" && (
+        <div className="space-y-6">
+          <div>
+            <h2 className="text-xl font-bold text-gray-900">System Administration & Infrastructure Controls</h2>
+            <p className="text-xs text-gray-600">
+              Authoritative geography verification, emergency operational kill-switches, and database infrastructure status.
+            </p>
+          </div>
+
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+            {/* Geography Seeder Card */}
+            <div className="bg-white p-6 rounded-2xl border border-gray-200 shadow-sm space-y-4">
+              <div className="flex items-center gap-2">
+                <Database className="w-5 h-5 text-emerald-700" />
+                <h3 className="font-bold text-gray-900 text-sm">Authoritative Reference Geography</h3>
+              </div>
+              <p className="text-xs text-gray-600 leading-relaxed">
+                Nigerian geopolitical reference dataset: 6 Geopolitical Zones, 36 States + FCT (37 total), and 774 Local Government Areas / Area Councils.
+              </p>
+              <div className="flex flex-wrap gap-2 text-xs">
+                <Badge variant="neutral">{stats.total_zones} Zones</Badge>
+                <Badge variant="neutral">{stats.total_states} States/FCT</Badge>
+                <Badge variant="neutral">{stats.total_lgas} LGAs</Badge>
+              </div>
+              <div className="pt-2">
+                <button
+                  onClick={handleSeedGeography}
+                  disabled={seedingGeography}
+                  className="px-4 py-2 bg-emerald-800 hover:bg-emerald-700 text-white text-xs font-bold rounded-lg transition disabled:opacity-50 inline-flex items-center gap-2"
+                >
+                  {seedingGeography ? (
+                    <>
+                      <Spinner size="sm" /> Seeding Geography...
+                    </>
+                  ) : (
+                    <>
+                      <CheckCircle2 className="w-4 h-4" /> Verify & Seed Reference Geography
+                    </>
+                  )}
+                </button>
+              </div>
+            </div>
+
+            {/* Operational Kill-Switch & Circuit Breakers */}
+            <div className="bg-white p-6 rounded-2xl border border-gray-200 shadow-sm space-y-4">
+              <div className="flex items-center gap-2">
+                <ShieldAlert className="w-5 h-5 text-amber-700" />
+                <h3 className="font-bold text-gray-900 text-sm">Operational Safety & Circuit Breakers</h3>
+              </div>
+              <p className="text-xs text-gray-600 leading-relaxed">
+                Emergency operational controls configured on production services. In the event of upstream failure, payments can be disabled via the environment kill-switch.
+              </p>
+              <div className="space-y-2 text-xs">
+                <div className="flex justify-between items-center py-1 border-b border-gray-100">
+                  <span className="text-gray-600">Database Engine</span>
+                  <span className="font-semibold text-gray-900">Neon Serverless PostgreSQL 16</span>
+                </div>
+                <div className="flex justify-between items-center py-1 border-b border-gray-100">
+                  <span className="text-gray-600">Advisory Migration Lock</span>
+                  <span className="text-emerald-700 font-bold flex items-center gap-1">
+                    <Check className="w-3.5 h-3.5" /> Active (Distributed)
+                  </span>
+                </div>
+                <div className="flex justify-between items-center py-1 border-b border-gray-100">
+                  <span className="text-gray-600">Payment Circuit-Breaker</span>
+                  <span className="text-emerald-700 font-bold flex items-center gap-1">
+                    <Check className="w-3.5 h-3.5" /> Safe Disabled Mode Supported
+                  </span>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

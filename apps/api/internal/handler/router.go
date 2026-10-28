@@ -496,9 +496,21 @@ func NewRouter(p RouterParams) http.Handler {
 
 		// Admin Workspace
 		api.Route("/admin", func(adm chi.Router) {
-			adm.With(RequireRole("national_admin", "state_coordinator", "zonal_coordinator", "lga_representative")).Get("/overview", p.AdminHandler.GetOverview)
-			adm.With(RequireRole("national_admin")).Get("/audit-logs", p.AdminHandler.ListAuditLogs)
-			adm.With(RequireRole("super_admin", "national_admin")).Post("/geography/seed", p.AdminHandler.SeedGeography)
+			// Super Admin Dedicated Dashboard & Coverage Endpoints (Super Admin only)
+			adm.With(RequireRole("super_admin")).Get("/super/dashboard", p.AdminHandler.GetSuperAdminDashboard)
+			adm.With(RequireRole("super_admin")).Get("/super/coverage/zones", p.AdminHandler.ListZoneCoverage)
+			adm.With(RequireRole("super_admin")).Get("/super/coverage/states", p.AdminHandler.ListStateCoverage)
+			adm.With(RequireRole("super_admin")).Get("/super/coverage/lgas", p.AdminHandler.ListLGACoverage)
+
+			// Standard Overview for all coordinators
+			adm.With(RequireRole("national_admin", "state_coordinator", "zonal_coordinator", "lga_representative", "super_admin")).Get("/overview", p.AdminHandler.GetOverview)
+
+			// Privileged Audit Stream (Strictly restricted to Super Admin)
+			adm.With(RequireRole("super_admin")).Get("/audit-logs", p.AdminHandler.ListAuditLogs)
+			adm.With(RequireRole("super_admin")).Get("/audit", p.AdminHandler.ListAuditLogs)
+
+			// Geography Seeder (Super Admin only)
+			adm.With(RequireRole("super_admin")).Post("/geography/seed", p.AdminHandler.SeedGeography)
 
 			// Event Media Gallery & Moderation Administration
 			adm.Route("/gallery", func(admGal chi.Router) {

@@ -3,6 +3,7 @@ package handler
 import (
 	"net/http"
 	"strconv"
+	"strings"
 
 	"ratels-api/internal/service"
 )
@@ -51,6 +52,47 @@ func (h *AdminHandler) GetOverview(w http.ResponseWriter, r *http.Request) {
 	JSON(w, http.StatusOK, overview)
 }
 
+func (h *AdminHandler) GetSuperAdminDashboard(w http.ResponseWriter, r *http.Request) {
+	stats, err := h.adminService.GetSuperAdminDashboardStats(r.Context())
+	if err != nil {
+		ErrorJSON(w, http.StatusInternalServerError, "INTERNAL_ERROR", err.Error(), nil)
+		return
+	}
+
+	JSON(w, http.StatusOK, stats)
+}
+
+func (h *AdminHandler) ListZoneCoverage(w http.ResponseWriter, r *http.Request) {
+	coverage, err := h.adminService.ListZoneCoverage(r.Context())
+	if err != nil {
+		ErrorJSON(w, http.StatusInternalServerError, "INTERNAL_ERROR", err.Error(), nil)
+		return
+	}
+
+	JSON(w, http.StatusOK, coverage)
+}
+
+func (h *AdminHandler) ListStateCoverage(w http.ResponseWriter, r *http.Request) {
+	coverage, err := h.adminService.ListStateCoverage(r.Context())
+	if err != nil {
+		ErrorJSON(w, http.StatusInternalServerError, "INTERNAL_ERROR", err.Error(), nil)
+		return
+	}
+
+	JSON(w, http.StatusOK, coverage)
+}
+
+func (h *AdminHandler) ListLGACoverage(w http.ResponseWriter, r *http.Request) {
+	stateID := strings.TrimSpace(r.URL.Query().Get("state_id"))
+	coverage, err := h.adminService.ListLGACoverage(r.Context(), stateID)
+	if err != nil {
+		ErrorJSON(w, http.StatusInternalServerError, "INTERNAL_ERROR", err.Error(), nil)
+		return
+	}
+
+	JSON(w, http.StatusOK, coverage)
+}
+
 func (h *AdminHandler) ListAuditLogs(w http.ResponseWriter, r *http.Request) {
 	page := int32(1)
 	if pStr := r.URL.Query().Get("page"); pStr != "" {
@@ -76,7 +118,14 @@ func (h *AdminHandler) ListAuditLogs(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *AdminHandler) SeedGeography(w http.ResponseWriter, r *http.Request) {
-	res, err := h.adminService.SeedGeography(r.Context())
+	user := GetCurrentUser(r.Context())
+	var actorID, actorRole *string
+	if user != nil {
+		actorID = &user.ID
+		actorRole = &user.PrimaryRole
+	}
+	ip := r.RemoteAddr
+	res, err := h.adminService.SeedGeography(r.Context(), actorID, actorRole, &ip)
 	if err != nil {
 		ErrorJSON(w, http.StatusInternalServerError, "SEED_ERROR", err.Error(), nil)
 		return
@@ -84,4 +133,3 @@ func (h *AdminHandler) SeedGeography(w http.ResponseWriter, r *http.Request) {
 
 	JSON(w, http.StatusOK, res)
 }
-

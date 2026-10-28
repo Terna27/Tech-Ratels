@@ -113,7 +113,7 @@ func RunMigrations(ctx context.Context, pool *pgxpool.Pool) error {
 
 		log.Printf("[MIGRATION] Applying pending database migration: %s (version: %d)...\n", mf.filename, mf.version)
 
-		tx, err := pool.Begin(ctx)
+		tx, err := conn.Begin(ctx)
 		if err != nil {
 			return fmt.Errorf("failed to begin migration transaction for %s: %w", mf.filename, err)
 		}

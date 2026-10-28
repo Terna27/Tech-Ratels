@@ -12,7 +12,7 @@ import { Spinner } from "@/components/ui/Spinner";
 
 export default function AdminAuditPage() {
   const router = useRouter();
-  const { user, isCoordinator, isLoading } = useAuth();
+  const { user, isCoordinator, isSuperAdmin, isLoading } = useAuth();
 
   const [events, setEvents] = useState<AuditEvent[]>([]);
   const [loading, setLoading] = useState(true);
@@ -20,8 +20,8 @@ export default function AdminAuditPage() {
   const loadAudit = async () => {
     setLoading(true);
     try {
-      const data = await apiRequest<AuditEvent[]>("/admin/audit?limit=100");
-      setEvents(data || []);
+      const data = await apiRequest<any>("/admin/audit?limit=100");
+      setEvents(Array.isArray(data) ? data : (data?.items || []));
     } catch (err) {
       console.error("Failed to load audit history", err);
     } finally {
@@ -30,14 +30,14 @@ export default function AdminAuditPage() {
   };
 
   useEffect(() => {
-    if (!isLoading && (!user || !isCoordinator)) {
+    if (!isLoading && (!user || (!isCoordinator && !isSuperAdmin))) {
       router.push("/login?redirect=/admin/audit");
       return;
     }
-    if (user && isCoordinator) {
+    if (user) {
       loadAudit();
     }
-  }, [user, isCoordinator, isLoading, router]);
+  }, [user, isCoordinator, isSuperAdmin, isLoading, router]);
 
   if (isLoading || loading) return <Spinner text="Loading audit logs..." />;
 
