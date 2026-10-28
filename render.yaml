@@ -61,6 +61,13 @@ services:
         sync: false
       - key: PAYSTACK_PUBLIC_KEY
         sync: false
+      # Store subscriptions have independent rollout and real-money safeguards.
+      - key: STORE_SUBSCRIPTIONS_ENABLED
+        value: "false"
+      - key: STORE_SUBSCRIPTIONS_ALLOW_LIVE_PAYMENTS
+        value: "false"
+      - key: STORE_SUBSCRIPTIONS_PAYSTACK_SECRET_KEY
+        sync: false
       - key: R2_ACCOUNT_ID
         sync: false
       - key: R2_ACCESS_KEY_ID
@@ -155,6 +162,13 @@ services:
       - key: PAYSTACK_SECRET_KEY
         sync: false
       - key: PAYSTACK_PUBLIC_KEY
+        sync: false
+      # Store subscriptions have independent rollout and real-money safeguards.
+      - key: STORE_SUBSCRIPTIONS_ENABLED
+        value: "false"
+      - key: STORE_SUBSCRIPTIONS_ALLOW_LIVE_PAYMENTS
+        value: "false"
+      - key: STORE_SUBSCRIPTIONS_PAYSTACK_SECRET_KEY
         sync: false
       - key: R2_ACCOUNT_ID
         sync: false

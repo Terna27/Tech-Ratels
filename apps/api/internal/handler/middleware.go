@@ -95,7 +95,7 @@ func CSRFProtectionMiddleware(next http.Handler) http.Handler {
 		authType, _ := r.Context().Value(AuthTypeContextKey).(string)
 
 		// CSRF protection is strictly required for cookie-authenticated mutating requests
-		if isMutating && authType == "cookie" {
+		if isMutating && authType == "cookie" && r.URL.Path != "/api/v1/marketplace/subscriptions/webhooks/paystack" && r.URL.Path != "/api/v1/marketplace/webhooks/paystack" {
 			csrfCookie, err := r.Cookie("ratels_csrf")
 			if err != nil || csrfCookie.Value == "" {
 				ErrorJSON(w, http.StatusForbidden, "CSRF_TOKEN_MISSING", "CSRF token cookie missing", nil)

@@ -34,6 +34,11 @@ jobs:
       - run: go run ./cmd/migrate
       - run: go run ./cmd/seed
       - run: go test -p 1 ./...
+      - name: Store subscription transaction and concurrency tests
+        run: go test -race ./internal/subscription -count=1
+        env:
+          TEST_DATABASE_URL: postgres://postgres@127.0.0.1:5432/ratels_test?sslmode=disable
+      - run: go vet ./...
       - run: go build ./...
   frontend:
     runs-on: ubuntu-latest
@@ -50,6 +55,19 @@ jobs:
       - run: npm ci --no-audit --no-fund
       - run: npm test
       - run: npm run build
+      - name: Store subscription browser acceptance
+        run: |
+          npm run start -- -p 3008 -H 127.0.0.1 > /tmp/store-subscriptions-web.log 2>&1 &
+          WEB_PID=$!
+          trap 'kill "$WEB_PID" 2>/dev/null || true' EXIT
+          for n in $(seq 1 40); do
+            curl --max-time 2 --fail --silent http://127.0.0.1:3008/marketplace/subscriptions && break
+            sleep 0.5
+          done
+          node --experimental-strip-types --test test/store-subscriptions-browser.test.mjs
+        env:
+          TEST_WEB_URL: http://127.0.0.1:3008
+          CHROME_BIN: /usr/bin/google-chrome
   containers:
     runs-on: ubuntu-latest
     steps:

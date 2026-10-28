@@ -25,6 +25,7 @@ type RouterParams struct {
 	FinanceHandler          *FinanceHandler
 	InventoryHandler        *InventoryHandler
 	MarketplaceHandler      *MarketplaceHandler
+	SubscriptionHandler     *SubscriptionHandler
 	CareersHandler          *CareersHandler
 	HeroMediaHandler        *HeroMediaHandler
 	CommunityProjectHandler *CommunityProjectHandler
@@ -265,6 +266,10 @@ func NewRouter(p RouterParams) http.Handler {
 
 		// Ratels Marketplace (Blueprint v2.0 Section 07)
 		api.Route("/marketplace", func(mkt chi.Router) {
+			if p.SubscriptionHandler != nil {
+				p.SubscriptionHandler.Routes(mkt)
+			}
+
 			// Public Storefront
 			mkt.Get("/checkout/status", p.MarketplaceHandler.GetCheckoutStatus)
 			mkt.Get("/products", p.MarketplaceHandler.ListPublicProducts)

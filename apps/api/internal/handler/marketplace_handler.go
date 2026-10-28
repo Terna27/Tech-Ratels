@@ -17,12 +17,17 @@ import (
 )
 
 type MarketplaceHandler struct {
-	marketplaceService *service.MarketplaceService
-	cronSecret         string
+	marketplaceService  *service.MarketplaceService
+	cronSecret          string
+	subscriptionHandler *SubscriptionHandler
 }
 
 func NewMarketplaceHandler(marketplaceService *service.MarketplaceService) *MarketplaceHandler {
 	return &MarketplaceHandler{marketplaceService: marketplaceService}
+}
+
+func (h *MarketplaceHandler) SetSubscriptionHandler(sh *SubscriptionHandler) {
+	h.subscriptionHandler = sh
 }
 
 func (h *MarketplaceHandler) SetCronSecret(secret string) {
@@ -230,12 +235,24 @@ func (h *MarketplaceHandler) VerifyPayment(w http.ResponseWriter, r *http.Reques
 
 func (h *MarketplaceHandler) PaystackWebhook(w http.ResponseWriter, r *http.Request) {
 	signature := r.Header.Get("x-paystack-signature")
-	body, err := io.ReadAll(r.Body)
+	body, err := io.ReadAll(http.MaxBytesReader(w, r.Body, 1<<20))
 	if err != nil {
 		ErrorJSON(w, http.StatusBadRequest, "INVALID_REQUEST", "Cannot read request body", nil)
 		return
 	}
 
+	var envelope struct {
+		Data struct {
+			Reference            string `json:"reference"`
+			TransactionReference string `json:"transaction_reference"`
+		} `json:"data"`
+	}
+	_ = json.Unmarshal(body, &envelope)
+	if (strings.HasPrefix(envelope.Data.Reference, "sub_") || strings.HasPrefix(envelope.Data.TransactionReference, "sub_")) && h.subscriptionHandler != nil {
+		r.Body = io.NopCloser(strings.NewReader(string(body)))
+		h.subscriptionHandler.Webhook(w, r)
+		return
+	}
 	if err := h.marketplaceService.HandleWebhook(r.Context(), signature, body); err != nil {
 		// Log warning, return 400 for bad signature, 200 for idempotent handling
 		w.WriteHeader(http.StatusBadRequest)
@@ -771,7 +788,23 @@ func (h *MarketplaceHandler) GetSellerMetrics(w http.ResponseWriter, r *http.Req
 		ErrorJSON(w, http.StatusInternalServerError, "INTERNAL_ERROR", err.Error(), nil)
 		return
 	}
-	JSON(w, http.StatusOK, metrics)
+	available := true
+	if h.subscriptionHandler != nil {
+		business, err := h.marketplaceService.GetMyBusiness(r.Context(), user)
+		if err != nil {
+			subscriptionError(w, err)
+			return
+		}
+		available, err = h.subscriptionHandler.Service.AnalyticsAllowed(r.Context(), user, business.ID)
+		if err != nil {
+			subscriptionError(w, err)
+			return
+		}
+	}
+	JSON(w, http.StatusOK, struct {
+		*db.GetMarketplaceSellerOverviewMetricsRow
+		AnalyticsAvailable bool `json:"sales_analytics_available"`
+	}{metrics, available})
 }
 
 func (h *MarketplaceHandler) ListOrderShipments(w http.ResponseWriter, r *http.Request) {

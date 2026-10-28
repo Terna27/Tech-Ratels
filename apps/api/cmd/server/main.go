@@ -23,6 +23,7 @@ import (
 	"ratels-api/internal/seeder"
 	"ratels-api/internal/service"
 	"ratels-api/internal/storage"
+	"ratels-api/internal/subscription"
 	"ratels-api/internal/worker"
 )
 
@@ -188,6 +189,13 @@ func main() {
 		log.Println("WARNING: Termii credentials missing; SMS notifications will fail safely.")
 	}
 
+	subscriptionService := subscription.FromEnvironment(repo.Pool(), emailSender, cfg.FrontendBaseURL)
+	if err := subscriptionService.Configure(ctx); err != nil {
+		log.Fatalf("Configure store subscriptions: %v", err)
+	}
+	subscriptionService.Run(ctx)
+	subscriptionH := &handler.SubscriptionHandler{Service: subscriptionService}
+
 	notifService := service.NewNotificationService(repo, auditService, emailSender, smsSender, cfg.FrontendBaseURL)
 	cleanupService.SetNotificationService(notifService)
 	partService.SetNotificationService(notifService)
@@ -216,6 +224,7 @@ func main() {
 	inventoryH := handler.NewInventoryHandler(inventoryService)
 	marketplaceH := handler.NewMarketplaceHandler(marketplaceService)
 	marketplaceH.SetCronSecret(cfg.MarketplaceCronSecret)
+	marketplaceH.SetSubscriptionHandler(subscriptionH)
 	careersH := handler.NewCareersHandler(careersService)
 	heroMediaH := handler.NewHeroMediaHandler(heroMediaService)
 	communityProjectH := handler.NewCommunityProjectHandler(communityProjectService)
@@ -296,6 +305,7 @@ func main() {
 		FinanceHandler:          financeH,
 		InventoryHandler:        inventoryH,
 		MarketplaceHandler:      marketplaceH,
+		SubscriptionHandler:     subscriptionH,
 		CareersHandler:          careersH,
 		HeroMediaHandler:        heroMediaH,
 		CommunityProjectHandler: communityProjectH,

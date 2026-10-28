@@ -742,6 +742,8 @@ export default function SellerPortalPage() {
   if (business && (business.status === "pending_review" || business.status === "pending" || business.approval_status === "pending")) {
     return (
       <div className="max-w-2xl mx-auto px-4 py-16 text-center space-y-6">
+        <Link href="/marketplace/subscriptions" className="block text-emerald-700 underline">Choose a store subscription plan</Link>
+        <Link href="/marketplace/seller/subscription" className="block text-emerald-700 underline">Manage subscription and payment history</Link>
         <div className="w-16 h-16 bg-amber-100 rounded-full flex items-center justify-center mx-auto text-amber-700">
           <Clock className="w-8 h-8" />
         </div>
@@ -749,7 +751,7 @@ export default function SellerPortalPage() {
           Business Verification Under Review
         </h1>
         <p className="text-sm text-gray-600 max-w-md mx-auto">
-          Your enterprise profile for <span className="font-bold text-gray-900">{business.name}</span> has been received and is under administrative compliance review. Once approved, you can immediately publish products and receive orders.
+          Your enterprise profile for <span className="font-bold text-gray-900">{business.name}</span> has been received and is under administrative compliance review. Store approval and an active subscription (or rollout grace) are required to publish products and receive new orders.
         </p>
         <div className="p-4 bg-gray-50 border border-gray-200 rounded-2xl max-w-sm mx-auto text-xs text-left space-y-1.5">
           <div className="flex justify-between">
@@ -784,6 +786,7 @@ export default function SellerPortalPage() {
   // 3. Approved Seller Dashboard
   return (
     <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-10 space-y-8">
+<Link href="/marketplace/seller/subscription" className="text-emerald-700 underline">Manage store subscription</Link>
       {/* Header */}
       <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 border-b border-gray-200 pb-5">
         <div>
@@ -872,20 +875,20 @@ export default function SellerPortalPage() {
             <div className="bg-white p-5 rounded-2xl border border-gray-200 shadow-sm space-y-1">
               <span className="text-xs text-gray-500">Gross Sales Revenue</span>
               <div className="text-xl font-black text-gray-900">
-                ₦{metrics?.total_revenue_kobo ? (metrics.total_revenue_kobo / 100).toLocaleString() : "0"}
+                {metrics?.sales_analytics_available === false ? <Link href="/marketplace/subscriptions" className="text-sm underline">Business Store analytics</Link> : <>₦{metrics?.seller_gross_sales_kobo ? (metrics.seller_gross_sales_kobo / 100).toLocaleString() : "0"}</>}
               </div>
               <span className="text-[10px] text-emerald-700">Paid merchant orders</span>
             </div>
 
             <div className="bg-white p-5 rounded-2xl border border-gray-200 shadow-sm space-y-1">
               <span className="text-xs text-gray-500">Total Orders</span>
-              <div className="text-xl font-black text-gray-900">{metrics?.total_orders || orders.length}</div>
+              <div className="text-xl font-black text-gray-900">{metrics?.seller_orders_count || orders.length}</div>
               <span className="text-[10px] text-gray-400">All customer checkouts</span>
             </div>
 
             <div className="bg-white p-5 rounded-2xl border border-gray-200 shadow-sm space-y-1">
               <span className="text-xs text-gray-500">Active Products</span>
-              <div className="text-xl font-black text-gray-900">{metrics?.active_products || products.length}</div>
+              <div className="text-xl font-black text-gray-900">{metrics?.seller_products_count || products.length}</div>
               <span className="text-[10px] text-emerald-700">Published in catalog</span>
             </div>
 

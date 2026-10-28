@@ -4826,6 +4826,14 @@ func (s *MarketplaceService) GetSellerOverviewMetrics(ctx context.Context, user 
 	if err != nil {
 		return nil, err
 	}
+	var analytics bool
+	err = s.repo.Pool().QueryRow(ctx, `SELECT NOT cfg.enabled OR (coalesce(sub.status,'')<>'suspended' AND ((coalesce(sub.legacy_store,false) AND now()<cfg.enabled_at+interval '30 days') OR EXISTS(SELECT 1 FROM marketplace_subscription_terms t WHERE t.business_id=$1 AND t.plan_code='business' AND NOT t.voided AND t.starts_at<=now() AND t.expires_at>now()))) FROM marketplace_subscription_settings cfg LEFT JOIN marketplace_store_subscriptions sub ON sub.business_id=$1 WHERE cfg.id`, b.ID).Scan(&analytics)
+	if err != nil {
+		return nil, err
+	}
+	if !analytics {
+		metrics.SellerGrossSalesKobo = 0
+	}
 	return &metrics, nil
 }
 

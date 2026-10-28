@@ -284,6 +284,7 @@ export default function AdminMarketplacePage() {
       <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 border-b border-gray-200 pb-5">
         <div>
           <div className="flex items-center gap-2">
+            {user?.primary_role === "super_admin" && <Link href="/admin/marketplace/subscriptions" className="text-emerald-700 underline">Store subscriptions &amp; revenue</Link>}
             <h1 className="text-2xl sm:text-3xl font-extrabold text-gray-900">
               Ratels Marketplace Workspace
             </h1>

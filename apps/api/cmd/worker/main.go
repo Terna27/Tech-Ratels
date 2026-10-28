@@ -17,6 +17,7 @@ import (
 	"ratels-api/internal/security"
 	"ratels-api/internal/service"
 	"ratels-api/internal/storage"
+	"ratels-api/internal/subscription"
 	"ratels-api/internal/worker"
 )
 
@@ -101,6 +102,9 @@ func main() {
 	}
 
 	marketplaceService := service.NewMarketplaceService(repo, auditService, paymentGateway, storageService)
+
+	subscriptionService := subscription.FromEnvironment(repo.Pool(), emailSender, cfg.FrontendBaseURL)
+	subscriptionService.Run(ctx)
 
 	outboxWorker := worker.NewOutboxWorker(repo, notifService, emailSender, smsSender, nil)
 	outboxWorker.Start(ctx)

@@ -134,6 +134,7 @@ export default function MarketplaceStorefrontPage() {
                 <Store className="w-3.5 h-3.5" />
                 Ratels Worldwide Commerce
               </div>
+              <Link href="/marketplace/subscriptions" className="text-emerald-100 underline">Store plans &amp; pricing</Link>
               <h1 className="text-3xl sm:text-4xl lg:text-5xl font-black tracking-tight text-white">
                 Ratels Marketplace
               </h1>
