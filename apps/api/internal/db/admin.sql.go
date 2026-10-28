@@ -132,6 +132,27 @@ func (q *Queries) CountVerifiedUsers(ctx context.Context) (int64, error) {
 	return count, err
 }
 
+const getOrganizationSetting = `-- name: GetOrganizationSetting :one
+SELECT key, value, description, category, is_sensitive, updated_by, updated_at
+FROM organization_settings
+WHERE key = $1
+`
+
+func (q *Queries) GetOrganizationSetting(ctx context.Context, key string) (OrganizationSetting, error) {
+	row := q.db.QueryRow(ctx, getOrganizationSetting, key)
+	var i OrganizationSetting
+	err := row.Scan(
+		&i.Key,
+		&i.Value,
+		&i.Description,
+		&i.Category,
+		&i.IsSensitive,
+		&i.UpdatedBy,
+		&i.UpdatedAt,
+	)
+	return i, err
+}
+
 const listAllLGACoverage = `-- name: ListAllLGACoverage :many
 SELECT lga_id, lga_name, is_area_council, state_id, appointment_id, user_id, coordinator_name, coordinator_email, coordinator_phone, start_date, appointment_status FROM (
     SELECT DISTINCT ON (l.id)
@@ -250,6 +271,40 @@ func (q *Queries) ListLGACoverageByState(ctx context.Context, stateID string) ([
 			&i.CoordinatorPhone,
 			&i.StartDate,
 			&i.AppointmentStatus,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listOrganizationSettings = `-- name: ListOrganizationSettings :many
+SELECT key, value, description, category, is_sensitive, updated_by, updated_at
+FROM organization_settings
+ORDER BY category, key
+`
+
+func (q *Queries) ListOrganizationSettings(ctx context.Context) ([]OrganizationSetting, error) {
+	rows, err := q.db.Query(ctx, listOrganizationSettings)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []OrganizationSetting
+	for rows.Next() {
+		var i OrganizationSetting
+		if err := rows.Scan(
+			&i.Key,
+			&i.Value,
+			&i.Description,
+			&i.Category,
+			&i.IsSensitive,
+			&i.UpdatedBy,
+			&i.UpdatedAt,
 		); err != nil {
 			return nil, err
 		}
@@ -520,4 +575,34 @@ func (q *Queries) ListZoneCoverage(ctx context.Context) ([]ListZoneCoverageRow, 
 		return nil, err
 	}
 	return items, nil
+}
+
+const updateOrganizationSetting = `-- name: UpdateOrganizationSetting :one
+UPDATE organization_settings
+SET value = $2,
+    updated_by = $3,
+    updated_at = CURRENT_TIMESTAMP
+WHERE key = $1
+RETURNING key, value, description, category, is_sensitive, updated_by, updated_at
+`
+
+type UpdateOrganizationSettingParams struct {
+	Key       string      `json:"key"`
+	Value     string      `json:"value"`
+	UpdatedBy pgtype.Text `json:"updated_by"`
+}
+
+func (q *Queries) UpdateOrganizationSetting(ctx context.Context, arg UpdateOrganizationSettingParams) (OrganizationSetting, error) {
+	row := q.db.QueryRow(ctx, updateOrganizationSetting, arg.Key, arg.Value, arg.UpdatedBy)
+	var i OrganizationSetting
+	err := row.Scan(
+		&i.Key,
+		&i.Value,
+		&i.Description,
+		&i.Category,
+		&i.IsSensitive,
+		&i.UpdatedBy,
+		&i.UpdatedAt,
+	)
+	return i, err
 }

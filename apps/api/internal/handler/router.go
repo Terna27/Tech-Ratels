@@ -512,6 +512,10 @@ func NewRouter(p RouterParams) http.Handler {
 			// Geography Seeder (Super Admin only)
 			adm.With(RequireRole("super_admin")).Post("/geography/seed", p.AdminHandler.SeedGeography)
 
+			// Organization-Wide Settings (Strictly restricted to Super Admin)
+			adm.With(RequireRole("super_admin")).Get("/settings", p.AdminHandler.ListOrganizationSettings)
+			adm.With(RequireRole("super_admin")).Put("/settings/{key}", p.AdminHandler.UpdateOrganizationSetting)
+
 			// Event Media Gallery & Moderation Administration
 			adm.Route("/gallery", func(admGal chi.Router) {
 				admGal.Use(RequireRole("national_admin", "super_admin", "zonal_coordinator", "state_coordinator", "lga_representative"))

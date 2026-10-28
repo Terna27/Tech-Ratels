@@ -463,3 +463,49 @@ func (s *AdminService) SeedGeography(ctx context.Context, actorID *string, actor
 		LGAs:    lgaCount,
 	}, nil
 }
+
+func (s *AdminService) ListOrganizationSettings(ctx context.Context, actorRole string) ([]db.OrganizationSetting, error) {
+	if actorRole != "super_admin" {
+		return nil, ErrSuperAdminRequired
+	}
+	settings, err := s.repo.Queries().ListOrganizationSettings(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("failed to list organization settings: %w", err)
+	}
+	if settings == nil {
+		settings = []db.OrganizationSetting{}
+	}
+	return settings, nil
+}
+
+func (s *AdminService) UpdateOrganizationSetting(ctx context.Context, actorID, actorRole, key, newValue string, ipAddress *string) (*db.OrganizationSetting, error) {
+	if actorRole != "super_admin" {
+		return nil, ErrSuperAdminRequired
+	}
+
+	oldSetting, err := s.repo.Queries().GetOrganizationSetting(ctx, key)
+	if err != nil {
+		return nil, fmt.Errorf("setting '%s' not found: %w", key, err)
+	}
+
+	updated, err := s.repo.Queries().UpdateOrganizationSetting(ctx, db.UpdateOrganizationSettingParams{
+		Key:       key,
+		Value:     newValue,
+		UpdatedBy: TextFromString(actorID),
+	})
+	if err != nil {
+		return nil, fmt.Errorf("failed to update organization setting '%s': %w", key, err)
+	}
+
+	if s.audit != nil {
+		details := fmt.Sprintf("Updated organization setting '%s' from '%s' to '%s'", key, oldSetting.Value, newValue)
+		if oldSetting.IsSensitive {
+			details = fmt.Sprintf("Updated sensitive organization setting '%s'", key)
+		}
+		scopeType := "national"
+		_ = s.audit.Log(ctx, &actorID, &actorRole, "update_organization_setting", "organization_setting", key, &scopeType, nil, &details, ipAddress)
+	}
+
+	return &updated, nil
+}
+

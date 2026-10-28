@@ -385,6 +385,7 @@ type Querier interface {
 	GetNotificationPreferences(ctx context.Context, userID string) (NotificationPreference, error)
 	// Templates
 	GetNotificationTemplateByCode(ctx context.Context, templateCode string) (NotificationTemplate, error)
+	GetOrganizationSetting(ctx context.Context, key string) (OrganizationSetting, error)
 	GetOutboxByID(ctx context.Context, id string) (NotificationOutbox, error)
 	GetOutboxOverviewStats(ctx context.Context) (GetOutboxOverviewStatsRow, error)
 	GetParticipationAppealByID(ctx context.Context, id string) (ParticipationAppeal, error)
@@ -525,6 +526,7 @@ type Querier interface {
 	ListNotificationSchedulesAdmin(ctx context.Context, arg ListNotificationSchedulesAdminParams) ([]ListNotificationSchedulesAdminRow, error)
 	ListNotificationTemplates(ctx context.Context) ([]NotificationTemplate, error)
 	ListNotificationsByRecipient(ctx context.Context, arg ListNotificationsByRecipientParams) ([]Notification, error)
+	ListOrganizationSettings(ctx context.Context) ([]OrganizationSetting, error)
 	ListOutboxAdmin(ctx context.Context, arg ListOutboxAdminParams) ([]NotificationOutbox, error)
 	ListPendingClaims(ctx context.Context) ([]ListPendingClaimsRow, error)
 	ListPendingClaimsByState(ctx context.Context, stateID string) ([]ListPendingClaimsByStateRow, error)
@@ -659,6 +661,7 @@ type Querier interface {
 	UpdateMemberProfile(ctx context.Context, arg UpdateMemberProfileParams) (MemberProfile, error)
 	UpdateNotificationTemplate(ctx context.Context, arg UpdateNotificationTemplateParams) (NotificationTemplate, error)
 	UpdateOrderItemShipmentID(ctx context.Context, arg UpdateOrderItemShipmentIDParams) error
+	UpdateOrganizationSetting(ctx context.Context, arg UpdateOrganizationSettingParams) (OrganizationSetting, error)
 	UpdateProjectMilestone(ctx context.Context, arg UpdateProjectMilestoneParams) (CommunityProjectMilestone, error)
 	UpdateReconciliationPeriodStatus(ctx context.Context, arg UpdateReconciliationPeriodStatusParams) (FinancialReconciliationPeriod, error)
 	UpdateReportExportStatus(ctx context.Context, arg UpdateReportExportStatusParams) (PublicReportExport, error)

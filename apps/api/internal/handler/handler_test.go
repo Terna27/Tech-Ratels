@@ -16,6 +16,7 @@ import (
 	"ratels-api/internal/config"
 	"ratels-api/internal/delivery"
 	"ratels-api/internal/handler"
+	"ratels-api/internal/migrator"
 	"ratels-api/internal/payment"
 	"ratels-api/internal/repository"
 	"ratels-api/internal/service"
@@ -58,6 +59,10 @@ func setupTestHarness(t *testing.T) *TestHarness {
 	pool, err := pgxpool.New(ctx, testDBURL)
 	if err != nil {
 		t.Fatalf("Failed to connect to test database: %v", err)
+	}
+
+	if err := migrator.RunMigrations(ctx, pool); err != nil {
+		t.Fatalf("Failed to run migrations on test database: %v", err)
 	}
 
 	repo := repository.NewRepository(pool)

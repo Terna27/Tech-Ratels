@@ -4,8 +4,10 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 	"time"
 
@@ -34,11 +36,24 @@ func TestSuperAdminDashboard_AuthorizationEnforcement(t *testing.T) {
 		{"GET", "/api/v1/admin/audit-logs"},
 		{"GET", "/api/v1/admin/audit"},
 		{"POST", "/api/v1/admin/geography/seed"},
+		{"GET", "/api/v1/admin/settings"},
+		{"PUT", "/api/v1/admin/settings/movement_motto"},
 	}
 
 	for _, ep := range endpoints {
+		var reqBody *bytes.Buffer
+		if ep.method == "POST" || ep.method == "PUT" {
+			reqBody = bytes.NewBufferString(`{"value":"test"}`)
+		}
+
 		// 1. Unauthenticated -> 401 Unauthorized
-		req, _ := http.NewRequest(ep.method, ep.path, nil)
+		var req *http.Request
+		if reqBody != nil {
+			req, _ = http.NewRequest(ep.method, ep.path, bytes.NewBufferString(`{"value":"test"}`))
+			req.Header.Set("Content-Type", "application/json")
+		} else {
+			req, _ = http.NewRequest(ep.method, ep.path, nil)
+		}
 		rr := httptest.NewRecorder()
 		h.Router.ServeHTTP(rr, req)
 		if rr.Code != http.StatusUnauthorized {
@@ -46,7 +61,12 @@ func TestSuperAdminDashboard_AuthorizationEnforcement(t *testing.T) {
 		}
 
 		// 2. Standard Member -> 403 Forbidden
-		req, _ = http.NewRequest(ep.method, ep.path, nil)
+		if reqBody != nil {
+			req, _ = http.NewRequest(ep.method, ep.path, bytes.NewBufferString(`{"value":"test"}`))
+			req.Header.Set("Content-Type", "application/json")
+		} else {
+			req, _ = http.NewRequest(ep.method, ep.path, nil)
+		}
 		req.Header.Set("Authorization", "Bearer "+memberToken)
 		rr = httptest.NewRecorder()
 		h.Router.ServeHTTP(rr, req)
@@ -55,7 +75,12 @@ func TestSuperAdminDashboard_AuthorizationEnforcement(t *testing.T) {
 		}
 
 		// 3. National Admin -> 403 Forbidden (prevent privilege escalation)
-		req, _ = http.NewRequest(ep.method, ep.path, nil)
+		if reqBody != nil {
+			req, _ = http.NewRequest(ep.method, ep.path, bytes.NewBufferString(`{"value":"test"}`))
+			req.Header.Set("Content-Type", "application/json")
+		} else {
+			req, _ = http.NewRequest(ep.method, ep.path, nil)
+		}
 		req.Header.Set("Authorization", "Bearer "+natAdminToken)
 		rr = httptest.NewRecorder()
 		h.Router.ServeHTTP(rr, req)
@@ -64,7 +89,12 @@ func TestSuperAdminDashboard_AuthorizationEnforcement(t *testing.T) {
 		}
 
 		// 4. State Coordinator -> 403 Forbidden
-		req, _ = http.NewRequest(ep.method, ep.path, nil)
+		if reqBody != nil {
+			req, _ = http.NewRequest(ep.method, ep.path, bytes.NewBufferString(`{"value":"test"}`))
+			req.Header.Set("Content-Type", "application/json")
+		} else {
+			req, _ = http.NewRequest(ep.method, ep.path, nil)
+		}
 		req.Header.Set("Authorization", "Bearer "+stateCoordToken)
 		rr = httptest.NewRecorder()
 		h.Router.ServeHTTP(rr, req)
@@ -73,7 +103,12 @@ func TestSuperAdminDashboard_AuthorizationEnforcement(t *testing.T) {
 		}
 
 		// 5. Zonal Coordinator -> 403 Forbidden
-		req, _ = http.NewRequest(ep.method, ep.path, nil)
+		if reqBody != nil {
+			req, _ = http.NewRequest(ep.method, ep.path, bytes.NewBufferString(`{"value":"test"}`))
+			req.Header.Set("Content-Type", "application/json")
+		} else {
+			req, _ = http.NewRequest(ep.method, ep.path, nil)
+		}
 		req.Header.Set("Authorization", "Bearer "+zonalCoordToken)
 		rr = httptest.NewRecorder()
 		h.Router.ServeHTTP(rr, req)
@@ -82,7 +117,12 @@ func TestSuperAdminDashboard_AuthorizationEnforcement(t *testing.T) {
 		}
 
 		// 6. LGA Representative -> 403 Forbidden
-		req, _ = http.NewRequest(ep.method, ep.path, nil)
+		if reqBody != nil {
+			req, _ = http.NewRequest(ep.method, ep.path, bytes.NewBufferString(`{"value":"test"}`))
+			req.Header.Set("Content-Type", "application/json")
+		} else {
+			req, _ = http.NewRequest(ep.method, ep.path, nil)
+		}
 		req.Header.Set("Authorization", "Bearer "+lgaRepToken)
 		rr = httptest.NewRecorder()
 		h.Router.ServeHTTP(rr, req)
@@ -91,7 +131,12 @@ func TestSuperAdminDashboard_AuthorizationEnforcement(t *testing.T) {
 		}
 
 		// 7. Super Admin -> Authorized (not 401 or 403)
-		req, _ = http.NewRequest(ep.method, ep.path, nil)
+		if reqBody != nil {
+			req, _ = http.NewRequest(ep.method, ep.path, bytes.NewBufferString(`{"value":"test"}`))
+			req.Header.Set("Content-Type", "application/json")
+		} else {
+			req, _ = http.NewRequest(ep.method, ep.path, nil)
+		}
 		req.Header.Set("Authorization", "Bearer "+superAdminToken)
 		rr = httptest.NewRecorder()
 		h.Router.ServeHTTP(rr, req)
@@ -342,8 +387,8 @@ func TestSuperAdminDashboard_UpcomingActivitiesAndRealMetrics(t *testing.T) {
 	}
 	lgaID := lgas[0].ID
 
-	// Create an upcoming cleanup activity
-	startTime := time.Now().Add(48 * time.Hour)
+	// Create an upcoming cleanup activity scheduled as the very next event
+	startTime := time.Now().Add(1 * time.Minute)
 	endTime := startTime.Add(4 * time.Hour)
 	eventID := "sa-test-evt-" + time.Now().Format("20060102150405.000000000")
 	var activityID string
@@ -458,3 +503,221 @@ func TestSuperAdminDashboard_InvalidParametersAndRobustness(t *testing.T) {
 		t.Errorf("Expected 0 LGAs for non-existent state, got %d", len(emptyLgas))
 	}
 }
+
+func TestSuperAdminDashboard_OrganizationSettings(t *testing.T) {
+	h := setupTestHarness(t)
+	defer h.Cleanup()
+	ctx := context.Background()
+
+	superAdminID, superAdminToken := createTestUserWithRole(t, h, "sa_org_root", "Super Admin", "super_admin")
+	_, natAdminToken := createTestUserWithRole(t, h, "sa_org_nat", "National Admin", "national_admin")
+	_, memberToken := createTestUserWithRole(t, h, "sa_org_mbr", "Member", "member")
+
+	// 1. Unauthenticated cannot list settings -> 401
+	req, _ := http.NewRequest("GET", "/api/v1/admin/settings", nil)
+	rr := httptest.NewRecorder()
+	h.Router.ServeHTTP(rr, req)
+	if rr.Code != http.StatusUnauthorized {
+		t.Errorf("Expected 401 for unauthenticated settings access, got %d", rr.Code)
+	}
+
+	// 2. Member cannot list settings -> 403
+	req, _ = http.NewRequest("GET", "/api/v1/admin/settings", nil)
+	req.Header.Set("Authorization", "Bearer "+memberToken)
+	rr = httptest.NewRecorder()
+	h.Router.ServeHTTP(rr, req)
+	if rr.Code != http.StatusForbidden {
+		t.Errorf("Expected 403 for member settings access, got %d", rr.Code)
+	}
+
+	// 3. National Admin cannot list settings -> 403
+	req, _ = http.NewRequest("GET", "/api/v1/admin/settings", nil)
+	req.Header.Set("Authorization", "Bearer "+natAdminToken)
+	rr = httptest.NewRecorder()
+	h.Router.ServeHTTP(rr, req)
+	if rr.Code != http.StatusForbidden {
+		t.Errorf("Expected 403 for national admin settings access, got %d", rr.Code)
+	}
+
+	// 4. Super Admin can list settings -> 200 OK
+	req, _ = http.NewRequest("GET", "/api/v1/admin/settings", nil)
+	req.Header.Set("Authorization", "Bearer "+superAdminToken)
+	rr = httptest.NewRecorder()
+	h.Router.ServeHTTP(rr, req)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("Expected 200 OK for Super Admin listing settings, got %d: %s", rr.Code, rr.Body.String())
+	}
+
+	var settings []map[string]interface{}
+	if err := json.Unmarshal(rr.Body.Bytes(), &settings); err != nil {
+		t.Fatalf("Failed to decode settings JSON: %v", err)
+	}
+	if len(settings) == 0 {
+		t.Fatalf("Expected seeded organization settings, got empty list")
+	}
+
+	// Verify baseline setting exists
+	foundMotto := false
+	for _, s := range settings {
+		if s["key"] == "movement_motto" {
+			foundMotto = true
+			break
+		}
+	}
+	if !foundMotto {
+		t.Errorf("Expected 'movement_motto' in organization settings")
+	}
+
+	// 5. National Admin cannot update setting -> 403 Forbidden
+	updatePayload := bytes.NewBufferString(`{"value":"Updated Motto by Nat Admin"}`)
+	req, _ = http.NewRequest("PUT", "/api/v1/admin/settings/movement_motto", updatePayload)
+	req.Header.Set("Authorization", "Bearer "+natAdminToken)
+	req.Header.Set("Content-Type", "application/json")
+	rr = httptest.NewRecorder()
+	h.Router.ServeHTTP(rr, req)
+	if rr.Code != http.StatusForbidden {
+		t.Errorf("Expected 403 Forbidden for National Admin updating setting, got %d", rr.Code)
+	}
+
+	// 6. Super Admin updates setting -> 200 OK
+	newMotto := "Clean Communities, Accountable Leadership - 2026"
+	updatePayload = bytes.NewBufferString(fmt.Sprintf(`{"value":"%s"}`, newMotto))
+	req, _ = http.NewRequest("PUT", "/api/v1/admin/settings/movement_motto", updatePayload)
+	req.Header.Set("Authorization", "Bearer "+superAdminToken)
+	req.Header.Set("Content-Type", "application/json")
+	rr = httptest.NewRecorder()
+	h.Router.ServeHTTP(rr, req)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("Expected 200 OK for Super Admin updating setting, got %d: %s", rr.Code, rr.Body.String())
+	}
+
+	var updatedSetting map[string]interface{}
+	if err := json.Unmarshal(rr.Body.Bytes(), &updatedSetting); err != nil {
+		t.Fatalf("Failed to decode updated setting JSON: %v", err)
+	}
+	if updatedSetting["value"] != newMotto {
+		t.Errorf("Expected setting value %s, got %v", newMotto, updatedSetting["value"])
+	}
+
+	// 7. Verify Audit Log was generated for organization setting update
+	var auditCount int
+	var auditDetails string
+	err := h.Pool.QueryRow(ctx, `
+		SELECT COUNT(*), COALESCE(MAX(details), '')
+		FROM audit_events
+		WHERE actor_id = $1 AND action = 'update_organization_setting' AND resource_id = 'movement_motto'
+	`, superAdminID).Scan(&auditCount, &auditDetails)
+	if err != nil {
+		t.Fatalf("Failed to query audit events: %v", err)
+	}
+	if auditCount < 1 {
+		t.Errorf("Expected at least 1 audit event for update_organization_setting, found %d", auditCount)
+	}
+	if !strings.Contains(auditDetails, newMotto) {
+		t.Errorf("Expected audit details to record new value %s, got: %s", newMotto, auditDetails)
+	}
+
+	// 8. Updating non-existent setting returns 400 Bad Request
+	nonExistentPayload := bytes.NewBufferString(`{"value":"val"}`)
+	req, _ = http.NewRequest("PUT", "/api/v1/admin/settings/non_existent_key_12345", nonExistentPayload)
+	req.Header.Set("Authorization", "Bearer "+superAdminToken)
+	req.Header.Set("Content-Type", "application/json")
+	rr = httptest.NewRecorder()
+	h.Router.ServeHTTP(rr, req)
+	if rr.Code != http.StatusBadRequest {
+		t.Errorf("Expected 400 Bad Request for non-existent setting update, got %d", rr.Code)
+	}
+}
+
+func TestSuperAdminDashboard_EmptyDatabaseStates(t *testing.T) {
+	h := setupTestHarness(t)
+	defer h.Cleanup()
+	ctx := context.Background()
+
+	// Verify that querying with empty event_instances or empty appointments returns clean zero counts and non-nil slices
+	_, superAdminToken := createTestUserWithRole(t, h, "sa_empty_root", "Super Admin", "super_admin")
+
+	req, _ := http.NewRequest("GET", "/api/v1/admin/super/dashboard", nil)
+	req.Header.Set("Authorization", "Bearer "+superAdminToken)
+	rr := httptest.NewRecorder()
+	h.Router.ServeHTTP(rr, req)
+
+	if rr.Code != http.StatusOK {
+		t.Fatalf("Expected 200 OK for empty state query, got %d: %s", rr.Code, rr.Body.String())
+	}
+
+	var stats service.SuperAdminDashboardStats
+	if err := json.Unmarshal(rr.Body.Bytes(), &stats); err != nil {
+		t.Fatalf("Failed to unmarshal dashboard stats: %v", err)
+	}
+
+	// Ensure non-nil slices
+	if stats.UpcomingActivities == nil {
+		t.Errorf("Expected non-nil UpcomingActivities slice")
+	}
+	if stats.RecentAuditActions == nil {
+		t.Errorf("Expected non-nil RecentAuditActions slice")
+	}
+	if stats.ZoneCoverage == nil {
+		t.Errorf("Expected non-nil ZoneCoverage slice")
+	}
+
+	_ = ctx
+}
+
+func TestSuperAdminDashboard_DatabaseErrorsNotSilenced(t *testing.T) {
+	h := setupTestHarness(t)
+	defer h.Cleanup()
+
+	// 1. When context is canceled, service must return an error rather than mock zero stats
+	canceledCtx, cancel := context.WithCancel(context.Background())
+	cancel() // Cancel immediately
+
+	stats, err := h.AdminService.GetSuperAdminDashboardStats(canceledCtx)
+	if err == nil {
+		t.Errorf("Expected error when calling GetSuperAdminDashboardStats with canceled context, got nil error with stats: %+v", stats)
+	}
+	if stats != nil {
+		t.Errorf("Expected nil stats on database error, got non-nil: %+v", stats)
+	}
+}
+
+func TestSuperAdminDashboard_JurisdictionRestrictionsAndHorizontalEscalation(t *testing.T) {
+	h := setupTestHarness(t)
+	defer h.Cleanup()
+	ctx := context.Background()
+
+	// Setup state coordinator
+	_, stateCoordToken := createTestUserWithRole(t, h, "sa_esc_st", "State Coord", "state_coordinator")
+
+	// 1. State coordinator attempts to access nationwide dashboard -> 403 Forbidden
+	req, _ := http.NewRequest("GET", "/api/v1/admin/super/dashboard", nil)
+	req.Header.Set("Authorization", "Bearer "+stateCoordToken)
+	rr := httptest.NewRecorder()
+	h.Router.ServeHTTP(rr, req)
+	if rr.Code != http.StatusForbidden {
+		t.Errorf("Expected 403 Forbidden for state coordinator accessing nationwide dashboard, got %d", rr.Code)
+	}
+
+	// 2. State coordinator attempts to modify organization settings -> 403 Forbidden
+	req, _ = http.NewRequest("PUT", "/api/v1/admin/settings/movement_name", bytes.NewBufferString(`{"value":"Rogue Name"}`))
+	req.Header.Set("Authorization", "Bearer "+stateCoordToken)
+	req.Header.Set("Content-Type", "application/json")
+	rr = httptest.NewRecorder()
+	h.Router.ServeHTTP(rr, req)
+	if rr.Code != http.StatusForbidden {
+		t.Errorf("Expected 403 Forbidden for state coordinator modifying organization settings, got %d", rr.Code)
+	}
+
+	// 3. State coordinator CAN access standard /admin/overview
+	req, _ = http.NewRequest("GET", "/api/v1/admin/overview", nil)
+	req.Header.Set("Authorization", "Bearer "+stateCoordToken)
+	rr = httptest.NewRecorder()
+	h.Router.ServeHTTP(rr, req)
+	if rr.Code != http.StatusOK {
+		t.Errorf("Expected 200 OK for state coordinator accessing /admin/overview, got %d: %s", rr.Code, rr.Body.String())
+	}
+
+	_ = ctx
+}
+

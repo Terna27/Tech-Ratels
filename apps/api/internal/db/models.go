@@ -1213,6 +1213,16 @@ type NotificationTemplate struct {
 	UpdatedAt     pgtype.Timestamptz `json:"updated_at"`
 }
 
+type OrganizationSetting struct {
+	Key         string             `json:"key"`
+	Value       string             `json:"value"`
+	Description pgtype.Text        `json:"description"`
+	Category    string             `json:"category"`
+	IsSensitive bool               `json:"is_sensitive"`
+	UpdatedBy   pgtype.Text        `json:"updated_by"`
+	UpdatedAt   pgtype.Timestamptz `json:"updated_at"`
+}
+
 type ParticipationAppeal struct {
 	ID               string             `json:"id"`
 	ParticipationID  string             `json:"participation_id"`

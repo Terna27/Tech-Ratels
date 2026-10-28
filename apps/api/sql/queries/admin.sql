@@ -138,3 +138,22 @@ SELECT * FROM (
     ORDER BY l.id, a.start_date DESC NULLS LAST
 ) lga_cov
 ORDER BY lga_cov.lga_name;
+
+-- name: ListOrganizationSettings :many
+SELECT key, value, description, category, is_sensitive, updated_by, updated_at
+FROM organization_settings
+ORDER BY category, key;
+
+-- name: GetOrganizationSetting :one
+SELECT key, value, description, category, is_sensitive, updated_by, updated_at
+FROM organization_settings
+WHERE key = $1;
+
+-- name: UpdateOrganizationSetting :one
+UPDATE organization_settings
+SET value = $2,
+    updated_by = $3,
+    updated_at = CURRENT_TIMESTAMP
+WHERE key = $1
+RETURNING key, value, description, category, is_sensitive, updated_by, updated_at;
+

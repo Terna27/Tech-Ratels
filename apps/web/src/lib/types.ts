@@ -299,6 +299,17 @@ export interface LGACoverageRow {
   appointment_status?: string;
 }
 
+export interface OrganizationSetting {
+  key: string;
+  value: string;
+  description: string | null;
+  category: string;
+  is_sensitive: boolean;
+  updated_by: string | null;
+  updated_at: string;
+}
+
+
 export interface AuditEvent {
   id: string;
   actor_id?: string;

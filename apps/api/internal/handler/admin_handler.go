@@ -1,10 +1,12 @@
 package handler
 
 import (
+	"encoding/json"
 	"net/http"
 	"strconv"
 	"strings"
 
+	"github.com/go-chi/chi/v5"
 	"ratels-api/internal/service"
 )
 
@@ -133,3 +135,57 @@ func (h *AdminHandler) SeedGeography(w http.ResponseWriter, r *http.Request) {
 
 	JSON(w, http.StatusOK, res)
 }
+
+func (h *AdminHandler) ListOrganizationSettings(w http.ResponseWriter, r *http.Request) {
+	actorRole := GetUserEffectiveRole(r.Context())
+	settings, err := h.adminService.ListOrganizationSettings(r.Context(), actorRole)
+	if err != nil {
+		if err == service.ErrSuperAdminRequired {
+			ErrorJSON(w, http.StatusForbidden, "FORBIDDEN", err.Error(), nil)
+			return
+		}
+		ErrorJSON(w, http.StatusInternalServerError, "INTERNAL_ERROR", err.Error(), nil)
+		return
+	}
+
+	JSON(w, http.StatusOK, settings)
+}
+
+type UpdateOrganizationSettingPayload struct {
+	Value string `json:"value"`
+}
+
+func (h *AdminHandler) UpdateOrganizationSetting(w http.ResponseWriter, r *http.Request) {
+	user := GetCurrentUser(r.Context())
+	if user == nil {
+		ErrorJSON(w, http.StatusUnauthorized, "UNAUTHORIZED", "Authentication required", nil)
+		return
+	}
+
+	key := chi.URLParam(r, "key")
+	if key == "" {
+		ErrorJSON(w, http.StatusBadRequest, "INVALID_KEY", "Setting key is required", nil)
+		return
+	}
+
+	var req UpdateOrganizationSettingPayload
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		ErrorJSON(w, http.StatusBadRequest, "INVALID_REQUEST", "Invalid JSON payload", nil)
+		return
+	}
+
+	actorRole := GetUserEffectiveRole(r.Context())
+	ip := r.RemoteAddr
+	updated, err := h.adminService.UpdateOrganizationSetting(r.Context(), user.ID, actorRole, key, req.Value, &ip)
+	if err != nil {
+		if err == service.ErrSuperAdminRequired {
+			ErrorJSON(w, http.StatusForbidden, "FORBIDDEN", err.Error(), nil)
+			return
+		}
+		ErrorJSON(w, http.StatusBadRequest, "UPDATE_FAILED", err.Error(), nil)
+		return
+	}
+
+	JSON(w, http.StatusOK, updated)
+}
+

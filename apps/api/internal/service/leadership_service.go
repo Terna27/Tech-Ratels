@@ -350,8 +350,8 @@ func (s *LeadershipService) RevokeAppointment(ctx context.Context, actorID, acto
 		return err
 	}
 
-	details := fmt.Sprintf("Revoked appointment %s (%s). Reason: %s", appointmentID, oldApp.RoleTitle, reason)
-	_ = s.audit.Log(ctx, &actorID, &actorRole, "revoke_appointment", "appointment", appointmentID, nil, nil, &details, nil)
+	details := fmt.Sprintf("Revoked appointment %s (%s). Previous status: %s, New status: revoked. Reason: %s", appointmentID, oldApp.RoleTitle, oldApp.Status, reason)
+	_ = s.audit.Log(ctx, &actorID, &actorRole, "revoke_appointment", "appointment", appointmentID, &oldApp.JurisdictionType, StringPtrFromText(oldApp.JurisdictionID), &details, nil)
 	return nil
 }
 
@@ -395,8 +395,8 @@ func (s *LeadershipService) SuspendAppointment(ctx context.Context, actorID, act
 		return err
 	}
 
-	details := fmt.Sprintf("Suspended appointment %s (%s). Reason: %s", appointmentID, oldApp.RoleTitle, reason)
-	_ = s.audit.Log(ctx, &actorID, &actorRole, "suspend_appointment", "appointment", appointmentID, nil, nil, &details, nil)
+	details := fmt.Sprintf("Suspended appointment %s (%s). Previous status: %s, New status: suspended. Reason: %s", appointmentID, oldApp.RoleTitle, oldApp.Status, reason)
+	_ = s.audit.Log(ctx, &actorID, &actorRole, "suspend_appointment", "appointment", appointmentID, &oldApp.JurisdictionType, StringPtrFromText(oldApp.JurisdictionID), &details, nil)
 	return nil
 }
 

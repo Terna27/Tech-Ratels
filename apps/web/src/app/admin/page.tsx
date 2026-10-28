@@ -47,6 +47,7 @@ import {
   SuperAdminDashboardStats,
   StateCoverageRow,
   LGACoverageRow,
+  OrganizationSetting,
 } from "@/lib/types";
 import { Badge } from "@/components/ui/Badge";
 import { Spinner } from "@/components/ui/Spinner";
@@ -94,16 +95,25 @@ export default function AdminOverviewPage() {
   const [seedingGeography, setSeedingGeography] = useState(false);
   const [seedSuccessMessage, setSeedSuccessMessage] = useState<string | null>(null);
 
+  // Organization-Wide Settings (Super Admin privileged)
+  const [settings, setSettings] = useState<OrganizationSetting[]>([]);
+  const [editingKey, setEditingKey] = useState<string | null>(null);
+  const [editingValue, setEditingValue] = useState<string>("");
+  const [savingSetting, setSavingSetting] = useState(false);
+  const [settingSuccess, setSettingSuccess] = useState<string | null>(null);
+
   const loadData = async () => {
     try {
       setError(null);
       if (isSuperAdmin || user?.primary_role === "super_admin") {
-        const [statsData, statesData] = await Promise.all([
+        const [statsData, statesData, settingsData] = await Promise.all([
           apiRequest<SuperAdminDashboardStats>("/admin/super/dashboard"),
           apiRequest<StateCoverageRow[]>("/admin/super/coverage/states").catch(() => []),
+          apiRequest<OrganizationSetting[]>("/admin/settings").catch(() => []),
         ]);
         setStats(statsData);
         setStateCoverage(statesData || []);
+        setSettings(settingsData || []);
         if (statesData && statesData.length > 0 && !selectedStateForLga) {
           setSelectedStateForLga(statesData[0].state_id);
         }
@@ -116,6 +126,30 @@ export default function AdminOverviewPage() {
     } finally {
       setLoading(false);
       setRefreshing(false);
+    }
+  };
+
+  const handleSaveSetting = async (key: string, value: string) => {
+    setSavingSetting(true);
+    setSettingSuccess(null);
+    try {
+      const updated = await apiRequest<OrganizationSetting>(
+        `/admin/settings/${encodeURIComponent(key)}`,
+        {
+          method: "PUT",
+          body: JSON.stringify({ value }),
+        }
+      );
+      setSettings((prev) => prev.map((s) => (s.key === key ? updated : s)));
+      setEditingKey(null);
+      setSettingSuccess(`Organization setting '${key}' successfully updated.`);
+      // Refresh stats to include latest audit trail entry
+      const updatedStats = await apiRequest<SuperAdminDashboardStats>("/admin/super/dashboard");
+      setStats(updatedStats);
+    } catch (err: any) {
+      setError(err.message || "Failed to update organization setting");
+    } finally {
+      setSavingSetting(false);
     }
   };
 
@@ -991,32 +1025,56 @@ export default function AdminOverviewPage() {
       {/* 7. TAB CONTENT: Member Management */}
       {activeTab === "members" && (
         <div className="space-y-6">
-          <div className="flex justify-between items-center">
+          <div className="flex flex-col sm:flex-row justify-between sm:items-center gap-4">
             <div>
               <h2 className="text-xl font-bold text-gray-900">Member Management Navigation</h2>
               <p className="text-xs text-gray-600">
                 Nationwide member verification, identity safeguarding, and geographic registration distribution.
               </p>
             </div>
-            <Link
-              href="/admin/audit"
-              className="inline-flex items-center text-xs font-bold text-emerald-700 hover:text-emerald-900"
-            >
-              View Member Audit Events <ArrowRight className="w-3.5 h-3.5 ml-1" />
-            </Link>
+            <div className="flex flex-wrap items-center gap-2">
+              <Link
+                href="/admin/reviews"
+                className="inline-flex items-center px-4 py-2 bg-emerald-800 hover:bg-emerald-700 text-white text-xs font-bold rounded-lg transition"
+              >
+                <UserCheck className="w-4 h-4 mr-1.5" />
+                Review Claims Queue ({stats.unverified_participations_queue})
+              </Link>
+              <Link
+                href="/admin/audit"
+                className="inline-flex items-center px-3.5 py-2 bg-gray-100 hover:bg-gray-200 text-gray-800 text-xs font-semibold rounded-lg transition"
+              >
+                <History className="w-3.5 h-3.5 mr-1.5" />
+                Audit Events
+              </Link>
+            </div>
           </div>
 
           <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
             <div className="bg-white p-6 rounded-2xl border border-gray-200 shadow-sm space-y-3">
               <span className="text-xs text-gray-500 font-bold uppercase">Total Registered</span>
               <div className="text-4xl font-black text-gray-900">{stats.total_members.toLocaleString()}</div>
-              <p className="text-xs text-gray-600">All member accounts created across Nigeria.</p>
+              <p className="text-xs text-gray-600">All member accounts created across Nigerian States and LGAs.</p>
+              <div className="text-[11px] text-gray-500 pt-2 border-t border-gray-100">
+                Total event registrations: <span className="font-bold text-gray-900">{stats.total_registrations.toLocaleString()}</span>
+              </div>
             </div>
 
             <div className="bg-white p-6 rounded-2xl border border-gray-200 shadow-sm space-y-3">
               <span className="text-xs text-emerald-600 font-bold uppercase">Fully Verified</span>
               <div className="text-4xl font-black text-emerald-700">{stats.verified_members.toLocaleString()}</div>
               <p className="text-xs text-gray-600">Verified via contact OTP or secure email confirmation.</p>
+              <div className="w-full bg-gray-100 rounded-full h-2 mt-2">
+                <div
+                  className="bg-emerald-600 h-2 rounded-full transition-all"
+                  style={{
+                    width: `${stats.total_members > 0 ? Math.min(100, Math.round((stats.verified_members / stats.total_members) * 100)) : 0}%`,
+                  }}
+                />
+              </div>
+              <span className="text-[11px] text-emerald-800 font-semibold block">
+                {stats.total_members > 0 ? Math.round((stats.verified_members / stats.total_members) * 100) : 0}% National Verification Rate
+              </span>
             </div>
 
             <div className="bg-white p-6 rounded-2xl border border-gray-200 shadow-sm space-y-3">
@@ -1024,7 +1082,87 @@ export default function AdminOverviewPage() {
               <div className="text-4xl font-black text-amber-600">
                 {stats.pending_member_verifications.toLocaleString()}
               </div>
-              <p className="text-xs text-gray-600">Members awaiting phone or email token verification.</p>
+              <p className="text-xs text-gray-600">Members awaiting phone or email token confirmation.</p>
+              <div className="text-[11px] text-amber-700 font-medium pt-2 border-t border-amber-100">
+                {stats.total_members > 0 ? Math.round((stats.pending_member_verifications / stats.total_members) * 100) : 0}% of accounts pending
+              </div>
+            </div>
+          </div>
+
+          {/* Member Governance & Operational Navigation Hub */}
+          <div className="bg-white rounded-2xl border border-gray-200 p-6 space-y-4 shadow-sm">
+            <h3 className="text-sm font-bold text-gray-900 uppercase tracking-wider flex items-center gap-2">
+              <Users className="w-4 h-4 text-emerald-700" />
+              Member Governance & Safeguarding Navigation Hub
+            </h3>
+            <p className="text-xs text-gray-600">
+              Access nationwide administrative queues, appointed regional leadership, confidential safety investigations, and outbound member communications.
+            </p>
+
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 pt-2">
+              <Link
+                href="/admin/reviews"
+                className="p-4 rounded-xl border border-gray-200 hover:border-emerald-600 hover:shadow-sm transition group bg-gray-50/50 hover:bg-white"
+              >
+                <div className="w-9 h-9 rounded-lg bg-emerald-100 text-emerald-800 flex items-center justify-center mb-3 group-hover:bg-emerald-800 group-hover:text-white transition">
+                  <UserCheck className="w-5 h-5" />
+                </div>
+                <div className="text-xs font-bold text-gray-900">Verification & Appeals</div>
+                <div className="text-[11px] text-gray-500 mt-1">
+                  Queue: {stats.unverified_participations_queue} claims, {stats.pending_appeals_queue} appeals
+                </div>
+                <div className="mt-3 text-[11px] font-bold text-emerald-700 group-hover:text-emerald-900 flex items-center">
+                  Open Queue <ArrowRight className="w-3 h-3 ml-1" />
+                </div>
+              </Link>
+
+              <Link
+                href="/admin/leadership"
+                className="p-4 rounded-xl border border-gray-200 hover:border-emerald-600 hover:shadow-sm transition group bg-gray-50/50 hover:bg-white"
+              >
+                <div className="w-9 h-9 rounded-lg bg-emerald-100 text-emerald-800 flex items-center justify-center mb-3 group-hover:bg-emerald-800 group-hover:text-white transition">
+                  <ShieldCheck className="w-5 h-5" />
+                </div>
+                <div className="text-xs font-bold text-gray-900">Leadership Roster</div>
+                <div className="text-[11px] text-gray-500 mt-1">
+                  {stats.active_coordinators} active coordinators across Nigeria
+                </div>
+                <div className="mt-3 text-[11px] font-bold text-emerald-700 group-hover:text-emerald-900 flex items-center">
+                  Appoint Coordinators <ArrowRight className="w-3 h-3 ml-1" />
+                </div>
+              </Link>
+
+              <Link
+                href="/admin/safeguarding"
+                className="p-4 rounded-xl border border-gray-200 hover:border-emerald-600 hover:shadow-sm transition group bg-gray-50/50 hover:bg-white"
+              >
+                <div className="w-9 h-9 rounded-lg bg-emerald-100 text-emerald-800 flex items-center justify-center mb-3 group-hover:bg-emerald-800 group-hover:text-white transition">
+                  <ShieldAlert className="w-5 h-5 text-amber-700" />
+                </div>
+                <div className="text-xs font-bold text-gray-900">Safeguarding Cases</div>
+                <div className="text-[11px] text-gray-500 mt-1">
+                  Confidential reports, legal holds, and officer triage
+                </div>
+                <div className="mt-3 text-[11px] font-bold text-emerald-700 group-hover:text-emerald-900 flex items-center">
+                  Manage Cases <ArrowRight className="w-3 h-3 ml-1" />
+                </div>
+              </Link>
+
+              <Link
+                href="/admin/communications"
+                className="p-4 rounded-xl border border-gray-200 hover:border-emerald-600 hover:shadow-sm transition group bg-gray-50/50 hover:bg-white"
+              >
+                <div className="w-9 h-9 rounded-lg bg-emerald-100 text-emerald-800 flex items-center justify-center mb-3 group-hover:bg-emerald-800 group-hover:text-white transition">
+                  <Send className="w-5 h-5" />
+                </div>
+                <div className="text-xs font-bold text-gray-900">Member Outbox</div>
+                <div className="text-[11px] text-gray-500 mt-1">
+                  Broadcasts, OTP delivery logs, and Termii/Brevo health
+                </div>
+                <div className="mt-3 text-[11px] font-bold text-emerald-700 group-hover:text-emerald-900 flex items-center">
+                  View Outbox <ArrowRight className="w-3 h-3 ml-1" />
+                </div>
+              </Link>
             </div>
           </div>
         </div>
@@ -1033,19 +1171,21 @@ export default function AdminOverviewPage() {
       {/* 8. TAB CONTENT: Activities & Cleanups */}
       {activeTab === "activities" && (
         <div className="space-y-6">
-          <div className="flex justify-between items-center">
+          <div className="flex flex-col sm:flex-row justify-between sm:items-center gap-4">
             <div>
               <h2 className="text-xl font-bold text-gray-900">Activities & Cleanups Oversight</h2>
               <p className="text-xs text-gray-600">
                 Direct access to environmental cleanup campaigns, venue proposals, and volunteer participation reviews.
               </p>
             </div>
-            <Link
-              href="/admin/activities"
-              className="inline-flex items-center px-4 py-2 bg-emerald-800 hover:bg-emerald-700 text-white text-xs font-bold rounded-lg transition"
-            >
-              Open Venue Manager <ArrowRight className="w-3.5 h-3.5 ml-1.5" />
-            </Link>
+            <div className="flex items-center gap-2">
+              <Link
+                href="/admin/activities"
+                className="inline-flex items-center px-4 py-2 bg-emerald-800 hover:bg-emerald-700 text-white text-xs font-bold rounded-lg transition"
+              >
+                Open Venue Manager <ArrowRight className="w-3.5 h-3.5 ml-1.5" />
+              </Link>
+            </div>
           </div>
 
           <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
@@ -1075,6 +1215,74 @@ export default function AdminOverviewPage() {
                 Review Claims &rarr;
               </Link>
             </div>
+          </div>
+
+          {/* Published Upcoming Venues Detail Table */}
+          <div className="bg-white rounded-2xl border border-gray-200 shadow-sm p-6 space-y-4">
+            <div className="flex justify-between items-center">
+              <div>
+                <h3 className="text-base font-bold text-gray-900 flex items-center gap-2">
+                  <Calendar className="w-5 h-5 text-emerald-700" />
+                  Scheduled Environmental Cleanups Roster
+                </h3>
+                <p className="text-xs text-gray-500">
+                  Published community venues with scheduled dates, volunteer capacities, and designated coordinators.
+                </p>
+              </div>
+              <Link
+                href="/admin/activities"
+                className="text-xs font-bold text-emerald-700 hover:text-emerald-900 inline-flex items-center"
+              >
+                Create New Venue <ArrowRight className="w-3.5 h-3.5 ml-1" />
+              </Link>
+            </div>
+
+            {stats.upcoming_activities.length === 0 ? (
+              <div className="text-center py-8 text-xs text-gray-500 bg-gray-50 rounded-xl">
+                No upcoming cleanups scheduled. Coordinators can propose and publish new venues in the Venue Manager.
+              </div>
+            ) : (
+              <div className="overflow-x-auto">
+                <table className="min-w-full divide-y divide-gray-200 text-xs">
+                  <thead className="bg-gray-50 text-gray-500 font-bold uppercase">
+                    <tr>
+                      <th className="px-4 py-3 text-left">Activity / Venue</th>
+                      <th className="px-4 py-3 text-left">Jurisdiction</th>
+                      <th className="px-4 py-3 text-left">Scheduled Date</th>
+                      <th className="px-4 py-3 text-left">Assigned Coordinator</th>
+                      <th className="px-4 py-3 text-right">Volunteers</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-gray-100">
+                    {stats.upcoming_activities.map((act) => (
+                      <tr key={act.id} className="hover:bg-gray-50 transition">
+                        <td className="px-4 py-3 font-semibold text-gray-900">
+                          {act.title}
+                          <div className="text-[10px] text-gray-500 font-normal">{act.address}</div>
+                        </td>
+                        <td className="px-4 py-3 text-gray-700">
+                          {act.state_name} — <span className="text-gray-500">{act.lga_name}</span>
+                        </td>
+                        <td className="px-4 py-3 text-gray-600">
+                          {new Date(act.start_time).toLocaleDateString("en-NG", {
+                            weekday: "short",
+                            year: "numeric",
+                            month: "short",
+                            day: "numeric",
+                            hour: "2-digit",
+                            minute: "2-digit",
+                          })}
+                        </td>
+                        <td className="px-4 py-3 text-gray-700">{act.coordinator_name}</td>
+                        <td className="px-4 py-3 text-right font-bold text-emerald-700">
+                          {act.registered_count} / {act.capacity}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
           </div>
         </div>
       )}
@@ -1253,11 +1461,149 @@ export default function AdminOverviewPage() {
       {/* 12. TAB CONTENT: System Administration */}
       {activeTab === "system" && (
         <div className="space-y-6">
-          <div>
-            <h2 className="text-xl font-bold text-gray-900">System Administration & Infrastructure Controls</h2>
-            <p className="text-xs text-gray-600">
-              Authoritative geography verification, emergency operational kill-switches, and database infrastructure status.
-            </p>
+          <div className="flex flex-col sm:flex-row justify-between sm:items-center gap-4">
+            <div>
+              <h2 className="text-xl font-bold text-gray-900">System Administration & Infrastructure Controls</h2>
+              <p className="text-xs text-gray-600">
+                Authoritative geography verification, organization-wide policy settings, and database infrastructure status.
+              </p>
+            </div>
+            <Badge variant="warning" size="sm">
+              SUPER ADMIN PRIVILEGED
+            </Badge>
+          </div>
+
+          {settingSuccess && <Alert type="success">{settingSuccess}</Alert>}
+
+          {/* Organization-Wide Governance Settings Panel */}
+          <div className="bg-white rounded-2xl border border-gray-200 shadow-sm p-6 space-y-4">
+            <div className="flex flex-col sm:flex-row justify-between sm:items-center gap-2">
+              <div>
+                <h3 className="text-base font-bold text-gray-900 flex items-center gap-2">
+                  <Settings className="w-5 h-5 text-emerald-700" />
+                  Organization-Wide Governance & Operational Settings
+                </h3>
+                <p className="text-xs text-gray-500">
+                  National policy configurations strictly editable by Super Admin. Changes are immutably logged to the privileged audit trail.
+                </p>
+              </div>
+            </div>
+
+            {settings.length === 0 ? (
+              <div className="text-center py-8 text-xs text-gray-500 bg-gray-50 rounded-xl">
+                No organization-wide settings loaded or none configured in database.
+              </div>
+            ) : (
+              <div className="overflow-x-auto">
+                <table className="min-w-full divide-y divide-gray-200 text-xs">
+                  <thead className="bg-gray-50 text-gray-500 font-bold uppercase">
+                    <tr>
+                      <th className="px-4 py-3 text-left">Category</th>
+                      <th className="px-4 py-3 text-left">Setting Key & Description</th>
+                      <th className="px-4 py-3 text-left">Current Value</th>
+                      <th className="px-4 py-3 text-left">Last Modified</th>
+                      <th className="px-4 py-3 text-right">Action</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-gray-100">
+                    {settings.map((setting) => {
+                      const isEditing = editingKey === setting.key;
+                      return (
+                        <tr key={setting.key} className="hover:bg-gray-50 transition">
+                          <td className="px-4 py-3 whitespace-nowrap">
+                            <span className="px-2 py-0.5 rounded text-[10px] font-bold uppercase tracking-wider bg-gray-100 text-gray-700">
+                              {setting.category}
+                            </span>
+                          </td>
+                          <td className="px-4 py-3">
+                            <div className="font-mono font-bold text-gray-900">{setting.key}</div>
+                            {setting.description && (
+                              <div className="text-[11px] text-gray-500 mt-0.5 max-w-sm">{setting.description}</div>
+                            )}
+                          </td>
+                          <td className="px-4 py-3 font-mono">
+                            {isEditing ? (
+                              <div className="flex items-center gap-2">
+                                {setting.value === "true" || setting.value === "false" ? (
+                                  <select
+                                    value={editingValue}
+                                    onChange={(e) => setEditingValue(e.target.value)}
+                                    className="border border-emerald-500 rounded px-2 py-1 text-xs bg-white focus:outline-none"
+                                  >
+                                    <option value="true">true (Enabled)</option>
+                                    <option value="false">false (Disabled)</option>
+                                  </select>
+                                ) : (
+                                  <input
+                                    type="text"
+                                    value={editingValue}
+                                    onChange={(e) => setEditingValue(e.target.value)}
+                                    className="border border-emerald-500 rounded px-2 py-1 text-xs focus:outline-none w-56"
+                                  />
+                                )}
+                              </div>
+                            ) : (
+                              <span
+                                className={`px-2 py-0.5 rounded text-[11px] font-bold ${
+                                  setting.value === "true"
+                                    ? "bg-emerald-100 text-emerald-800"
+                                    : setting.value === "false"
+                                    ? "bg-amber-100 text-amber-800"
+                                    : "bg-gray-100 text-gray-900"
+                                }`}
+                              >
+                                {setting.is_sensitive ? "••••••••" : setting.value || "—"}
+                              </span>
+                            )}
+                          </td>
+                          <td className="px-4 py-3 text-gray-500 text-[11px] whitespace-nowrap">
+                            {setting.updated_at
+                              ? new Date(setting.updated_at).toLocaleDateString("en-NG", {
+                                  month: "short",
+                                  day: "numeric",
+                                  year: "numeric",
+                                  hour: "2-digit",
+                                  minute: "2-digit",
+                                })
+                              : "Initial Seeding"}
+                          </td>
+                          <td className="px-4 py-3 text-right whitespace-nowrap">
+                            {isEditing ? (
+                              <div className="inline-flex items-center gap-1.5">
+                                <button
+                                  onClick={() => handleSaveSetting(setting.key, editingValue)}
+                                  disabled={savingSetting}
+                                  className="px-2.5 py-1 bg-emerald-800 hover:bg-emerald-700 text-white font-bold text-xs rounded transition disabled:opacity-50"
+                                >
+                                  {savingSetting ? "Saving..." : "Save"}
+                                </button>
+                                <button
+                                  onClick={() => setEditingKey(null)}
+                                  disabled={savingSetting}
+                                  className="px-2 py-1 bg-gray-200 hover:bg-gray-300 text-gray-700 font-bold text-xs rounded transition"
+                                >
+                                  Cancel
+                                </button>
+                              </div>
+                            ) : (
+                              <button
+                                onClick={() => {
+                                  setEditingKey(setting.key);
+                                  setEditingValue(setting.value);
+                                }}
+                                className="px-3 py-1 bg-emerald-50 hover:bg-emerald-100 text-emerald-800 font-bold text-xs rounded transition"
+                              >
+                                Edit
+                              </button>
+                            )}
+                          </td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
+            )}
           </div>
 
           <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
