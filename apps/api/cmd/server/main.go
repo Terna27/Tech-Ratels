@@ -68,7 +68,7 @@ func main() {
 
 	repo := repository.NewRepository(pool)
 	isProduction := strings.ToLower(cfg.Environment) == "production" || strings.ToLower(os.Getenv("APP_ENV")) == "production"
-	
+
 	var emailDelivery delivery.DeliveryAdapter
 	switch cfg.EmailProvider {
 	case "brevo":
@@ -227,7 +227,17 @@ func main() {
 	if err != nil {
 		log.Fatalf("Failed to initialize safeguarding cipher: %v\n", err)
 	}
-	safeguardStorage := storage.NewDevSafeguardingStorageService()
+	if isProduction && cfg.R2SafeguardingBucketName != "" && cfg.R2SafeguardingBucketName == cfg.R2BucketName {
+		log.Fatal("Private safeguarding evidence must not share the public media bucket")
+	}
+	safeguardStorage, err := storage.NewEnvironmentSafeguardingStorage(ctx, isProduction, storage.R2Config{
+		AccountID: cfg.R2AccountID, Endpoint: cfg.R2Endpoint,
+		AccessKeyID: cfg.R2AccessKeyID, SecretAccessKey: cfg.R2SecretAccessKey,
+		BucketName: cfg.R2SafeguardingBucketName,
+	})
+	if err != nil {
+		log.Fatalf("Failed to initialize private safeguarding storage: %v", err)
+	}
 	safeguardService := service.NewSafeguardingService(repo, safeguardCipher, safeguardStorage, notifService, cfg)
 	safeguardH := handler.NewSafeguardingHandler(safeguardService, safeguardStorage, cfg)
 

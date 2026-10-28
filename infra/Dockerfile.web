@@ -11,8 +11,8 @@ ENV NEXT_PUBLIC_API_URL=${NEXT_PUBLIC_API_URL}
 ENV API_URL=${API_URL}
 ENV INTERNAL_API_URL=${INTERNAL_API_URL:-$API_URL}
 
-COPY apps/web/package.json ./
-RUN npm install
+COPY apps/web/package.json apps/web/package-lock.json ./
+RUN npm ci --no-audit --no-fund
 
 COPY apps/web/ ./
 RUN npm run build
@@ -33,6 +33,8 @@ COPY --from=builder /app/package.json ./
 COPY --from=builder /app/node_modules ./node_modules
 COPY --from=builder /app/.next ./.next
 COPY --from=builder /app/public ./public
+
+USER node
 
 EXPOSE 3000
 

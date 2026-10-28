@@ -42,7 +42,7 @@ export function setCsrfToken(token: string | null) {
 }
 
 export function getCsrfToken(): string | null {
-  if (memoryCsrfToken) return memoryCsrfToken;
+  // Another tab may rotate the session cookie after this tab caches a login token.
   if (typeof document !== "undefined") {
     const match = document.cookie.match(/(?:^|;\s*)ratels_csrf=([^;]+)/);
     if (match) {
@@ -50,7 +50,7 @@ export function getCsrfToken(): string | null {
       return memoryCsrfToken;
     }
   }
-  return null;
+  return memoryCsrfToken;
 }
 
 export function clearCsrfToken() {
