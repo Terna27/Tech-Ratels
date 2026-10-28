@@ -39,14 +39,13 @@ func NewRouter(p RouterParams) http.Handler {
 
 	// Base middleware
 	r.Use(middleware.RequestID)
-	r.Use(middleware.RealIP)
 	r.Use(middleware.Logger)
 	r.Use(middleware.Recoverer)
 
 	// CORS configuration
 	r.Use(cors.Handler(cors.Options{
 		AllowedOrigins:   p.Config.AllowedOrigins,
-		AllowedMethods:   []string{"GET", "POST", "PUT", "DELETE", "OPTIONS"},
+		AllowedMethods:   []string{"GET", "POST", "PUT", "DELETE", "PATCH", "OPTIONS"},
 		AllowedHeaders:   []string{"Accept", "Authorization", "Content-Type", "X-CSRF-Token"},
 		ExposedHeaders:   []string{"Link"},
 		AllowCredentials: true,

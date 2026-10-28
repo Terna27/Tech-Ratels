@@ -6,6 +6,10 @@ const BASE_URL = process.env.TEST_WEB_URL || "http://127.0.0.1:3008";
 const CHROME_PATH = process.env.CHROME_BIN || "/usr/bin/google-chrome";
 
 test("Ratels Marketplace - Browser End-to-End & Responsive Layout Suite", async (t) => {
+  if (!process.env.TEST_WEB_URL) {
+    t.skip("Set TEST_WEB_URL to run browser tests against a running frontend");
+    return;
+  }
   let browser;
 
   try {
@@ -20,7 +24,7 @@ test("Ratels Marketplace - Browser End-to-End & Responsive Layout Suite", async 
       ],
     });
   } catch (err) {
-    t.diagnostic(`Skipping browser tests: Chrome launch failed: ${err.message}`);
+    t.skip(`Chrome unavailable: ${err.message}`);
     return;
   }
 

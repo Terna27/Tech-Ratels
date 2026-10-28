@@ -321,3 +321,19 @@ func ValidateEvidenceFile(filename, declaredMIME string, declaredSize int64) (sa
 
 	return sanitizedName, mime, nil
 }
+
+// NewEnvironmentSafeguardingStorage never acknowledges ephemeral evidence writes
+// in production. A configured bucket must be private and separate from public media.
+func NewEnvironmentSafeguardingStorage(ctx context.Context, production bool, cfg R2Config) (SafeguardingStorageService, error) {
+	if !production {
+		return NewDevSafeguardingStorageService(), nil
+	}
+	if cfg.BucketName == "" || cfg.AccessKeyID == "" || cfg.SecretAccessKey == "" {
+		return NewR2SafeguardingStorage(nil, nil, ""), nil
+	}
+	client, err := NewR2StorageService(ctx, cfg)
+	if err != nil {
+		return nil, err
+	}
+	return NewR2SafeguardingStorage(client.s3Client, client.presignClient, cfg.BucketName), nil
+}

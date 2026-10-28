@@ -86,17 +86,20 @@ func GenerateJWT(userID, email, role, jti, secret string, expiryHours int) (stri
 
 func ParseJWT(tokenString, secret string) (*JWTClaims, error) {
 	token, err := jwt.ParseWithClaims(tokenString, &JWTClaims{}, func(t *jwt.Token) (interface{}, error) {
-		if _, ok := t.Method.(*jwt.SigningMethodHMAC); !ok {
+		if t.Method != jwt.SigningMethodHS256 {
 			return nil, fmt.Errorf("unexpected signing method: %v", t.Header["alg"])
 		}
 		return []byte(secret), nil
-	})
+	}, jwt.WithValidMethods([]string{"HS256"}), jwt.WithExpirationRequired(), jwt.WithIssuedAt())
 
 	if err != nil {
 		return nil, err
 	}
 
 	if claims, ok := token.Claims.(*JWTClaims); ok && token.Valid {
+		if claims.UserID == "" || claims.JTI == "" {
+			return nil, errors.New("token missing subject or session identifier")
+		}
 		if claims.ExpiresAt != nil && claims.ExpiresAt.Before(time.Now()) {
 			return nil, errors.New("token expired")
 		}

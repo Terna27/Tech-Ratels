@@ -50,7 +50,7 @@ func AuthMiddleware(cfg *config.Config, repo *repository.Repository) func(http.H
 
 			// Validate session in database (ensure not revoked and not expired)
 			session, err := repo.Queries().GetUserSession(r.Context(), claims.JTI)
-			if err != nil || session.ID == "" || session.IsRevoked {
+			if err != nil || session.ID == "" || session.IsRevoked || session.UserID != claims.UserID {
 				next.ServeHTTP(w, r)
 				return
 			}

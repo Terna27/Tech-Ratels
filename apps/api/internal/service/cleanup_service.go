@@ -493,6 +493,10 @@ func (s *CleanupService) VerifyAttendance(ctx context.Context, actorID string, e
 		return nil, nil, err
 	}
 
+	if event.Status == "cancelled" {
+		return nil, nil, ErrEventCancelled
+	}
+
 	cleanCode := strings.ToUpper(strings.TrimSpace(req.CheckinCode))
 	if cleanCode == "" {
 		return nil, nil, errors.New("check-in code is required")

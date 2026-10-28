@@ -102,7 +102,7 @@ func (h *AuthHandler) ResendVerification(w http.ResponseWriter, r *http.Request)
 		return
 	}
 
-	ip := r.RemoteAddr
+	ip := security.GetClientIP(r)
 	res, err := h.authService.ResendVerificationEmail(r.Context(), req.Email, ip)
 	if err != nil {
 		if errors.Is(err, service.ErrResendCooldownActive) {
@@ -136,7 +136,7 @@ func (h *AuthHandler) Login(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	ip := r.RemoteAddr
+	ip := security.GetClientIP(r)
 	ua := r.UserAgent()
 
 	res, err := h.authService.Login(r.Context(), req, ip, ua)

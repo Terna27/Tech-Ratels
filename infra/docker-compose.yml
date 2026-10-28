@@ -10,7 +10,7 @@ services:
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-ratels_secure_dev_pass}
       POSTGRES_DB: ${POSTGRES_DB:-ratels_db}
     ports:
-      - "5432:5432"
+      - "127.0.0.1:5432:5432"
     volumes:
       - postgres_data:/var/lib/postgresql/data
     healthcheck:
@@ -39,19 +39,30 @@ services:
       FOUNDATION_PROVISIONAL_NAME: "Martins Vincent Otse Foundation"
     ports:
       - "8000:8000"
-    command: >
-      sh -c "/app/seed && /app/server"
+    command: ["sh", "-c", "/app/migrate && /app/seed && exec /app/server"]
+    healthcheck:
+      test: ["CMD", "curl", "--fail", "http://127.0.0.1:8000/health"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
 
   web:
     build:
       context: ..
       dockerfile: infra/Dockerfile.web
+      args:
+        INTERNAL_API_URL: http://api:8000
+        API_URL: http://api:8000
+        NEXT_PUBLIC_API_URL: /api/v1
     container_name: ratels_web
     restart: unless-stopped
     depends_on:
-      - api
+      api:
+        condition: service_healthy
     environment:
-      NEXT_PUBLIC_API_URL: http://127.0.0.1:8000/api/v1
+      NEXT_PUBLIC_API_URL: /api/v1
+      API_URL: http://api:8000
+      INTERNAL_API_URL: http://api:8000
     ports:
       - "3000:3000"
 
