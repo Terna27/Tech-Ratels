@@ -3,6 +3,7 @@ package migrator_test
 import (
 	"context"
 	"os"
+	"sync"
 	"testing"
 
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -111,5 +112,63 @@ func TestMigrations_LifecycleRollbackAndRecovery(t *testing.T) {
 	// 7. Test Idempotency
 	if err := migrator.RunMigrations(ctx, pool); err != nil {
 		t.Fatalf("second run of migrator (idempotency check) failed: %v", err)
+	}
+}
+
+func TestMigrations_ConcurrentExecutionSafety(t *testing.T) {
+	testDBURL := os.Getenv("TEST_DATABASE_URL")
+	if testDBURL == "" {
+		testDBURL = "postgres://postgres@127.0.0.1:5432/ratels_migration_audit_db?sslmode=disable"
+	}
+
+	ctx := context.Background()
+	pool, err := pgxpool.New(ctx, testDBURL)
+	if err != nil {
+		t.Fatalf("failed connecting to migration test database: %v", err)
+	}
+	defer pool.Close()
+
+	// Concurrently invoke RunMigrations from 5 simultaneous workers
+	const numWorkers = 5
+	errs := make([]error, numWorkers)
+	var wg sync.WaitGroup
+	startCh := make(chan struct{})
+
+	for i := 0; i < numWorkers; i++ {
+		wg.Add(1)
+		go func(workerIdx int) {
+			defer wg.Done()
+			<-startCh // Synchronize start
+			errs[workerIdx] = migrator.RunMigrations(ctx, pool)
+		}(i)
+	}
+
+	// Trigger all workers at once
+	close(startCh)
+	wg.Wait()
+
+	for i, wErr := range errs {
+		if wErr != nil {
+			t.Errorf("worker %d encountered error during concurrent RunMigrations: %v", i, wErr)
+		}
+	}
+
+	// Verify database is consistent and goose_db_version has no duplicate version records
+	var duplicateCount int
+	err = pool.QueryRow(ctx, `
+		SELECT COUNT(*)
+		FROM (
+			SELECT version_id, COUNT(*)
+			FROM goose_db_version
+			WHERE is_applied = true
+			GROUP BY version_id
+			HAVING COUNT(*) > 1
+		) dups
+	`).Scan(&duplicateCount)
+	if err != nil {
+		t.Fatalf("failed checking for duplicate version records: %v", err)
+	}
+	if duplicateCount > 0 {
+		t.Errorf("expected 0 duplicate version records in goose_db_version, found %d", duplicateCount)
 	}
 }

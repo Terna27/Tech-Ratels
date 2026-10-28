@@ -515,4 +515,81 @@ func TestConfig_EmailProviderConfiguration(t *testing.T) {
 	})
 }
 
+func TestConfig_PaymentProviderConfiguration(t *testing.T) {
+	t.Run("Production absent PAYMENT_PROVIDER defaults safely to unconfigured", func(t *testing.T) {
+		os.Setenv("APP_ENV", "production")
+		os.Setenv("DATABASE_URL", "postgres://user:pass@ep-production-host.neon.tech/dbname?sslmode=require")
+		os.Setenv("JWT_SECRET", "super-secret-jwt-production-key-minimum-32-chars-long!")
+		os.Setenv("ALLOWED_ORIGINS", "https://ratels-web.onrender.com")
+		os.Unsetenv("PAYMENT_PROVIDER")
+		os.Unsetenv("PAYSTACK_SECRET_KEY")
+		os.Unsetenv("PAYSTACK_PUBLIC_KEY")
+		defer func() {
+			os.Unsetenv("APP_ENV")
+			os.Unsetenv("DATABASE_URL")
+			os.Unsetenv("JWT_SECRET")
+			os.Unsetenv("ALLOWED_ORIGINS")
+			os.Unsetenv("PAYMENT_PROVIDER")
+			os.Unsetenv("PAYSTACK_SECRET_KEY")
+			os.Unsetenv("PAYSTACK_PUBLIC_KEY")
+		}()
+
+		cfg, err := LoadAndValidate()
+		if err != nil {
+			t.Fatalf("expected production config with unconfigured paystack to validate cleanly, got err: %v", err)
+		}
+		if cfg.PaymentProvider != "unconfigured" {
+			t.Errorf("expected PaymentProvider to default to 'unconfigured' in production, got %q", cfg.PaymentProvider)
+		}
+		if cfg.PaystackSecretKey != "" {
+			t.Errorf("expected PaystackSecretKey to be empty, got %q", cfg.PaystackSecretKey)
+		}
+		if cfg.PaystackPublicKey != "" {
+			t.Errorf("expected PaystackPublicKey to be empty, got %q", cfg.PaystackPublicKey)
+		}
+	})
+
+	t.Run("Production rejects sandbox payment provider", func(t *testing.T) {
+		os.Setenv("APP_ENV", "production")
+		os.Setenv("DATABASE_URL", "postgres://user:pass@ep-production-host.neon.tech/dbname?sslmode=require")
+		os.Setenv("JWT_SECRET", "super-secret-jwt-production-key-minimum-32-chars-long!")
+		os.Setenv("ALLOWED_ORIGINS", "https://ratels-web.onrender.com")
+		os.Setenv("PAYMENT_PROVIDER", "sandbox")
+		defer func() {
+			os.Unsetenv("APP_ENV")
+			os.Unsetenv("DATABASE_URL")
+			os.Unsetenv("JWT_SECRET")
+			os.Unsetenv("ALLOWED_ORIGINS")
+			os.Unsetenv("PAYMENT_PROVIDER")
+		}()
+
+		_, err := LoadAndValidate()
+		if err == nil || !strings.Contains(err.Error(), "cannot be set to 'sandbox'") {
+			t.Errorf("expected error rejecting sandbox payment provider in production, got: %v", err)
+		}
+	})
+
+	t.Run("Production requires PAYSTACK_SECRET_KEY when PAYMENT_PROVIDER=paystack", func(t *testing.T) {
+		os.Setenv("APP_ENV", "production")
+		os.Setenv("DATABASE_URL", "postgres://user:pass@ep-production-host.neon.tech/dbname?sslmode=require")
+		os.Setenv("JWT_SECRET", "super-secret-jwt-production-key-minimum-32-chars-long!")
+		os.Setenv("ALLOWED_ORIGINS", "https://ratels-web.onrender.com")
+		os.Setenv("PAYMENT_PROVIDER", "paystack")
+		os.Unsetenv("PAYSTACK_SECRET_KEY")
+		defer func() {
+			os.Unsetenv("APP_ENV")
+			os.Unsetenv("DATABASE_URL")
+			os.Unsetenv("JWT_SECRET")
+			os.Unsetenv("ALLOWED_ORIGINS")
+			os.Unsetenv("PAYMENT_PROVIDER")
+			os.Unsetenv("PAYSTACK_SECRET_KEY")
+		}()
+
+		_, err := LoadAndValidate()
+		if err == nil || !strings.Contains(err.Error(), "PAYSTACK_SECRET_KEY is required") {
+			t.Errorf("expected error requiring PAYSTACK_SECRET_KEY in production, got: %v", err)
+		}
+	})
+}
+
 

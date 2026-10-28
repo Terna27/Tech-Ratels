@@ -5645,6 +5645,11 @@ func (s *MarketplaceService) ProcessPendingRefunds(ctx context.Context, batchSiz
 		ProcessedCount: len(refunds),
 	}
 
+	if s.paymentGateway.ProviderName() == "unconfigured" {
+		result.PendingCount = len(refunds)
+		return result, nil
+	}
+
 	for _, ref := range refunds {
 		// Manual or offline refunds require human administrator confirmation/evidence
 		if ref.Provider == "manual" || ref.Provider == "offline" {

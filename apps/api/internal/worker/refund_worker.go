@@ -77,8 +77,14 @@ func (w *RefundWorker) Start(ctx context.Context) {
 }
 
 func (w *RefundWorker) runCycle(ctx context.Context) {
+	if ctx.Err() != nil {
+		return
+	}
 	result, err := w.marketplaceService.ProcessPendingRefunds(ctx, w.config.BatchSize)
 	if err != nil {
+		if ctx.Err() != nil {
+			return
+		}
 		log.Printf("[REFUND_WORKER] Error processing pending refunds: %v\n", err)
 		return
 	}

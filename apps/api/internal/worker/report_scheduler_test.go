@@ -51,6 +51,21 @@ func setupReportSchedulerTestEnv(t *testing.T) *reportSchedulerTestEnv {
 	cfg := worker.DefaultReportSchedulerConfig()
 	sched := worker.NewReportScheduler(repo, reportService, &cfg)
 
+	// Ensure an active admin user exists for tests requiring admin attribution
+	if _, err := repo.Queries().GetFirstActiveAdminUser(ctx); err != nil {
+		_, _ = repo.Queries().CreateUser(ctx, db.CreateUserParams{
+			ID:                  security.GenerateUUID(),
+			Email:               service.TextFromString("admin-scheduler@test.org"),
+			Phone:               service.TextFromString("+2348000000001"),
+			PasswordHash:        "hash",
+			DisplayName:         "Scheduler Admin",
+			MembershipReference: "ADM-SCHED-001",
+			Status:              "active",
+			PrimaryRole:         "super_admin",
+			IsVerified:          true,
+		})
+	}
+
 	return &reportSchedulerTestEnv{
 		pool:          pool,
 		repo:          repo,

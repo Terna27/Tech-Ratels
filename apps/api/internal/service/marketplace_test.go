@@ -792,6 +792,18 @@ func TestMarketplaceService_UnconfiguredGatewayRejection(t *testing.T) {
 	if !errors.Is(err, payment.ErrPaymentProcessingUnavailable) {
 		t.Fatalf("Expected ErrPaymentProcessingUnavailable on ConfirmPayment, got %v", err)
 	}
+
+	// ProcessPendingRefunds must safely return without attempting payment dispatch
+	refundResult, err := unconfiguredSvc.ProcessPendingRefunds(ctx, 10)
+	if err != nil {
+		t.Fatalf("Expected nil error from ProcessPendingRefunds on unconfigured gateway, got %v", err)
+	}
+	if refundResult == nil {
+		t.Fatalf("Expected non-nil refundResult")
+	}
+	if refundResult.SettledCount != 0 || refundResult.RetriedCount != 0 || refundResult.FailedCount != 0 {
+		t.Errorf("Expected zero settled/retried/failed refunds on unconfigured gateway, got %+v", refundResult)
+	}
 }
 
 func TestMarketplaceService_DirectOrderCancellationAndStockRestoration(t *testing.T) {

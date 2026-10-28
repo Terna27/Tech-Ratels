@@ -254,3 +254,41 @@ func TestRefundWorker_Lifecycle(t *testing.T) {
 	time.Sleep(100 * time.Millisecond)
 	w.Stop()
 }
+
+func TestRefundWorker_UnconfiguredGatewaySafety(t *testing.T) {
+	testDBURL := os.Getenv("TEST_DATABASE_URL")
+	if testDBURL == "" {
+		testDBURL = "postgres://postgres@127.0.0.1:5432/ratels_migration_audit_db?sslmode=disable"
+	}
+
+	ctx := context.Background()
+	pool, err := pgxpool.New(ctx, testDBURL)
+	if err != nil {
+		t.Fatalf("Failed to connect to database: %v", err)
+	}
+	defer pool.Close()
+
+	repo := repository.NewRepository(pool)
+	auditSvc := service.NewAuditService(repo)
+	unconfGateway := payment.NewUnconfiguredGateway()
+	mockStorage := storage.NewDevSandboxStorageService("http://localhost:3000")
+	mktSvc := service.NewMarketplaceService(repo, auditSvc, unconfGateway, mockStorage)
+
+	w := worker.NewRefundWorker(mktSvc, &worker.RefundWorkerConfig{
+		PollInterval: 50 * time.Millisecond,
+		BatchSize:    10,
+	})
+
+	w.Start(ctx)
+	time.Sleep(100 * time.Millisecond)
+	w.Stop()
+
+	// Verify that ProcessPendingRefunds returns safely without dispatching or erroring
+	res, err := mktSvc.ProcessPendingRefunds(ctx, 10)
+	if err != nil {
+		t.Fatalf("expected nil error on unconfigured ProcessPendingRefunds, got: %v", err)
+	}
+	if res.SettledCount != 0 || res.RetriedCount != 0 || res.FailedCount != 0 {
+		t.Errorf("expected 0 settled/retried/failed refunds on unconfigured gateway, got %+v", res)
+	}
+}

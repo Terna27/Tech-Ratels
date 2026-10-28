@@ -15,7 +15,23 @@ import (
 
 // RunMigrations inspects the embedded SQL migration scripts and executes any pending
 // migrations in transactional order, recording execution status in goose_db_version.
+// Uses distributed PostgreSQL advisory lock to prevent concurrent deployment races.
 func RunMigrations(ctx context.Context, pool *pgxpool.Pool) error {
+	// 0. Acquire distributed session advisory lock to guarantee mutual exclusion during concurrent deployments
+	conn, err := pool.Acquire(ctx)
+	if err != nil {
+		return fmt.Errorf("failed to acquire connection for migration advisory lock: %w", err)
+	}
+	defer conn.Release()
+
+	const migrationAdvisoryLockID int64 = 8472910481
+	if _, err := conn.Exec(ctx, "SELECT pg_advisory_lock($1)", migrationAdvisoryLockID); err != nil {
+		return fmt.Errorf("failed to acquire migration advisory lock: %w", err)
+	}
+	defer func() {
+		_, _ = conn.Exec(context.Background(), "SELECT pg_advisory_unlock($1)", migrationAdvisoryLockID)
+	}()
+
 	// 1. Ensure goose_db_version tracking table exists
 	createTableSQL := `
 		CREATE TABLE IF NOT EXISTS goose_db_version (
@@ -24,13 +40,14 @@ func RunMigrations(ctx context.Context, pool *pgxpool.Pool) error {
 			is_applied boolean NOT NULL,
 			tstamp timestamp without time zone NOT NULL DEFAULT now()
 		);
+		CREATE UNIQUE INDEX IF NOT EXISTS idx_goose_db_version_vid ON goose_db_version(version_id);
 	`
-	if _, err := pool.Exec(ctx, createTableSQL); err != nil {
+	if _, err := conn.Exec(ctx, createTableSQL); err != nil {
 		return fmt.Errorf("failed to create goose_db_version table: %w", err)
 	}
 
 	// 2. Query already applied version IDs
-	rows, err := pool.Query(ctx, "SELECT version_id FROM goose_db_version WHERE is_applied = true")
+	rows, err := conn.Query(ctx, "SELECT version_id FROM goose_db_version WHERE is_applied = true")
 	if err != nil {
 		return fmt.Errorf("failed to query goose_db_version: %w", err)
 	}
