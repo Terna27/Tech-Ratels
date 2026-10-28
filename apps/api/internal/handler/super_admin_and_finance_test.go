@@ -60,7 +60,7 @@ func TestSuperAdminAuthority_CoordinatorBoundaries(t *testing.T) {
 	if err != nil || len(states) == 0 {
 		t.Fatalf("Failed to list states: %v", err)
 	}
-	stateID := states[0].ID
+	stateID := getVacantStateID(t, h)
 
 	// 1. Ordinary National Admin attempts to appoint a state coordinator -> 403 Forbidden
 	apptPayload := map[string]interface{}{
@@ -354,13 +354,13 @@ func TestFinancialStatement_ReconciliationAndCSV(t *testing.T) {
 
 	// 2. Record a disbursement (Outflow: 500,000 Kobo = 5,000 NGN)
 	tx2Payload := map[string]interface{}{
-		"idempotency_key":   fmt.Sprintf("stmt-tx-2-%d", time.Now().UnixNano()),
-		"transaction_type":  "disbursement",
-		"amount":            500000,
-		"currency":          "NGN",
-		"source_fund_id":    destFund,
-		"notes":             "Purchase of cleanup gloves and sacks",
-		"auto_post":         true,
+		"idempotency_key":  fmt.Sprintf("stmt-tx-2-%d", time.Now().UnixNano()),
+		"transaction_type": "disbursement",
+		"amount":           500000,
+		"currency":         "NGN",
+		"source_fund_id":   destFund,
+		"notes":            "Purchase of cleanup gloves and sacks",
+		"auto_post":        true,
 	}
 	tx2Bytes, _ := json.Marshal(tx2Payload)
 	req, _ = http.NewRequest("POST", "/api/v1/finance/transactions", bytes.NewBuffer(tx2Bytes))

@@ -267,6 +267,82 @@ func (q *Queries) ListActiveAppointmentsByUser(ctx context.Context, userID strin
 	return items, nil
 }
 
+const listActiveApprovedAppointmentsByUser = `-- name: ListActiveApprovedAppointmentsByUser :many
+SELECT a.id, a.user_id, a.role_title, a.role_type, a.jurisdiction_type, a.jurisdiction_id, a.reporting_to_appointment_id, a.start_date, a.end_date, a.status, a.approval_reference, a.public_contact, a.created_at, a.updated_at, a.version,
+       CASE
+           WHEN a.jurisdiction_type = 'national' THEN 'National (Nigeria)'
+           WHEN a.jurisdiction_type = 'zone' THEN COALESCE(z.name, a.jurisdiction_id, '')
+           WHEN a.jurisdiction_type = 'state' THEN COALESCE(s.name, a.jurisdiction_id, '')
+           WHEN a.jurisdiction_type = 'lga' THEN COALESCE(l.name, a.jurisdiction_id, '')
+           ELSE COALESCE(a.jurisdiction_id, '')
+       END AS jurisdiction_name
+FROM appointments a
+LEFT JOIN zones z ON a.jurisdiction_type = 'zone' AND (a.jurisdiction_id = z.id OR a.jurisdiction_id = z.code)
+LEFT JOIN states s ON a.jurisdiction_type = 'state' AND (a.jurisdiction_id = s.id OR a.jurisdiction_id = s.code)
+LEFT JOIN lgas l ON a.jurisdiction_type = 'lga' AND a.jurisdiction_id = l.id
+WHERE a.user_id = $1
+  AND a.status = 'active'
+  AND a.start_date <= CURRENT_TIMESTAMP
+  AND (a.end_date IS NULL OR a.end_date > CURRENT_TIMESTAMP)
+ORDER BY a.start_date DESC
+`
+
+type ListActiveApprovedAppointmentsByUserRow struct {
+	ID                       string             `json:"id"`
+	UserID                   string             `json:"user_id"`
+	RoleTitle                string             `json:"role_title"`
+	RoleType                 string             `json:"role_type"`
+	JurisdictionType         string             `json:"jurisdiction_type"`
+	JurisdictionID           pgtype.Text        `json:"jurisdiction_id"`
+	ReportingToAppointmentID pgtype.Text        `json:"reporting_to_appointment_id"`
+	StartDate                pgtype.Timestamptz `json:"start_date"`
+	EndDate                  pgtype.Timestamptz `json:"end_date"`
+	Status                   string             `json:"status"`
+	ApprovalReference        string             `json:"approval_reference"`
+	PublicContact            pgtype.Text        `json:"public_contact"`
+	CreatedAt                pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt                pgtype.Timestamptz `json:"updated_at"`
+	Version                  int32              `json:"version"`
+	JurisdictionName         interface{}        `json:"jurisdiction_name"`
+}
+
+func (q *Queries) ListActiveApprovedAppointmentsByUser(ctx context.Context, userID string) ([]ListActiveApprovedAppointmentsByUserRow, error) {
+	rows, err := q.db.Query(ctx, listActiveApprovedAppointmentsByUser, userID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []ListActiveApprovedAppointmentsByUserRow
+	for rows.Next() {
+		var i ListActiveApprovedAppointmentsByUserRow
+		if err := rows.Scan(
+			&i.ID,
+			&i.UserID,
+			&i.RoleTitle,
+			&i.RoleType,
+			&i.JurisdictionType,
+			&i.JurisdictionID,
+			&i.ReportingToAppointmentID,
+			&i.StartDate,
+			&i.EndDate,
+			&i.Status,
+			&i.ApprovalReference,
+			&i.PublicContact,
+			&i.CreatedAt,
+			&i.UpdatedAt,
+			&i.Version,
+			&i.JurisdictionName,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listAppointmentHistory = `-- name: ListAppointmentHistory :many
 SELECT h.id, h.appointment_id, h.action, h.changed_by_user_id, h.previous_status, h.new_status, h.reason, h.timestamp, h.created_at, h.updated_at, h.version, h.previous_user_id, h.new_user_id, h.effective_date,
        u.display_name as changed_by_name,

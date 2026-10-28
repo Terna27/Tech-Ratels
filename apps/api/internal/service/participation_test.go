@@ -6,6 +6,9 @@ import (
 	"testing"
 	"time"
 
+	"github.com/jackc/pgx/v5/pgtype"
+	"ratels-api/internal/db"
+	"ratels-api/internal/security"
 	"ratels-api/internal/service"
 )
 
@@ -37,8 +40,26 @@ func TestParticipationAndAntiSelfApproval(t *testing.T) {
 		t.Fatalf("Failed to create coordinator: %v", err)
 	}
 
+	// Give the event creator a legitimate coordinator appointment.
+	_, err = env.Repo.Queries().CreateAppointment(ctx, db.CreateAppointmentParams{
+		ID:               security.GenerateUUID(),
+		UserID:           regCoord.UserID,
+		RoleTitle:        "Event State Coordinator",
+		RoleType:         "state_coordinator",
+		JurisdictionType: "state",
+		JurisdictionID:   service.TextFromString(state.ID),
+		StartDate: pgtype.Timestamptz{
+			Time:  time.Now().Add(-time.Hour),
+			Valid: true,
+		},
+		Status: "active",
+	})
+	if err != nil {
+		t.Fatalf("Failed to create event coordinator appointment: %v", err)
+	}
+
 	// 3. Create Event
-	event, err := env.CleanupService.CreateEvent(ctx, regCoord.UserID, "national_admin", nil, service.CreateEventRequest{
+	event, err := env.CleanupService.CreateEvent(ctx, regCoord.UserID, "state_coordinator", nil, service.CreateEventRequest{
 		Title:         "Badge Verification Event",
 		StateID:       state.ID,
 		LGAID:         lga.ID,
@@ -83,6 +104,24 @@ func TestParticipationAndAntiSelfApproval(t *testing.T) {
 	})
 	if err != nil {
 		t.Fatalf("Failed to create independent reviewer: %v", err)
+	}
+
+	// Grant the independent reviewer an active appointment covering this event.
+	_, err = env.Repo.Queries().CreateAppointment(ctx, db.CreateAppointmentParams{
+		ID:               security.GenerateUUID(),
+		UserID:           regReviewer.UserID,
+		RoleTitle:        "Independent State Review Coordinator",
+		RoleType:         "state_coordinator",
+		JurisdictionType: "state",
+		JurisdictionID:   service.TextFromString(state.ID),
+		StartDate: pgtype.Timestamptz{
+			Time:  time.Now().Add(-time.Hour),
+			Valid: true,
+		},
+		Status: "active",
+	})
+	if err != nil {
+		t.Fatalf("Failed to create independent reviewer appointment: %v", err)
 	}
 
 	// Independent reviewer approves the claim

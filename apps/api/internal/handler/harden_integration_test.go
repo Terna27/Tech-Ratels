@@ -221,12 +221,12 @@ func TestExpiredAppointmentRevokesAccessHTTP(t *testing.T) {
 
 	// Make request to endpoint requiring state_coordinator role: POST /api/v1/activities/events
 	eventBytes, _ := json.Marshal(map[string]interface{}{
-		"title":              "Expired Access Attempt",
-		"state_id":           lagos.ID,
-		"address":            "Test Address",
-		"start_time":         time.Now().Add(48 * time.Hour).Format(time.RFC3339),
-		"end_time":           time.Now().Add(52 * time.Hour).Format(time.RFC3339),
-		"capacity":           50,
+		"title":      "Expired Access Attempt",
+		"state_id":   lagos.ID,
+		"address":    "Test Address",
+		"start_time": time.Now().Add(48 * time.Hour).Format(time.RFC3339),
+		"end_time":   time.Now().Add(52 * time.Hour).Format(time.RFC3339),
+		"capacity":   50,
 	})
 	req, _ := http.NewRequest("POST", "/api/v1/activities/events", bytes.NewBuffer(eventBytes))
 	req.Header.Set("Authorization", "Bearer "+token)
@@ -322,13 +322,13 @@ func TestPermissionsAndCrossStateIsolationHTTP(t *testing.T) {
 
 	// A. Lagos Coordinator creates event IN LAGOS -> 201 Created
 	lagosEventBytes, _ := json.Marshal(map[string]interface{}{
-		"title":              "Lagos Community Cleanup",
-		"state_id":           lagosState.ID,
-		"lga_id":             lagosLGAs[0].ID,
-		"address":            "Marina Waterfront",
-		"start_time":         time.Now().Add(48 * time.Hour).Format(time.RFC3339),
-		"end_time":           time.Now().Add(52 * time.Hour).Format(time.RFC3339),
-		"capacity":           100,
+		"title":      "Lagos Community Cleanup",
+		"state_id":   lagosState.ID,
+		"lga_id":     lagosLGAs[0].ID,
+		"address":    "Marina Waterfront",
+		"start_time": time.Now().Add(48 * time.Hour).Format(time.RFC3339),
+		"end_time":   time.Now().Add(52 * time.Hour).Format(time.RFC3339),
+		"capacity":   100,
 	})
 	req, _ = http.NewRequest("POST", "/api/v1/activities/events", bytes.NewBuffer(lagosEventBytes))
 	req.Header.Set("Authorization", "Bearer "+lagosToken)
@@ -341,13 +341,13 @@ func TestPermissionsAndCrossStateIsolationHTTP(t *testing.T) {
 
 	// B. Lagos Coordinator attempts to create event IN KANO -> 403 Forbidden!
 	kanoEventBytes, _ := json.Marshal(map[string]interface{}{
-		"title":              "Unauthorized Kano Event",
-		"state_id":           kanoState.ID,
-		"lga_id":             kanoLGAs[0].ID,
-		"address":            "Kano City Plaza",
-		"start_time":         time.Now().Add(48 * time.Hour).Format(time.RFC3339),
-		"end_time":           time.Now().Add(52 * time.Hour).Format(time.RFC3339),
-		"capacity":           100,
+		"title":      "Unauthorized Kano Event",
+		"state_id":   kanoState.ID,
+		"lga_id":     kanoLGAs[0].ID,
+		"address":    "Kano City Plaza",
+		"start_time": time.Now().Add(48 * time.Hour).Format(time.RFC3339),
+		"end_time":   time.Now().Add(52 * time.Hour).Format(time.RFC3339),
+		"capacity":   100,
 	})
 	req, _ = http.NewRequest("POST", "/api/v1/activities/events", bytes.NewBuffer(kanoEventBytes))
 	req.Header.Set("Authorization", "Bearer "+lagosToken)
@@ -391,14 +391,14 @@ func TestCompleteUserJourneyHTTP(t *testing.T) {
 
 	// 2. Admin creates activity draft with capacity=2
 	createEvtBytes, _ := json.Marshal(map[string]interface{}{
-		"title":              "Phase 1 Demonstration Cleanup",
-		"state_id":           state.ID,
-		"lga_id":             lga.ID,
-		"address":            "12 Freedom Way",
-		"start_time":         time.Now().Add(24 * time.Hour).Format(time.RFC3339),
-		"end_time":           time.Now().Add(28 * time.Hour).Format(time.RFC3339),
-		"capacity":           2, // Low capacity for testing limits
-		"status":             "draft",
+		"title":      "Phase 1 Demonstration Cleanup",
+		"state_id":   state.ID,
+		"lga_id":     lga.ID,
+		"address":    "12 Freedom Way",
+		"start_time": time.Now().Add(24 * time.Hour).Format(time.RFC3339),
+		"end_time":   time.Now().Add(28 * time.Hour).Format(time.RFC3339),
+		"capacity":   2, // Low capacity for testing limits
+		"status":     "draft",
 	})
 	req, _ := http.NewRequest("POST", "/api/v1/activities/events", bytes.NewBuffer(createEvtBytes))
 	req.Header.Set("Authorization", "Bearer "+adminToken)
@@ -534,9 +534,9 @@ func TestCompleteUserJourneyHTTP(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Failed to fetch persistent registration record from DB: %v", err)
 	}
-	if dbReg.Status != "registered" {
-		t.Errorf("Expected registration record Status='registered', got %s", dbReg.Status)
-	}
+	if dbReg.Status != "attended" {
+        t.Errorf("Expected registration record Status='attended', got %s", dbReg.Status)
+    }
 
 	dbClaim, err := h.Repo.Queries().GetParticipationClaimByID(ctx, claimID)
 	if err != nil {

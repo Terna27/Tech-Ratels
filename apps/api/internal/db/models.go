@@ -403,6 +403,8 @@ type EventInstance struct {
 	RecyclablesKg        int64              `json:"recyclables_kg"`
 	CleanupDurationHours pgtype.Numeric     `json:"cleanup_duration_hours"`
 	EnvironmentalNotes   pgtype.Text        `json:"environmental_notes"`
+	Description          pgtype.Text        `json:"description"`
+	ZoneID               pgtype.Text        `json:"zone_id"`
 }
 
 type EventMediaConsent struct {
@@ -453,15 +455,20 @@ type EventMedium struct {
 }
 
 type EventRegistration struct {
-	ID           string             `json:"id"`
-	EventID      string             `json:"event_id"`
-	UserID       string             `json:"user_id"`
-	Status       string             `json:"status"`
-	RegisteredAt pgtype.Timestamptz `json:"registered_at"`
-	CancelledAt  pgtype.Timestamptz `json:"cancelled_at"`
-	CreatedAt    pgtype.Timestamptz `json:"created_at"`
-	UpdatedAt    pgtype.Timestamptz `json:"updated_at"`
-	Version      int32              `json:"version"`
+	ID                 string             `json:"id"`
+	EventID            string             `json:"event_id"`
+	UserID             string             `json:"user_id"`
+	Status             string             `json:"status"`
+	RegisteredAt       pgtype.Timestamptz `json:"registered_at"`
+	CancelledAt        pgtype.Timestamptz `json:"cancelled_at"`
+	CreatedAt          pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt          pgtype.Timestamptz `json:"updated_at"`
+	Version            int32              `json:"version"`
+	CheckinCode        pgtype.Text        `json:"checkin_code"`
+	AttendedAt         pgtype.Timestamptz `json:"attended_at"`
+	VerifiedAt         pgtype.Timestamptz `json:"verified_at"`
+	VerifiedByUserID   pgtype.Text        `json:"verified_by_user_id"`
+	VerificationMethod pgtype.Text        `json:"verification_method"`
 }
 
 type FinancialAllocation struct {
@@ -1238,20 +1245,26 @@ type ParticipationAppeal struct {
 }
 
 type ParticipationClaim struct {
-	ID               string             `json:"id"`
-	EventID          string             `json:"event_id"`
-	UserID           string             `json:"user_id"`
-	Description      string             `json:"description"`
-	EvidenceNotes    pgtype.Text        `json:"evidence_notes"`
-	Status           string             `json:"status"`
-	SubmittedAt      pgtype.Timestamptz `json:"submitted_at"`
-	ReviewedByUserID pgtype.Text        `json:"reviewed_by_user_id"`
-	ReviewDecision   pgtype.Text        `json:"review_decision"`
-	ReviewReason     pgtype.Text        `json:"review_reason"`
-	ReviewedAt       pgtype.Timestamptz `json:"reviewed_at"`
-	CreatedAt        pgtype.Timestamptz `json:"created_at"`
-	UpdatedAt        pgtype.Timestamptz `json:"updated_at"`
-	Version          int32              `json:"version"`
+	ID                 string             `json:"id"`
+	EventID            string             `json:"event_id"`
+	UserID             string             `json:"user_id"`
+	Description        string             `json:"description"`
+	EvidenceNotes      pgtype.Text        `json:"evidence_notes"`
+	Status             string             `json:"status"`
+	SubmittedAt        pgtype.Timestamptz `json:"submitted_at"`
+	ReviewedByUserID   pgtype.Text        `json:"reviewed_by_user_id"`
+	ReviewDecision     pgtype.Text        `json:"review_decision"`
+	ReviewReason       pgtype.Text        `json:"review_reason"`
+	ReviewedAt         pgtype.Timestamptz `json:"reviewed_at"`
+	CreatedAt          pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt          pgtype.Timestamptz `json:"updated_at"`
+	Version            int32              `json:"version"`
+	EvidenceUrl        pgtype.Text        `json:"evidence_url"`
+	EvidenceType       pgtype.Text        `json:"evidence_type"`
+	VerificationMethod pgtype.Text        `json:"verification_method"`
+	ReversedAt         pgtype.Timestamptz `json:"reversed_at"`
+	ReversedByUserID   pgtype.Text        `json:"reversed_by_user_id"`
+	ReversalReason     pgtype.Text        `json:"reversal_reason"`
 }
 
 type PublicReportApproval struct {

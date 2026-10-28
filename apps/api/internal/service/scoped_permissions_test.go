@@ -6,6 +6,9 @@ import (
 	"testing"
 	"time"
 
+	"github.com/jackc/pgx/v5/pgtype"
+	"ratels-api/internal/db"
+	"ratels-api/internal/security"
 	"ratels-api/internal/service"
 )
 
@@ -49,6 +52,24 @@ func TestScopedPermissions(t *testing.T) {
 		t.Fatalf("Failed to register Lagos coordinator: %v", err)
 	}
 
+	// An active appointment is required for coordinator authorization.
+	_, err = env.Repo.Queries().CreateAppointment(ctx, db.CreateAppointmentParams{
+		ID:               security.GenerateUUID(),
+		UserID:           regCoord.UserID,
+		RoleTitle:        "Lagos State Coordinator",
+		RoleType:         "state_coordinator",
+		JurisdictionType: "state",
+		JurisdictionID:   service.TextFromString(lagosID),
+		StartDate: pgtype.Timestamptz{
+			Time:  time.Now().Add(-time.Hour),
+			Valid: true,
+		},
+		Status: "active",
+	})
+	if err != nil {
+		t.Fatalf("Failed to create Lagos coordinator appointment: %v", err)
+	}
+
 	// 3. Attempt cross-state creation: Lagos Coordinator tries to create event in Kano State
 	_, err = env.CleanupService.CreateEvent(ctx, regCoord.UserID, "state_coordinator", &lagosID, service.CreateEventRequest{
 		Title:         "Unauthorized Cross-State Kano Venue",
@@ -67,9 +88,10 @@ func TestScopedPermissions(t *testing.T) {
 		t.Fatalf("Expected ErrScopeUnauthorized when Lagos coordinator creates event in Kano, got %v", err)
 	}
 
-	// 4. Attempt cross-state review: Lagos coordinator tries to review Kano claim queue
-	_, err = env.PartService.ListReviewQueue(ctx, "state_coordinator", nil)
-	if err != service.ErrScopeUnauthorized {
-		t.Fatalf("Expected ErrScopeUnauthorized when jurisdiction ID is missing for state coordinator review queue, got %v", err)
+	// 4. The active appointment determines the coordinator's jurisdiction.
+	// The review queue should be restricted to Lagos.
+	_, err = env.PartService.ListReviewQueue(ctx, regCoord.UserID, "state_coordinator", nil)
+	if err != nil {
+		t.Fatalf("Expected Lagos coordinator to access scoped review queue, got %v", err)
 	}
 }

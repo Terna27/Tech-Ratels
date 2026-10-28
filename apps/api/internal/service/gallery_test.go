@@ -4,9 +4,11 @@ import (
 	"bytes"
 	"context"
 	"fmt"
+	"github.com/jackc/pgx/v5/pgtype"
 	"image"
 	"image/color"
 	"image/jpeg"
+	"ratels-api/internal/security"
 	"testing"
 	"time"
 
@@ -30,7 +32,37 @@ func createTestJPEGBytes(w, h int) []byte {
 func createTestCleanupEvent(t *testing.T, env *TestEnv, creatorID, stateID, lgaID string) *db.EventInstance {
 	t.Helper()
 	ctx := context.Background()
-	event, err := env.CleanupService.CreateEvent(ctx, creatorID, "national_admin", nil, service.CreateEventRequest{
+
+	// Event creation requires an appointed coordinator.
+	// The uploader remains an ordinary member.
+	_ = creatorID
+	regCoord, err := env.AuthService.Register(ctx, service.RegisterRequest{
+		Email:       fmt.Sprintf("gallery_coord_%d@example.org", time.Now().UnixNano()),
+		Password:    "TestPassword123!",
+		DisplayName: "Gallery Event Coordinator",
+	})
+	if err != nil {
+		t.Fatalf("Failed to register gallery coordinator: %v", err)
+	}
+
+	_, err = env.Repo.Queries().CreateAppointment(ctx, db.CreateAppointmentParams{
+		ID:               security.GenerateUUID(),
+		UserID:           regCoord.UserID,
+		RoleTitle:        "Gallery State Coordinator",
+		RoleType:         "state_coordinator",
+		JurisdictionType: "state",
+		JurisdictionID:   service.TextFromString(stateID),
+		StartDate: pgtype.Timestamptz{
+			Time:  time.Now().Add(-time.Hour),
+			Valid: true,
+		},
+		Status: "active",
+	})
+	if err != nil {
+		t.Fatalf("Failed to appoint gallery coordinator: %v", err)
+	}
+
+	event, err := env.CleanupService.CreateEvent(ctx, regCoord.UserID, "state_coordinator", nil, service.CreateEventRequest{
 		Title:         fmt.Sprintf("Cleanup Event %d", time.Now().UnixNano()),
 		StateID:       stateID,
 		LGAID:         lgaID,

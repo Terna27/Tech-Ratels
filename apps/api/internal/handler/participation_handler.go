@@ -64,7 +64,7 @@ func (h *ParticipationHandler) ListReviewQueue(w http.ResponseWriter, r *http.Re
 		}
 	}
 
-	queue, err := h.partService.ListReviewQueue(r.Context(), actorRole, actorJurisdictionID)
+	queue, err := h.partService.ListReviewQueue(r.Context(), user.ID, actorRole, actorJurisdictionID)
 	if err != nil {
 		if err == service.ErrScopeUnauthorized {
 			ErrorJSON(w, http.StatusForbidden, "SCOPE_UNAUTHORIZED", err.Error(), nil)
@@ -170,4 +170,59 @@ func (h *ParticipationHandler) ListMyBadges(w http.ResponseWriter, r *http.Reque
 	}
 
 	JSON(w, http.StatusOK, badges)
+}
+
+func (h *ParticipationHandler) ReverseClaim(w http.ResponseWriter, r *http.Request) {
+	user := GetCurrentUser(r.Context())
+	if user == nil {
+		ErrorJSON(w, http.StatusUnauthorized, "UNAUTHORIZED", "Authentication required", nil)
+		return
+	}
+
+	claimID := chi.URLParam(r, "id")
+	if claimID == "" {
+		ErrorJSON(w, http.StatusBadRequest, "INVALID_ID", "Claim ID required", nil)
+		return
+	}
+
+	var req struct {
+		Reason string `json:"reason"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		ErrorJSON(w, http.StatusBadRequest, "INVALID_REQUEST", "Invalid request payload", nil)
+		return
+	}
+
+	actorRole := user.PrimaryRole
+	reversed, err := h.partService.ReverseClaim(r.Context(), user.ID, actorRole, claimID, req.Reason)
+	if err != nil {
+		if err == service.ErrScopeUnauthorized {
+			ErrorJSON(w, http.StatusForbidden, "SCOPE_UNAUTHORIZED", err.Error(), nil)
+			return
+		}
+		if err == service.ErrClaimAlreadyReversed || err == service.ErrClaimNotApproved {
+			ErrorJSON(w, http.StatusBadRequest, "INVALID_STATE", err.Error(), nil)
+			return
+		}
+		ErrorJSON(w, http.StatusBadRequest, "REVERSAL_FAILED", err.Error(), nil)
+		return
+	}
+
+	JSON(w, http.StatusOK, reversed)
+}
+
+func (h *ParticipationHandler) ListMyClaims(w http.ResponseWriter, r *http.Request) {
+	user := GetCurrentUser(r.Context())
+	if user == nil {
+		ErrorJSON(w, http.StatusUnauthorized, "UNAUTHORIZED", "Authentication required", nil)
+		return
+	}
+
+	claims, err := h.partService.ListClaimsByUser(r.Context(), user.ID)
+	if err != nil {
+		ErrorJSON(w, http.StatusInternalServerError, "INTERNAL_ERROR", err.Error(), nil)
+		return
+	}
+
+	JSON(w, http.StatusOK, claims)
 }

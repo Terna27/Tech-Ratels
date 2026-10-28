@@ -51,7 +51,7 @@ func setupWorkerTestEnv(t *testing.T) *workerTestEnv {
 	wCfg := &worker.WorkerConfig{
 		PollInterval: 100 * time.Millisecond,
 		SchedulePoll: 500 * time.Millisecond,
-		BatchSize:    10,
+		BatchSize:    1000,
 	}
 	w := worker.NewOutboxWorker(repo, notifSvc, emailSender, smsSender, wCfg)
 

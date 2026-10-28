@@ -16,6 +16,25 @@ WHERE user_id = $1 AND status = 'active'
   AND (end_date IS NULL OR end_date > CURRENT_TIMESTAMP)
 ORDER BY start_date DESC;
 
+-- name: ListActiveApprovedAppointmentsByUser :many
+SELECT a.*,
+       CASE
+           WHEN a.jurisdiction_type = 'national' THEN 'National (Nigeria)'
+           WHEN a.jurisdiction_type = 'zone' THEN COALESCE(z.name, a.jurisdiction_id, '')
+           WHEN a.jurisdiction_type = 'state' THEN COALESCE(s.name, a.jurisdiction_id, '')
+           WHEN a.jurisdiction_type = 'lga' THEN COALESCE(l.name, a.jurisdiction_id, '')
+           ELSE COALESCE(a.jurisdiction_id, '')
+       END AS jurisdiction_name
+FROM appointments a
+LEFT JOIN zones z ON a.jurisdiction_type = 'zone' AND (a.jurisdiction_id = z.id OR a.jurisdiction_id = z.code)
+LEFT JOIN states s ON a.jurisdiction_type = 'state' AND (a.jurisdiction_id = s.id OR a.jurisdiction_id = s.code)
+LEFT JOIN lgas l ON a.jurisdiction_type = 'lga' AND a.jurisdiction_id = l.id
+WHERE a.user_id = $1
+  AND a.status = 'active'
+  AND a.start_date <= CURRENT_TIMESTAMP
+  AND (a.end_date IS NULL OR a.end_date > CURRENT_TIMESTAMP)
+ORDER BY a.start_date DESC;
+
 -- name: ListAppointments :many
 SELECT a.*,
        u.display_name as user_name,

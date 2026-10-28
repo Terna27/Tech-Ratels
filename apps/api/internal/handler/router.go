@@ -187,11 +187,18 @@ func NewRouter(p RouterParams) http.Handler {
 			act.Get("/events/{id}/gallery", p.GalleryHandler.ListEventGallery)
 
 			// Venue & Event mutations
-			act.With(RequireRole("national_admin", "state_coordinator", "lga_representative")).Post("/events", p.ActivityHandler.CreateEvent)
-			act.With(RequireRole("national_admin", "state_coordinator")).Post("/events/{id}/publish", p.ActivityHandler.PublishEvent)
-			act.With(RequireRole("national_admin", "state_coordinator")).Post("/events/{id}/reschedule", p.ActivityHandler.RescheduleEvent)
+			act.With(RequireRole("super_admin", "national_admin", "zonal_coordinator", "state_coordinator", "lga_coordinator", "lga_representative")).Post("/events", p.ActivityHandler.CreateEvent)
+			act.With(RequireRole("super_admin", "national_admin", "zonal_coordinator", "state_coordinator", "lga_coordinator", "lga_representative")).Post("/events/{id}/publish", p.ActivityHandler.PublishEvent)
+			act.With(RequireRole("super_admin", "national_admin", "zonal_coordinator", "state_coordinator", "lga_coordinator", "lga_representative")).Post("/events/{id}/reschedule", p.ActivityHandler.RescheduleEvent)
+			act.With(RequireRole("super_admin", "national_admin", "zonal_coordinator", "state_coordinator", "lga_coordinator", "lga_representative")).Post("/events/{id}/cancel", p.ActivityHandler.CancelEvent)
 
-			// Registration
+			// Operational attendance verification & roster
+			act.With(RequireRole("super_admin", "national_admin", "zonal_coordinator", "state_coordinator", "lga_coordinator", "lga_representative")).Get("/events/{id}/participants", p.ActivityHandler.ListParticipants)
+			act.With(RequireRole("super_admin", "national_admin", "zonal_coordinator", "state_coordinator", "lga_coordinator", "lga_representative")).Post("/events/{id}/verify-attendance", p.ActivityHandler.VerifyAttendance)
+
+			// Registration & Member Access
+			act.With(RequireAuth).Get("/events/{id}/my-registration", p.ActivityHandler.GetMyRegistration)
+			act.With(RequireAuth).Get("/my-registrations", p.ActivityHandler.ListMyRegistrations)
 			act.With(RequireAuth).Post("/events/{id}/register", p.ActivityHandler.RegisterForEvent)
 			act.With(RequireAuth).Post("/events/{id}/cancel-registration", p.ActivityHandler.CancelRegistration)
 		})
@@ -199,8 +206,10 @@ func NewRouter(p RouterParams) http.Handler {
 		// Participations & Badges
 		api.Route("/participations", func(part chi.Router) {
 			part.With(RequireAuth).Post("/claims", p.ParticipationHandler.SubmitClaim)
-			part.With(RequireRole("national_admin", "state_coordinator")).Get("/review-queue", p.ParticipationHandler.ListReviewQueue)
-			part.With(RequireRole("national_admin", "state_coordinator")).Post("/claims/{id}/review", p.ParticipationHandler.ReviewClaim)
+			part.With(RequireAuth).Get("/my", p.ParticipationHandler.ListMyClaims)
+			part.With(RequireRole("super_admin", "national_admin", "zonal_coordinator", "state_coordinator", "lga_coordinator", "lga_representative")).Get("/review-queue", p.ParticipationHandler.ListReviewQueue)
+			part.With(RequireRole("super_admin", "national_admin", "zonal_coordinator", "state_coordinator", "lga_coordinator", "lga_representative")).Post("/claims/{id}/review", p.ParticipationHandler.ReviewClaim)
+			part.With(RequireRole("super_admin")).Post("/claims/{id}/reverse", p.ParticipationHandler.ReverseClaim)
 			part.With(RequireAuth).Post("/claims/{id}/appeal", p.ParticipationHandler.SubmitAppeal)
 			part.With(RequireAuth).Get("/my-badges", p.ParticipationHandler.ListMyBadges)
 		})

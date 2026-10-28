@@ -208,7 +208,12 @@ export default function AdminActivitiesPage() {
           </p>
         </div>
 
-        <button
+        {/* Phase 68.3 participation review link */}
+          <Link href="/admin/activities/reviews"
+            className="inline-flex items-center gap-1.5 px-4 py-2.5 rounded-xl text-sm font-semibold border border-emerald-300 bg-emerald-50 text-emerald-950 hover:bg-emerald-100 transition">
+            Review Participation Claims
+          </Link>
+          <button
           type="button"
           onClick={() => setShowCreateModal(true)}
           className="inline-flex items-center gap-1.5 px-4 py-2.5 rounded-xl text-sm font-semibold text-white bg-emerald-800 hover:bg-emerald-900 shadow-sm transition"
@@ -534,6 +539,11 @@ export default function AdminActivitiesPage() {
                           Publish
                         </button>
                       )}
+                      {/* Phase 68.2 attendance link */}
+                      <Link href={`/admin/activities/${ev.id}/attendance`}
+                        className="inline-block px-2.5 py-1 bg-emerald-50 border border-emerald-200 hover:bg-emerald-100 text-emerald-900 font-semibold rounded-md text-[11px] transition">
+                        Verify Attendance
+                      </Link>
                       <button
                         type="button"
                         onClick={() => setRescheduleEventId(ev.id)}

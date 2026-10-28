@@ -65,12 +65,12 @@ func AuthMiddleware(cfg *config.Config, repo *repository.Repository) func(http.H
 			// Fetch active appointments (query filters status='active' AND (end_date IS NULL OR end_date > now))
 			appointments, _ := repo.Queries().ListActiveAppointmentsByUser(r.Context(), user.ID)
 
-			// Double-check appointment end_date promptly
+			// Double-check appointment start_date and end_date promptly
 			now := time.Now()
 			var validAppointments []db.Appointment
 			for _, a := range appointments {
 				if a.Status == "active" {
-					if !a.EndDate.Valid || a.EndDate.Time.After(now) {
+					if (!a.StartDate.Valid || a.StartDate.Time.Before(now) || a.StartDate.Time.Equal(now)) && (!a.EndDate.Valid || a.EndDate.Time.After(now)) {
 						validAppointments = append(validAppointments, a)
 					}
 				}

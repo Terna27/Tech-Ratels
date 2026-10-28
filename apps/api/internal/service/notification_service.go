@@ -1544,6 +1544,94 @@ func (s *NotificationService) OnReportWithdrawn(ctx context.Context, qtx *db.Que
 	})
 }
 
+func (s *NotificationService) OnEventCancelled(ctx context.Context, qtx *db.Queries, eventID, eventTitle, reason string) {
+	users, err := s.repo.Queries().ListRegisteredUsersForEvent(ctx, eventID)
+	if err != nil {
+		return
+	}
+
+	actionURL := fmt.Sprintf("%s/activities", s.appBaseURL)
+	title := fmt.Sprintf("Event Cancelled: %s", eventTitle)
+	body := fmt.Sprintf("Notice: The cleanup event '%s' has been cancelled. Reason: %s", eventTitle, reason)
+
+	for _, u := range users {
+		_, _ = s.CreateInAppNotification(ctx, qtx, CreateInAppNotificationInput{
+			RecipientID:         u.ID,
+			NotificationType:    "event_cancelled",
+			Title:               title,
+			Body:                body,
+			RelatedResourceType: strPtr("event"),
+			RelatedResourceID:   &eventID,
+			ActionURL:           &actionURL,
+			Priority:            "high",
+		})
+	}
+}
+
+func (s *NotificationService) OnAttendanceVerified(ctx context.Context, qtx *db.Queries, userID, eventTitle, method string) {
+	actionURL := fmt.Sprintf("%s/member/participations", s.appBaseURL)
+	title := "Attendance Verified!"
+	body := fmt.Sprintf("Your attendance at '%s' has been officially verified by the cleanup coordinator.", eventTitle)
+
+	_, _ = s.CreateInAppNotification(ctx, qtx, CreateInAppNotificationInput{
+		RecipientID:         userID,
+		NotificationType:    "attendance_verified",
+		Title:               title,
+		Body:                body,
+		RelatedResourceType: strPtr("event"),
+		ActionURL:           &actionURL,
+		Priority:            "normal",
+	})
+}
+
+func (s *NotificationService) OnCorrectionApproved(ctx context.Context, qtx *db.Queries, userID, eventTitle string) {
+	actionURL := fmt.Sprintf("%s/member/participations", s.appBaseURL)
+	title := "Attendance Correction Approved"
+	body := fmt.Sprintf("Your attendance correction request for '%s' has been approved and your participation is verified.", eventTitle)
+
+	_, _ = s.CreateInAppNotification(ctx, qtx, CreateInAppNotificationInput{
+		RecipientID:         userID,
+		NotificationType:    "correction_approved",
+		Title:               title,
+		Body:                body,
+		RelatedResourceType: strPtr("event"),
+		ActionURL:           &actionURL,
+		Priority:            "normal",
+	})
+}
+
+func (s *NotificationService) OnCorrectionRejected(ctx context.Context, qtx *db.Queries, userID, eventTitle, reason string) {
+	actionURL := fmt.Sprintf("%s/member/participations", s.appBaseURL)
+	title := "Attendance Correction Rejected"
+	body := fmt.Sprintf("Your attendance correction request for '%s' was reviewed and rejected. Reason: %s", eventTitle, reason)
+
+	_, _ = s.CreateInAppNotification(ctx, qtx, CreateInAppNotificationInput{
+		RecipientID:         userID,
+		NotificationType:    "correction_rejected",
+		Title:               title,
+		Body:                body,
+		RelatedResourceType: strPtr("event"),
+		ActionURL:           &actionURL,
+		Priority:            "normal",
+	})
+}
+
+func (s *NotificationService) OnParticipationReversed(ctx context.Context, qtx *db.Queries, userID, eventTitle, reason string) {
+	actionURL := fmt.Sprintf("%s/member/participations", s.appBaseURL)
+	title := "Participation Verification Reversal"
+	body := fmt.Sprintf("Notice: Your verified participation status for '%s' was reversed by administrative audit. Reason: %s", eventTitle, reason)
+
+	_, _ = s.CreateInAppNotification(ctx, qtx, CreateInAppNotificationInput{
+		RecipientID:         userID,
+		NotificationType:    "participation_reversed",
+		Title:               title,
+		Body:                body,
+		RelatedResourceType: strPtr("event"),
+		ActionURL:           &actionURL,
+		Priority:            "high",
+	})
+}
+
 // -------------------------------------------------------------
 // Safe Template Rendering Helper
 // -------------------------------------------------------------

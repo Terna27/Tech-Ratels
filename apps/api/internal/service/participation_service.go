@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strings"
 
 	"ratels-api/internal/db"
 	"ratels-api/internal/repository"
@@ -11,25 +12,32 @@ import (
 )
 
 var (
-	ErrClaimNotFound           = errors.New("participation claim not found")
-	ErrSelfApprovalNotAllowed  = errors.New("ANTI_SELF_APPROVAL: Coordinators cannot approve their own participation claims")
-	ErrDuplicateClaim          = errors.New("participation claim already submitted for this event")
-	ErrAppealNotAllowed        = errors.New("appeals can only be submitted for rejected claims")
+	ErrClaimNotFound          = errors.New("participation claim not found")
+	ErrSelfApprovalNotAllowed = errors.New("ANTI_SELF_APPROVAL: Coordinators cannot approve their own participation claims")
+	ErrDuplicateClaim         = errors.New("participation claim already submitted for this event")
+	ErrAppealNotAllowed       = errors.New("appeals can only be submitted for rejected claims")
 )
 
 type ParticipationService struct {
 	repo  *repository.Repository
 	audit *AuditService
+	notif *NotificationService
 }
 
 func NewParticipationService(repo *repository.Repository, audit *AuditService) *ParticipationService {
 	return &ParticipationService{repo: repo, audit: audit}
 }
 
+func (s *ParticipationService) SetNotificationService(notif *NotificationService) {
+	s.notif = notif
+}
+
 type SubmitClaimRequest struct {
 	EventID       string  `json:"event_id"`
 	Description   string  `json:"description"`
 	EvidenceNotes *string `json:"evidence_notes"`
+	EvidenceURL   *string `json:"evidence_url"`
+	EvidenceType  *string `json:"evidence_type"`
 }
 
 type ReviewClaimRequest struct {
@@ -48,22 +56,29 @@ func (s *ParticipationService) SubmitClaim(ctx context.Context, userID string, r
 		return nil, ErrEventNotFound
 	}
 
-	// Check duplicate claim
+	// Check if already submitted and pending or verified
 	existing, err := s.repo.Queries().GetParticipationClaimByEventAndUser(ctx, db.GetParticipationClaimByEventAndUserParams{
 		EventID: req.EventID,
 		UserID:  userID,
 	})
 	if err == nil && existing.ID != "" {
-		return nil, ErrDuplicateClaim
+		if existing.Status == "verified" || existing.Status == "approved" {
+			return nil, ErrAlreadyVerified
+		}
+		if existing.Status == "pending" {
+			return nil, ErrDuplicateClaim
+		}
 	}
 
 	claimID := security.GenerateUUID()
-	claim, err := s.repo.Queries().CreateParticipationClaim(ctx, db.CreateParticipationClaimParams{
+	claim, err := s.repo.Queries().SubmitEvidenceCorrection(ctx, db.SubmitEvidenceCorrectionParams{
 		ID:            claimID,
 		EventID:       req.EventID,
 		UserID:        userID,
 		Description:   req.Description,
 		EvidenceNotes: Text(req.EvidenceNotes),
+		EvidenceUrl:   Text(req.EvidenceURL),
+		EvidenceType:  Text(req.EvidenceType),
 	})
 	if err != nil {
 		return nil, err
@@ -72,15 +87,43 @@ func (s *ParticipationService) SubmitClaim(ctx context.Context, userID string, r
 	return &claim, nil
 }
 
-func (s *ParticipationService) ListReviewQueue(ctx context.Context, actorRole string, actorJurisdictionID *string) (interface{}, error) {
-	if actorRole == "state_coordinator" {
-		if actorJurisdictionID == nil || *actorJurisdictionID == "" {
-			return nil, ErrScopeUnauthorized
-		}
-		return s.repo.Queries().ListPendingClaimsByState(ctx, *actorJurisdictionID)
+func (s *ParticipationService) ListReviewQueue(ctx context.Context, actorID string, actorRole string, actorJurisdictionID *string) (interface{}, error) {
+	// 1. Super Admin has nationwide oversight
+	u, err := s.repo.Queries().GetUserByID(ctx, actorID)
+	if err == nil && (u.PrimaryRole == "super_admin") {
+		return s.repo.Queries().ListPendingClaims(ctx)
 	}
 
-	return s.repo.Queries().ListPendingClaims(ctx)
+	// 2. Fetch active approved appointments from DB
+	apps, err := s.repo.Queries().ListActiveApprovedAppointmentsByUser(ctx, actorID)
+	if err != nil || len(apps) == 0 {
+		if err == nil && u.PrimaryRole == "national_admin" {
+			return s.repo.Queries().ListPendingClaims(ctx)
+		}
+		return nil, ErrCoordinatorUnauthorized
+	}
+
+	// 3. Filter review queue according to coordinator appointment jurisdiction
+	for _, app := range apps {
+		switch app.RoleType {
+		case "super_admin", "national_admin":
+			return s.repo.Queries().ListPendingClaims(ctx)
+		case "zonal_coordinator":
+			if app.JurisdictionID.Valid {
+				return s.repo.Queries().ListPendingClaimsByZone(ctx, app.JurisdictionID.String)
+			}
+		case "state_coordinator":
+			if app.JurisdictionID.Valid {
+				return s.repo.Queries().ListPendingClaimsByState(ctx, app.JurisdictionID.String)
+			}
+		case "lga_coordinator", "lga_representative":
+			if app.JurisdictionID.Valid {
+				return s.repo.Queries().ListPendingClaimsByLGA(ctx, app.JurisdictionID.String)
+			}
+		}
+	}
+
+	return nil, ErrScopeUnauthorized
 }
 
 func (s *ParticipationService) ReviewClaim(ctx context.Context, reviewerID, reviewerRole string, reviewerJurisdictionID *string, claimID string, req ReviewClaimRequest) (*db.ParticipationClaim, error) {
@@ -94,18 +137,36 @@ func (s *ParticipationService) ReviewClaim(ctx context.Context, reviewerID, revi
 		return nil, ErrSelfApprovalNotAllowed
 	}
 
-	// Scope verification for State Coordinator
-	if reviewerRole == "state_coordinator" {
-		event, err := s.repo.Queries().GetEventInstanceByID(ctx, claim.EventID)
-		if err != nil || reviewerJurisdictionID == nil || *reviewerJurisdictionID != event.StateID {
-			return nil, ErrScopeUnauthorized
+	cleanReason := strings.TrimSpace(req.Reason)
+	if len(cleanReason) < 5 {
+		return nil, errors.New("decision reason must be at least 5 characters")
+	}
+
+	// Centralized database-backed coordinator authorization for the claim's event
+	event, app, err := AuthorizeCoordinatorForEvent(ctx, s.repo, reviewerID, claim.EventID)
+	if err != nil {
+		// Fallback for super_admin or national_admin user role
+		u, uErr := s.repo.Queries().GetUserByID(ctx, reviewerID)
+		if uErr == nil && (u.PrimaryRole == "super_admin" || u.PrimaryRole == "national_admin") {
+			ev, eErr := s.repo.Queries().GetEventInstanceByID(ctx, claim.EventID)
+			if eErr != nil {
+				return nil, ErrEventNotFound
+			}
+			event = &ev
+			app = &db.Appointment{RoleType: u.PrimaryRole, JurisdictionType: "national"}
+		} else {
+			return nil, err
 		}
-	} else if reviewerRole != "national_admin" {
-		return nil, errors.New("unauthorized to review participation claims")
+	}
+
+	decision := strings.TrimSpace(req.Decision)
+
+	if decision != "approved" && decision != "rejected" {
+		return nil, errors.New("decision must be approved or rejected")
 	}
 
 	status := "verified"
-	if req.Decision == "rejected" {
+	if decision == "rejected" {
 		status = "rejected"
 	}
 
@@ -117,8 +178,8 @@ func (s *ParticipationService) ReviewClaim(ctx context.Context, reviewerID, revi
 			ID:               claimID,
 			Status:           status,
 			ReviewedByUserID: TextFromString(reviewerID),
-			ReviewDecision:   TextFromString(req.Decision),
-			ReviewReason:     TextFromString(req.Reason),
+			ReviewDecision:   TextFromString(decision),
+			ReviewReason:     TextFromString(cleanReason),
 		})
 		if err != nil {
 			return err
@@ -126,13 +187,21 @@ func (s *ParticipationService) ReviewClaim(ctx context.Context, reviewerID, revi
 		updatedClaim = p
 
 		if status == "verified" {
+			// Update event registration if it exists
+			_, _ = q.VerifyEventAttendance(ctx, db.VerifyEventAttendanceParams{
+				EventID:            claim.EventID,
+				UserID:             claim.UserID,
+				VerifiedByUserID:   TextFromString(reviewerID),
+				VerificationMethod: TextFromString("evidence_correction"),
+			})
+
 			// Check total verified participations for user
 			verifiedCount, err := q.CountVerifiedParticipationsByUser(ctx, claim.UserID)
 			if err != nil {
 				return err
 			}
 
-			// If this is the user's first approved participation, award First Participation badge!
+			// If this is the user's first approved participation, award First Participation badge
 			if verifiedCount == 1 {
 				badge, err := q.GetBadgeByCode(ctx, "first-cleanup-ratel")
 				if err == nil && badge.ID != "" {
@@ -161,13 +230,90 @@ func (s *ParticipationService) ReviewClaim(ctx context.Context, reviewerID, revi
 		return nil, err
 	}
 
-	details := fmt.Sprintf("Decision: %s. Reason: %s", req.Decision, req.Reason)
+	effectiveRole := app.RoleType
+	scopeType := app.JurisdictionType
+	details := fmt.Sprintf("Decision: %s. Reason: %s", decision, cleanReason)
 	if awardedBadge != nil {
 		details += fmt.Sprintf(" [Awarded Badge: %s]", awardedBadge.Name)
 	}
-	_ = s.audit.Log(ctx, &reviewerID, &reviewerRole, "review_participation", "participation_claim", claimID, nil, nil, &details, nil)
+	_ = s.audit.Log(ctx, &reviewerID, &effectiveRole, "review_participation", "participation_claim", claimID, &scopeType, &event.StateID, &details, nil)
+
+	if s.notif != nil {
+		if status == "verified" {
+			s.notif.OnCorrectionApproved(ctx, s.repo.Queries(), claim.UserID, event.Title)
+		} else {
+			s.notif.OnCorrectionRejected(ctx, s.repo.Queries(), claim.UserID, event.Title, cleanReason)
+		}
+	}
 
 	return &updatedClaim, nil
+}
+
+func (s *ParticipationService) ReverseClaim(ctx context.Context, actorID string, actorRole string, claimID string, reason string) (*db.ParticipationClaim, error) {
+	// Strictly Super Admin authority
+	u, err := s.repo.Queries().GetUserByID(ctx, actorID)
+	if err != nil || (u.PrimaryRole != "super_admin") {
+		return nil, ErrSuperAdminRequired
+	}
+
+	cleanReason := strings.TrimSpace(reason)
+	if len(cleanReason) < 5 {
+		return nil, errors.New("reversal reason must be at least 5 characters")
+	}
+
+	claim, err := s.repo.Queries().GetParticipationClaimByID(ctx, claimID)
+	if err != nil {
+		return nil, ErrClaimNotFound
+	}
+
+	if claim.Status == "reversed" {
+		return nil, ErrClaimAlreadyReversed
+	}
+	if claim.Status != "verified" && claim.Status != "approved" {
+		return nil, ErrClaimNotApproved
+	}
+
+	event, err := s.repo.Queries().GetEventInstanceByID(ctx, claim.EventID)
+	if err != nil {
+		return nil, ErrEventNotFound
+	}
+
+	var reversedClaim db.ParticipationClaim
+
+	err = s.repo.WithTx(ctx, func(q *db.Queries) error {
+		c, err := q.ReverseParticipationClaim(ctx, db.ReverseParticipationClaimParams{
+			ID:               claimID,
+			ReversedByUserID: TextFromString(actorID),
+			ReversalReason:   TextFromString(cleanReason),
+		})
+		if err != nil {
+			return err
+		}
+		reversedClaim = c
+
+		// Reset event registration attendance status back to registered
+		_, _ = q.ResetEventAttendance(ctx, db.ResetEventAttendanceParams{
+			EventID: claim.EventID,
+			UserID:  claim.UserID,
+		})
+
+		return nil
+	})
+
+	if err != nil {
+		return nil, err
+	}
+
+	effectiveRole := "super_admin"
+	scopeType := "national"
+	details := fmt.Sprintf("Reversed participation verification for claim %s (Participant %s). Reason: %s", claimID, claim.UserID, cleanReason)
+	_ = s.audit.Log(ctx, &actorID, &effectiveRole, "reverse_participation_verification", "participation_claim", claimID, &scopeType, &event.StateID, &details, nil)
+
+	if s.notif != nil {
+		s.notif.OnParticipationReversed(ctx, s.repo.Queries(), claim.UserID, event.Title, cleanReason)
+	}
+
+	return &reversedClaim, nil
 }
 
 func (s *ParticipationService) SubmitAppeal(ctx context.Context, userID, claimID string, req SubmitAppealRequest) (*db.ParticipationAppeal, error) {
@@ -195,6 +341,10 @@ func (s *ParticipationService) SubmitAppeal(ctx context.Context, userID, claimID
 	}
 
 	return &appeal, nil
+}
+
+func (s *ParticipationService) ListClaimsByUser(ctx context.Context, userID string) ([]db.ListClaimsByUserRow, error) {
+	return s.repo.Queries().ListClaimsByUser(ctx, userID)
 }
 
 func (s *ParticipationService) ListUserBadges(ctx context.Context, userID string) ([]db.ListBadgeAwardsByUserRow, error) {

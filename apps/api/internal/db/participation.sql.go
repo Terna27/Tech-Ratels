@@ -166,7 +166,7 @@ INSERT INTO participation_claims (
     created_at, updated_at, version
 ) VALUES (
     $1, $2, $3, $4, $5, 'pending', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, 1
-) RETURNING id, event_id, user_id, description, evidence_notes, status, submitted_at, reviewed_by_user_id, review_decision, review_reason, reviewed_at, created_at, updated_at, version
+) RETURNING id, event_id, user_id, description, evidence_notes, status, submitted_at, reviewed_by_user_id, review_decision, review_reason, reviewed_at, created_at, updated_at, version, evidence_url, evidence_type, verification_method, reversed_at, reversed_by_user_id, reversal_reason
 `
 
 type CreateParticipationClaimParams struct {
@@ -201,6 +201,12 @@ func (q *Queries) CreateParticipationClaim(ctx context.Context, arg CreatePartic
 		&i.CreatedAt,
 		&i.UpdatedAt,
 		&i.Version,
+		&i.EvidenceUrl,
+		&i.EvidenceType,
+		&i.VerificationMethod,
+		&i.ReversedAt,
+		&i.ReversedByUserID,
+		&i.ReversalReason,
 	)
 	return i, err
 }
@@ -279,7 +285,7 @@ func (q *Queries) GetParticipationAppealByID(ctx context.Context, id string) (Pa
 }
 
 const getParticipationClaimByEventAndUser = `-- name: GetParticipationClaimByEventAndUser :one
-SELECT id, event_id, user_id, description, evidence_notes, status, submitted_at, reviewed_by_user_id, review_decision, review_reason, reviewed_at, created_at, updated_at, version FROM participation_claims
+SELECT id, event_id, user_id, description, evidence_notes, status, submitted_at, reviewed_by_user_id, review_decision, review_reason, reviewed_at, created_at, updated_at, version, evidence_url, evidence_type, verification_method, reversed_at, reversed_by_user_id, reversal_reason FROM participation_claims
 WHERE event_id = $1 AND user_id = $2
 `
 
@@ -306,12 +312,18 @@ func (q *Queries) GetParticipationClaimByEventAndUser(ctx context.Context, arg G
 		&i.CreatedAt,
 		&i.UpdatedAt,
 		&i.Version,
+		&i.EvidenceUrl,
+		&i.EvidenceType,
+		&i.VerificationMethod,
+		&i.ReversedAt,
+		&i.ReversedByUserID,
+		&i.ReversalReason,
 	)
 	return i, err
 }
 
 const getParticipationClaimByID = `-- name: GetParticipationClaimByID :one
-SELECT id, event_id, user_id, description, evidence_notes, status, submitted_at, reviewed_by_user_id, review_decision, review_reason, reviewed_at, created_at, updated_at, version FROM participation_claims
+SELECT id, event_id, user_id, description, evidence_notes, status, submitted_at, reviewed_by_user_id, review_decision, review_reason, reviewed_at, created_at, updated_at, version, evidence_url, evidence_type, verification_method, reversed_at, reversed_by_user_id, reversal_reason FROM participation_claims
 WHERE id = $1
 `
 
@@ -333,6 +345,12 @@ func (q *Queries) GetParticipationClaimByID(ctx context.Context, id string) (Par
 		&i.CreatedAt,
 		&i.UpdatedAt,
 		&i.Version,
+		&i.EvidenceUrl,
+		&i.EvidenceType,
+		&i.VerificationMethod,
+		&i.ReversedAt,
+		&i.ReversedByUserID,
+		&i.ReversalReason,
 	)
 	return i, err
 }
@@ -430,7 +448,7 @@ func (q *Queries) ListBadges(ctx context.Context) ([]Badge, error) {
 }
 
 const listClaimsByUser = `-- name: ListClaimsByUser :many
-SELECT c.id, c.event_id, c.user_id, c.description, c.evidence_notes, c.status, c.submitted_at, c.reviewed_by_user_id, c.review_decision, c.review_reason, c.reviewed_at, c.created_at, c.updated_at, c.version, e.title as event_title, e.start_time as event_start_time, s.name as state_name
+SELECT c.id, c.event_id, c.user_id, c.description, c.evidence_notes, c.status, c.submitted_at, c.reviewed_by_user_id, c.review_decision, c.review_reason, c.reviewed_at, c.created_at, c.updated_at, c.version, c.evidence_url, c.evidence_type, c.verification_method, c.reversed_at, c.reversed_by_user_id, c.reversal_reason, e.title as event_title, e.start_time as event_start_time, s.name as state_name
 FROM participation_claims c
 JOIN event_instances e ON c.event_id = e.id
 JOIN states s ON e.state_id = s.id
@@ -439,23 +457,29 @@ ORDER BY c.submitted_at DESC
 `
 
 type ListClaimsByUserRow struct {
-	ID               string             `json:"id"`
-	EventID          string             `json:"event_id"`
-	UserID           string             `json:"user_id"`
-	Description      string             `json:"description"`
-	EvidenceNotes    pgtype.Text        `json:"evidence_notes"`
-	Status           string             `json:"status"`
-	SubmittedAt      pgtype.Timestamptz `json:"submitted_at"`
-	ReviewedByUserID pgtype.Text        `json:"reviewed_by_user_id"`
-	ReviewDecision   pgtype.Text        `json:"review_decision"`
-	ReviewReason     pgtype.Text        `json:"review_reason"`
-	ReviewedAt       pgtype.Timestamptz `json:"reviewed_at"`
-	CreatedAt        pgtype.Timestamptz `json:"created_at"`
-	UpdatedAt        pgtype.Timestamptz `json:"updated_at"`
-	Version          int32              `json:"version"`
-	EventTitle       string             `json:"event_title"`
-	EventStartTime   pgtype.Timestamptz `json:"event_start_time"`
-	StateName        string             `json:"state_name"`
+	ID                 string             `json:"id"`
+	EventID            string             `json:"event_id"`
+	UserID             string             `json:"user_id"`
+	Description        string             `json:"description"`
+	EvidenceNotes      pgtype.Text        `json:"evidence_notes"`
+	Status             string             `json:"status"`
+	SubmittedAt        pgtype.Timestamptz `json:"submitted_at"`
+	ReviewedByUserID   pgtype.Text        `json:"reviewed_by_user_id"`
+	ReviewDecision     pgtype.Text        `json:"review_decision"`
+	ReviewReason       pgtype.Text        `json:"review_reason"`
+	ReviewedAt         pgtype.Timestamptz `json:"reviewed_at"`
+	CreatedAt          pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt          pgtype.Timestamptz `json:"updated_at"`
+	Version            int32              `json:"version"`
+	EvidenceUrl        pgtype.Text        `json:"evidence_url"`
+	EvidenceType       pgtype.Text        `json:"evidence_type"`
+	VerificationMethod pgtype.Text        `json:"verification_method"`
+	ReversedAt         pgtype.Timestamptz `json:"reversed_at"`
+	ReversedByUserID   pgtype.Text        `json:"reversed_by_user_id"`
+	ReversalReason     pgtype.Text        `json:"reversal_reason"`
+	EventTitle         string             `json:"event_title"`
+	EventStartTime     pgtype.Timestamptz `json:"event_start_time"`
+	StateName          string             `json:"state_name"`
 }
 
 func (q *Queries) ListClaimsByUser(ctx context.Context, userID string) ([]ListClaimsByUserRow, error) {
@@ -482,6 +506,12 @@ func (q *Queries) ListClaimsByUser(ctx context.Context, userID string) ([]ListCl
 			&i.CreatedAt,
 			&i.UpdatedAt,
 			&i.Version,
+			&i.EvidenceUrl,
+			&i.EvidenceType,
+			&i.VerificationMethod,
+			&i.ReversedAt,
+			&i.ReversedByUserID,
+			&i.ReversalReason,
 			&i.EventTitle,
 			&i.EventStartTime,
 			&i.StateName,
@@ -497,7 +527,7 @@ func (q *Queries) ListClaimsByUser(ctx context.Context, userID string) ([]ListCl
 }
 
 const listPendingClaims = `-- name: ListPendingClaims :many
-SELECT c.id, c.event_id, c.user_id, c.description, c.evidence_notes, c.status, c.submitted_at, c.reviewed_by_user_id, c.review_decision, c.review_reason, c.reviewed_at, c.created_at, c.updated_at, c.version, e.title as event_title, e.state_id, s.name as state_name, u.display_name as user_name
+SELECT c.id, c.event_id, c.user_id, c.description, c.evidence_notes, c.status, c.submitted_at, c.reviewed_by_user_id, c.review_decision, c.review_reason, c.reviewed_at, c.created_at, c.updated_at, c.version, c.evidence_url, c.evidence_type, c.verification_method, c.reversed_at, c.reversed_by_user_id, c.reversal_reason, e.title as event_title, e.state_id, s.name as state_name, u.display_name as user_name
 FROM participation_claims c
 JOIN event_instances e ON c.event_id = e.id
 JOIN states s ON e.state_id = s.id
@@ -507,24 +537,30 @@ ORDER BY c.submitted_at ASC
 `
 
 type ListPendingClaimsRow struct {
-	ID               string             `json:"id"`
-	EventID          string             `json:"event_id"`
-	UserID           string             `json:"user_id"`
-	Description      string             `json:"description"`
-	EvidenceNotes    pgtype.Text        `json:"evidence_notes"`
-	Status           string             `json:"status"`
-	SubmittedAt      pgtype.Timestamptz `json:"submitted_at"`
-	ReviewedByUserID pgtype.Text        `json:"reviewed_by_user_id"`
-	ReviewDecision   pgtype.Text        `json:"review_decision"`
-	ReviewReason     pgtype.Text        `json:"review_reason"`
-	ReviewedAt       pgtype.Timestamptz `json:"reviewed_at"`
-	CreatedAt        pgtype.Timestamptz `json:"created_at"`
-	UpdatedAt        pgtype.Timestamptz `json:"updated_at"`
-	Version          int32              `json:"version"`
-	EventTitle       string             `json:"event_title"`
-	StateID          string             `json:"state_id"`
-	StateName        string             `json:"state_name"`
-	UserName         string             `json:"user_name"`
+	ID                 string             `json:"id"`
+	EventID            string             `json:"event_id"`
+	UserID             string             `json:"user_id"`
+	Description        string             `json:"description"`
+	EvidenceNotes      pgtype.Text        `json:"evidence_notes"`
+	Status             string             `json:"status"`
+	SubmittedAt        pgtype.Timestamptz `json:"submitted_at"`
+	ReviewedByUserID   pgtype.Text        `json:"reviewed_by_user_id"`
+	ReviewDecision     pgtype.Text        `json:"review_decision"`
+	ReviewReason       pgtype.Text        `json:"review_reason"`
+	ReviewedAt         pgtype.Timestamptz `json:"reviewed_at"`
+	CreatedAt          pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt          pgtype.Timestamptz `json:"updated_at"`
+	Version            int32              `json:"version"`
+	EvidenceUrl        pgtype.Text        `json:"evidence_url"`
+	EvidenceType       pgtype.Text        `json:"evidence_type"`
+	VerificationMethod pgtype.Text        `json:"verification_method"`
+	ReversedAt         pgtype.Timestamptz `json:"reversed_at"`
+	ReversedByUserID   pgtype.Text        `json:"reversed_by_user_id"`
+	ReversalReason     pgtype.Text        `json:"reversal_reason"`
+	EventTitle         string             `json:"event_title"`
+	StateID            string             `json:"state_id"`
+	StateName          string             `json:"state_name"`
+	UserName           string             `json:"user_name"`
 }
 
 func (q *Queries) ListPendingClaims(ctx context.Context) ([]ListPendingClaimsRow, error) {
@@ -551,6 +587,94 @@ func (q *Queries) ListPendingClaims(ctx context.Context) ([]ListPendingClaimsRow
 			&i.CreatedAt,
 			&i.UpdatedAt,
 			&i.Version,
+			&i.EvidenceUrl,
+			&i.EvidenceType,
+			&i.VerificationMethod,
+			&i.ReversedAt,
+			&i.ReversedByUserID,
+			&i.ReversalReason,
+			&i.EventTitle,
+			&i.StateID,
+			&i.StateName,
+			&i.UserName,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listPendingClaimsByLGA = `-- name: ListPendingClaimsByLGA :many
+SELECT c.id, c.event_id, c.user_id, c.description, c.evidence_notes, c.status, c.submitted_at, c.reviewed_by_user_id, c.review_decision, c.review_reason, c.reviewed_at, c.created_at, c.updated_at, c.version, c.evidence_url, c.evidence_type, c.verification_method, c.reversed_at, c.reversed_by_user_id, c.reversal_reason, e.title as event_title, e.state_id, s.name as state_name, u.display_name as user_name
+FROM participation_claims c
+JOIN event_instances e ON c.event_id = e.id
+JOIN states s ON e.state_id = s.id
+JOIN users u ON c.user_id = u.id
+WHERE c.status = 'pending' AND e.lga_id = $1
+ORDER BY c.submitted_at ASC
+`
+
+type ListPendingClaimsByLGARow struct {
+	ID                 string             `json:"id"`
+	EventID            string             `json:"event_id"`
+	UserID             string             `json:"user_id"`
+	Description        string             `json:"description"`
+	EvidenceNotes      pgtype.Text        `json:"evidence_notes"`
+	Status             string             `json:"status"`
+	SubmittedAt        pgtype.Timestamptz `json:"submitted_at"`
+	ReviewedByUserID   pgtype.Text        `json:"reviewed_by_user_id"`
+	ReviewDecision     pgtype.Text        `json:"review_decision"`
+	ReviewReason       pgtype.Text        `json:"review_reason"`
+	ReviewedAt         pgtype.Timestamptz `json:"reviewed_at"`
+	CreatedAt          pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt          pgtype.Timestamptz `json:"updated_at"`
+	Version            int32              `json:"version"`
+	EvidenceUrl        pgtype.Text        `json:"evidence_url"`
+	EvidenceType       pgtype.Text        `json:"evidence_type"`
+	VerificationMethod pgtype.Text        `json:"verification_method"`
+	ReversedAt         pgtype.Timestamptz `json:"reversed_at"`
+	ReversedByUserID   pgtype.Text        `json:"reversed_by_user_id"`
+	ReversalReason     pgtype.Text        `json:"reversal_reason"`
+	EventTitle         string             `json:"event_title"`
+	StateID            string             `json:"state_id"`
+	StateName          string             `json:"state_name"`
+	UserName           string             `json:"user_name"`
+}
+
+func (q *Queries) ListPendingClaimsByLGA(ctx context.Context, lgaID string) ([]ListPendingClaimsByLGARow, error) {
+	rows, err := q.db.Query(ctx, listPendingClaimsByLGA, lgaID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []ListPendingClaimsByLGARow
+	for rows.Next() {
+		var i ListPendingClaimsByLGARow
+		if err := rows.Scan(
+			&i.ID,
+			&i.EventID,
+			&i.UserID,
+			&i.Description,
+			&i.EvidenceNotes,
+			&i.Status,
+			&i.SubmittedAt,
+			&i.ReviewedByUserID,
+			&i.ReviewDecision,
+			&i.ReviewReason,
+			&i.ReviewedAt,
+			&i.CreatedAt,
+			&i.UpdatedAt,
+			&i.Version,
+			&i.EvidenceUrl,
+			&i.EvidenceType,
+			&i.VerificationMethod,
+			&i.ReversedAt,
+			&i.ReversedByUserID,
+			&i.ReversalReason,
 			&i.EventTitle,
 			&i.StateID,
 			&i.StateName,
@@ -567,7 +691,7 @@ func (q *Queries) ListPendingClaims(ctx context.Context) ([]ListPendingClaimsRow
 }
 
 const listPendingClaimsByState = `-- name: ListPendingClaimsByState :many
-SELECT c.id, c.event_id, c.user_id, c.description, c.evidence_notes, c.status, c.submitted_at, c.reviewed_by_user_id, c.review_decision, c.review_reason, c.reviewed_at, c.created_at, c.updated_at, c.version, e.title as event_title, e.state_id, s.name as state_name, u.display_name as user_name
+SELECT c.id, c.event_id, c.user_id, c.description, c.evidence_notes, c.status, c.submitted_at, c.reviewed_by_user_id, c.review_decision, c.review_reason, c.reviewed_at, c.created_at, c.updated_at, c.version, c.evidence_url, c.evidence_type, c.verification_method, c.reversed_at, c.reversed_by_user_id, c.reversal_reason, e.title as event_title, e.state_id, s.name as state_name, u.display_name as user_name
 FROM participation_claims c
 JOIN event_instances e ON c.event_id = e.id
 JOIN states s ON e.state_id = s.id
@@ -577,24 +701,30 @@ ORDER BY c.submitted_at ASC
 `
 
 type ListPendingClaimsByStateRow struct {
-	ID               string             `json:"id"`
-	EventID          string             `json:"event_id"`
-	UserID           string             `json:"user_id"`
-	Description      string             `json:"description"`
-	EvidenceNotes    pgtype.Text        `json:"evidence_notes"`
-	Status           string             `json:"status"`
-	SubmittedAt      pgtype.Timestamptz `json:"submitted_at"`
-	ReviewedByUserID pgtype.Text        `json:"reviewed_by_user_id"`
-	ReviewDecision   pgtype.Text        `json:"review_decision"`
-	ReviewReason     pgtype.Text        `json:"review_reason"`
-	ReviewedAt       pgtype.Timestamptz `json:"reviewed_at"`
-	CreatedAt        pgtype.Timestamptz `json:"created_at"`
-	UpdatedAt        pgtype.Timestamptz `json:"updated_at"`
-	Version          int32              `json:"version"`
-	EventTitle       string             `json:"event_title"`
-	StateID          string             `json:"state_id"`
-	StateName        string             `json:"state_name"`
-	UserName         string             `json:"user_name"`
+	ID                 string             `json:"id"`
+	EventID            string             `json:"event_id"`
+	UserID             string             `json:"user_id"`
+	Description        string             `json:"description"`
+	EvidenceNotes      pgtype.Text        `json:"evidence_notes"`
+	Status             string             `json:"status"`
+	SubmittedAt        pgtype.Timestamptz `json:"submitted_at"`
+	ReviewedByUserID   pgtype.Text        `json:"reviewed_by_user_id"`
+	ReviewDecision     pgtype.Text        `json:"review_decision"`
+	ReviewReason       pgtype.Text        `json:"review_reason"`
+	ReviewedAt         pgtype.Timestamptz `json:"reviewed_at"`
+	CreatedAt          pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt          pgtype.Timestamptz `json:"updated_at"`
+	Version            int32              `json:"version"`
+	EvidenceUrl        pgtype.Text        `json:"evidence_url"`
+	EvidenceType       pgtype.Text        `json:"evidence_type"`
+	VerificationMethod pgtype.Text        `json:"verification_method"`
+	ReversedAt         pgtype.Timestamptz `json:"reversed_at"`
+	ReversedByUserID   pgtype.Text        `json:"reversed_by_user_id"`
+	ReversalReason     pgtype.Text        `json:"reversal_reason"`
+	EventTitle         string             `json:"event_title"`
+	StateID            string             `json:"state_id"`
+	StateName          string             `json:"state_name"`
+	UserName           string             `json:"user_name"`
 }
 
 func (q *Queries) ListPendingClaimsByState(ctx context.Context, stateID string) ([]ListPendingClaimsByStateRow, error) {
@@ -621,6 +751,12 @@ func (q *Queries) ListPendingClaimsByState(ctx context.Context, stateID string) 
 			&i.CreatedAt,
 			&i.UpdatedAt,
 			&i.Version,
+			&i.EvidenceUrl,
+			&i.EvidenceType,
+			&i.VerificationMethod,
+			&i.ReversedAt,
+			&i.ReversedByUserID,
+			&i.ReversalReason,
 			&i.EventTitle,
 			&i.StateID,
 			&i.StateName,
@@ -636,12 +772,139 @@ func (q *Queries) ListPendingClaimsByState(ctx context.Context, stateID string) 
 	return items, nil
 }
 
+const listPendingClaimsByZone = `-- name: ListPendingClaimsByZone :many
+SELECT c.id, c.event_id, c.user_id, c.description, c.evidence_notes, c.status, c.submitted_at, c.reviewed_by_user_id, c.review_decision, c.review_reason, c.reviewed_at, c.created_at, c.updated_at, c.version, c.evidence_url, c.evidence_type, c.verification_method, c.reversed_at, c.reversed_by_user_id, c.reversal_reason, e.title as event_title, e.state_id, s.name as state_name, u.display_name as user_name
+FROM participation_claims c
+JOIN event_instances e ON c.event_id = e.id
+JOIN states s ON e.state_id = s.id
+JOIN users u ON c.user_id = u.id
+WHERE c.status = 'pending' AND (s.zone_id = $1 OR e.zone_id = $1)
+ORDER BY c.submitted_at ASC
+`
+
+type ListPendingClaimsByZoneRow struct {
+	ID                 string             `json:"id"`
+	EventID            string             `json:"event_id"`
+	UserID             string             `json:"user_id"`
+	Description        string             `json:"description"`
+	EvidenceNotes      pgtype.Text        `json:"evidence_notes"`
+	Status             string             `json:"status"`
+	SubmittedAt        pgtype.Timestamptz `json:"submitted_at"`
+	ReviewedByUserID   pgtype.Text        `json:"reviewed_by_user_id"`
+	ReviewDecision     pgtype.Text        `json:"review_decision"`
+	ReviewReason       pgtype.Text        `json:"review_reason"`
+	ReviewedAt         pgtype.Timestamptz `json:"reviewed_at"`
+	CreatedAt          pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt          pgtype.Timestamptz `json:"updated_at"`
+	Version            int32              `json:"version"`
+	EvidenceUrl        pgtype.Text        `json:"evidence_url"`
+	EvidenceType       pgtype.Text        `json:"evidence_type"`
+	VerificationMethod pgtype.Text        `json:"verification_method"`
+	ReversedAt         pgtype.Timestamptz `json:"reversed_at"`
+	ReversedByUserID   pgtype.Text        `json:"reversed_by_user_id"`
+	ReversalReason     pgtype.Text        `json:"reversal_reason"`
+	EventTitle         string             `json:"event_title"`
+	StateID            string             `json:"state_id"`
+	StateName          string             `json:"state_name"`
+	UserName           string             `json:"user_name"`
+}
+
+func (q *Queries) ListPendingClaimsByZone(ctx context.Context, zoneID string) ([]ListPendingClaimsByZoneRow, error) {
+	rows, err := q.db.Query(ctx, listPendingClaimsByZone, zoneID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []ListPendingClaimsByZoneRow
+	for rows.Next() {
+		var i ListPendingClaimsByZoneRow
+		if err := rows.Scan(
+			&i.ID,
+			&i.EventID,
+			&i.UserID,
+			&i.Description,
+			&i.EvidenceNotes,
+			&i.Status,
+			&i.SubmittedAt,
+			&i.ReviewedByUserID,
+			&i.ReviewDecision,
+			&i.ReviewReason,
+			&i.ReviewedAt,
+			&i.CreatedAt,
+			&i.UpdatedAt,
+			&i.Version,
+			&i.EvidenceUrl,
+			&i.EvidenceType,
+			&i.VerificationMethod,
+			&i.ReversedAt,
+			&i.ReversedByUserID,
+			&i.ReversalReason,
+			&i.EventTitle,
+			&i.StateID,
+			&i.StateName,
+			&i.UserName,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const reverseParticipationClaim = `-- name: ReverseParticipationClaim :one
+UPDATE participation_claims
+SET status = 'reversed',
+    reversed_by_user_id = $2,
+    reversal_reason = $3,
+    reversed_at = CURRENT_TIMESTAMP,
+    updated_at = CURRENT_TIMESTAMP
+WHERE id = $1 AND status IN ('verified', 'approved')
+RETURNING id, event_id, user_id, description, evidence_notes, status, submitted_at, reviewed_by_user_id, review_decision, review_reason, reviewed_at, created_at, updated_at, version, evidence_url, evidence_type, verification_method, reversed_at, reversed_by_user_id, reversal_reason
+`
+
+type ReverseParticipationClaimParams struct {
+	ID               string      `json:"id"`
+	ReversedByUserID pgtype.Text `json:"reversed_by_user_id"`
+	ReversalReason   pgtype.Text `json:"reversal_reason"`
+}
+
+func (q *Queries) ReverseParticipationClaim(ctx context.Context, arg ReverseParticipationClaimParams) (ParticipationClaim, error) {
+	row := q.db.QueryRow(ctx, reverseParticipationClaim, arg.ID, arg.ReversedByUserID, arg.ReversalReason)
+	var i ParticipationClaim
+	err := row.Scan(
+		&i.ID,
+		&i.EventID,
+		&i.UserID,
+		&i.Description,
+		&i.EvidenceNotes,
+		&i.Status,
+		&i.SubmittedAt,
+		&i.ReviewedByUserID,
+		&i.ReviewDecision,
+		&i.ReviewReason,
+		&i.ReviewedAt,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+		&i.Version,
+		&i.EvidenceUrl,
+		&i.EvidenceType,
+		&i.VerificationMethod,
+		&i.ReversedAt,
+		&i.ReversedByUserID,
+		&i.ReversalReason,
+	)
+	return i, err
+}
+
 const reviewParticipationClaim = `-- name: ReviewParticipationClaim :one
 UPDATE participation_claims
 SET status = $2, reviewed_by_user_id = $3, review_decision = $4, review_reason = $5,
     reviewed_at = CURRENT_TIMESTAMP, updated_at = CURRENT_TIMESTAMP
-WHERE id = $1
-RETURNING id, event_id, user_id, description, evidence_notes, status, submitted_at, reviewed_by_user_id, review_decision, review_reason, reviewed_at, created_at, updated_at, version
+WHERE id = $1 AND status = 'pending'
+RETURNING id, event_id, user_id, description, evidence_notes, status, submitted_at, reviewed_by_user_id, review_decision, review_reason, reviewed_at, created_at, updated_at, version, evidence_url, evidence_type, verification_method, reversed_at, reversed_by_user_id, reversal_reason
 `
 
 type ReviewParticipationClaimParams struct {
@@ -676,6 +939,147 @@ func (q *Queries) ReviewParticipationClaim(ctx context.Context, arg ReviewPartic
 		&i.CreatedAt,
 		&i.UpdatedAt,
 		&i.Version,
+		&i.EvidenceUrl,
+		&i.EvidenceType,
+		&i.VerificationMethod,
+		&i.ReversedAt,
+		&i.ReversedByUserID,
+		&i.ReversalReason,
+	)
+	return i, err
+}
+
+const submitEvidenceCorrection = `-- name: SubmitEvidenceCorrection :one
+INSERT INTO participation_claims (
+    id, event_id, user_id, description, evidence_notes, evidence_url, evidence_type,
+    status, submitted_at, verification_method, created_at, updated_at, version
+) VALUES (
+    $1, $2, $3, $4, $5, $6, $7,
+    'pending', CURRENT_TIMESTAMP, 'evidence_correction', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, 1
+)
+ON CONFLICT (event_id, user_id) DO UPDATE
+SET description = EXCLUDED.description,
+    evidence_notes = EXCLUDED.evidence_notes,
+    evidence_url = EXCLUDED.evidence_url,
+    evidence_type = EXCLUDED.evidence_type,
+    status = 'pending',
+    submitted_at = CURRENT_TIMESTAMP,
+    updated_at = CURRENT_TIMESTAMP
+WHERE participation_claims.status = 'pending'
+RETURNING id, event_id, user_id, description, evidence_notes, status, submitted_at, reviewed_by_user_id, review_decision, review_reason, reviewed_at, created_at, updated_at, version, evidence_url, evidence_type, verification_method, reversed_at, reversed_by_user_id, reversal_reason
+`
+
+type SubmitEvidenceCorrectionParams struct {
+	ID            string      `json:"id"`
+	EventID       string      `json:"event_id"`
+	UserID        string      `json:"user_id"`
+	Description   string      `json:"description"`
+	EvidenceNotes pgtype.Text `json:"evidence_notes"`
+	EvidenceUrl   pgtype.Text `json:"evidence_url"`
+	EvidenceType  pgtype.Text `json:"evidence_type"`
+}
+
+func (q *Queries) SubmitEvidenceCorrection(ctx context.Context, arg SubmitEvidenceCorrectionParams) (ParticipationClaim, error) {
+	row := q.db.QueryRow(ctx, submitEvidenceCorrection,
+		arg.ID,
+		arg.EventID,
+		arg.UserID,
+		arg.Description,
+		arg.EvidenceNotes,
+		arg.EvidenceUrl,
+		arg.EvidenceType,
+	)
+	var i ParticipationClaim
+	err := row.Scan(
+		&i.ID,
+		&i.EventID,
+		&i.UserID,
+		&i.Description,
+		&i.EvidenceNotes,
+		&i.Status,
+		&i.SubmittedAt,
+		&i.ReviewedByUserID,
+		&i.ReviewDecision,
+		&i.ReviewReason,
+		&i.ReviewedAt,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+		&i.Version,
+		&i.EvidenceUrl,
+		&i.EvidenceType,
+		&i.VerificationMethod,
+		&i.ReversedAt,
+		&i.ReversedByUserID,
+		&i.ReversalReason,
+	)
+	return i, err
+}
+
+const upsertVerifiedParticipationClaim = `-- name: UpsertVerifiedParticipationClaim :one
+INSERT INTO participation_claims (
+    id, event_id, user_id, description, evidence_notes, status, submitted_at,
+    reviewed_by_user_id, review_decision, review_reason, reviewed_at,
+    verification_method, created_at, updated_at, version
+) VALUES (
+    $1, $2, $3, $4, $5, 'verified', CURRENT_TIMESTAMP,
+    $6, 'approved', $7, CURRENT_TIMESTAMP,
+    $8, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, 1
+)
+ON CONFLICT (event_id, user_id) DO UPDATE
+SET status = 'verified',
+    reviewed_by_user_id = EXCLUDED.reviewed_by_user_id,
+    review_decision = 'approved',
+    review_reason = EXCLUDED.review_reason,
+    reviewed_at = CURRENT_TIMESTAMP,
+    verification_method = EXCLUDED.verification_method,
+    updated_at = CURRENT_TIMESTAMP
+RETURNING id, event_id, user_id, description, evidence_notes, status, submitted_at, reviewed_by_user_id, review_decision, review_reason, reviewed_at, created_at, updated_at, version, evidence_url, evidence_type, verification_method, reversed_at, reversed_by_user_id, reversal_reason
+`
+
+type UpsertVerifiedParticipationClaimParams struct {
+	ID                 string      `json:"id"`
+	EventID            string      `json:"event_id"`
+	UserID             string      `json:"user_id"`
+	Description        string      `json:"description"`
+	EvidenceNotes      pgtype.Text `json:"evidence_notes"`
+	ReviewedByUserID   pgtype.Text `json:"reviewed_by_user_id"`
+	ReviewReason       pgtype.Text `json:"review_reason"`
+	VerificationMethod pgtype.Text `json:"verification_method"`
+}
+
+func (q *Queries) UpsertVerifiedParticipationClaim(ctx context.Context, arg UpsertVerifiedParticipationClaimParams) (ParticipationClaim, error) {
+	row := q.db.QueryRow(ctx, upsertVerifiedParticipationClaim,
+		arg.ID,
+		arg.EventID,
+		arg.UserID,
+		arg.Description,
+		arg.EvidenceNotes,
+		arg.ReviewedByUserID,
+		arg.ReviewReason,
+		arg.VerificationMethod,
+	)
+	var i ParticipationClaim
+	err := row.Scan(
+		&i.ID,
+		&i.EventID,
+		&i.UserID,
+		&i.Description,
+		&i.EvidenceNotes,
+		&i.Status,
+		&i.SubmittedAt,
+		&i.ReviewedByUserID,
+		&i.ReviewDecision,
+		&i.ReviewReason,
+		&i.ReviewedAt,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+		&i.Version,
+		&i.EvidenceUrl,
+		&i.EvidenceType,
+		&i.VerificationMethod,
+		&i.ReversedAt,
+		&i.ReversedByUserID,
+		&i.ReversalReason,
 	)
 	return i, err
 }

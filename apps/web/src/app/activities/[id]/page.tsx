@@ -34,6 +34,9 @@ export default function ActivityDetailPage({ params }: { params: Promise<{ id: s
   const [event, setEvent] = useState<EventInstance | null>(null);
   const [eventMedia, setEventMedia] = useState<GalleryMedia[]>([]);
   const [isRegistered, setIsRegistered] = useState(false);
+  const [registrationStatus, setRegistrationStatus] = useState<string | null>(null);
+  const [checkinCode, setCheckinCode] = useState<string | null>(null); // Phase 68: check-in code
+  const [showCheckinCode, setShowCheckinCode] = useState(false);
   const [loading, setLoading] = useState(true);
   const [submitting, setSubmitting] = useState(false);
   const [feedback, setFeedback] = useState<{ type: "success" | "error"; message: string } | null>(null);
@@ -46,8 +49,13 @@ export default function ActivityDetailPage({ params }: { params: Promise<{ id: s
 
         if (user) {
           const myRegs = await apiRequest<EventRegistration[]>("/activities/my-registrations");
-          const registered = myRegs.some((r) => r.event_id === id && r.status === "registered");
-          setIsRegistered(registered);
+          const registration = myRegs.find((r) => r.event_id === id && ["registered", "attended"].includes(r.status));
+          setIsRegistered(Boolean(registration));
+          setRegistrationStatus(registration?.status ?? null);
+          // The backend may expose the code as checkin_code or check_in_code.
+          // Never derive a code from a member ID or expose another user's registration.
+          const regFields = registration as (EventRegistration & { checkin_code?: string; check_in_code?: string; verification_code?: string }) | undefined;
+          setCheckinCode(regFields?.checkin_code ?? regFields?.check_in_code ?? regFields?.verification_code ?? null);
         }
 
         try {
@@ -76,8 +84,10 @@ export default function ActivityDetailPage({ params }: { params: Promise<{ id: s
     setSubmitting(true);
     setFeedback(null);
     try {
-      await apiRequest(`/activities/events/${id}/register`, { method: "POST" });
+      const registration = await apiRequest<EventRegistration & { checkin_code?: string; check_in_code?: string; verification_code?: string }>(`/activities/events/${id}/register`, { method: "POST" });
       setIsRegistered(true);
+      setRegistrationStatus("registered");
+      setCheckinCode(registration?.checkin_code ?? registration?.check_in_code ?? registration?.verification_code ?? null);
       setEvent((prev) => prev ? { ...prev, registered_count: prev.registered_count + 1 } : null);
       setFeedback({ type: "success", message: "You have successfully registered for this cleanup venue!" });
     } catch (err: any) {
@@ -95,6 +105,9 @@ export default function ActivityDetailPage({ params }: { params: Promise<{ id: s
     try {
       await apiRequest(`/activities/events/${id}/cancel-registration`, { method: "POST" });
       setIsRegistered(false);
+      setRegistrationStatus(null);
+      setCheckinCode(null);
+      setShowCheckinCode(false);
       setEvent((prev) => prev ? { ...prev, registered_count: Math.max(0, prev.registered_count - 1) } : null);
       setFeedback({ type: "success", message: "Your registration has been cancelled." });
     } catch (err: any) {
@@ -209,7 +222,7 @@ export default function ActivityDetailPage({ params }: { params: Promise<{ id: s
             <div className="w-full flex flex-col sm:flex-row items-center justify-between gap-3 p-4 bg-emerald-50 rounded-xl border border-emerald-200">
               <div className="flex items-center gap-2 text-emerald-900 text-xs font-semibold">
                 <CheckCircle className="w-5 h-5 text-emerald-700" />
-                <span>You are registered for this cleanup!</span>
+                <span>{registrationStatus === "attended" ? "Attendance verified by coordinator" : "You are registered — attendance not yet verified"}</span>
               </div>
               <div className="flex gap-2">
                 <Link
@@ -218,6 +231,13 @@ export default function ActivityDetailPage({ params }: { params: Promise<{ id: s
                 >
                   Submit Attendance Evidence
                 </Link>
+                {registrationStatus === "registered" && checkinCode && (
+                  <button type="button" onClick={() => setShowCheckinCode((current) => !current)}
+                    className="px-3.5 py-2 text-xs font-semibold text-emerald-900 bg-white border border-emerald-200 rounded-lg">
+                    {showCheckinCode ? "Hide check-in code" : "Show check-in code"}
+                  </button>
+                )}
+                {registrationStatus === "registered" && (
                 <button
                   type="button"
                   onClick={handleCancelRegistration}
@@ -226,7 +246,14 @@ export default function ActivityDetailPage({ params }: { params: Promise<{ id: s
                 >
                   Cancel Registration
                 </button>
+                )}
               </div>
+              {showCheckinCode && registrationStatus === "registered" && checkinCode && (
+                <div className="w-full rounded-lg border border-emerald-200 bg-white p-3 text-center">
+                  <p className="text-xs text-gray-600">Present this code privately to the coordinator at the venue.</p>
+                  <p className="mt-2 font-mono text-xl font-bold tracking-widest text-emerald-950 select-all">{checkinCode}</p>
+                </div>
+              )}
             </div>
           ) : (
             <button

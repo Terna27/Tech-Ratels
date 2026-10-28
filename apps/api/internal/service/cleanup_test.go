@@ -3,6 +3,9 @@ package service_test
 import (
 	"context"
 	"fmt"
+	"github.com/jackc/pgx/v5/pgtype"
+	"ratels-api/internal/db"
+	"ratels-api/internal/security"
 	"testing"
 	"time"
 
@@ -54,7 +57,24 @@ func TestCleanupCalendarAndCapacityLocking(t *testing.T) {
 		t.Fatalf("Failed to create admin user: %v", err)
 	}
 
-	event, err := env.CleanupService.CreateEvent(ctx, regAdmin.UserID, "national_admin", nil, service.CreateEventRequest{
+	_, err = env.Repo.Queries().CreateAppointment(ctx, db.CreateAppointmentParams{
+		ID:               security.GenerateUUID(),
+		UserID:           regAdmin.UserID,
+		RoleTitle:        "Test Event Coordinator",
+		RoleType:         "state_coordinator",
+		JurisdictionType: "state",
+		JurisdictionID:   service.TextFromString(state.ID),
+		StartDate: pgtype.Timestamptz{
+			Time:  time.Now().Add(-time.Hour),
+			Valid: true,
+		},
+		Status: "active",
+	})
+	if err != nil {
+		t.Fatalf("Failed to appoint event coordinator: %v", err)
+	}
+
+	event, err := env.CleanupService.CreateEvent(ctx, regAdmin.UserID, "state_coordinator", nil, service.CreateEventRequest{
 		ProgrammeType: "cleanup",
 		Title:         "Capacity Controlled Cleanup",
 		StateID:       state.ID,
@@ -108,6 +128,62 @@ func TestCleanupCalendarAndCapacityLocking(t *testing.T) {
 	_, err = env.CleanupService.RegisterForEvent(ctx, userIDs[2], event.ID)
 	if err != service.ErrEventAtCapacity {
 		t.Fatalf("Expected ErrEventAtCapacity when registering beyond capacity, got %v", err)
+	}
+
+	// Phase 68.9: cancellation and re-registration regression.
+	original, err := env.CleanupService.GetMyRegistration(ctx, userIDs[0], event.ID)
+	if err != nil {
+		t.Fatalf("Failed to retrieve original registration: %v", err)
+	}
+	if !original.CheckinCode.Valid || original.CheckinCode.String == "" {
+		t.Fatal("Original registration has no check-in code")
+	}
+	oldCode := original.CheckinCode.String
+
+	if err := env.CleanupService.CancelRegistration(ctx, userIDs[0], event.ID); err != nil {
+		t.Fatalf("Cancellation failed: %v", err)
+	}
+
+	reactivated, err := env.CleanupService.RegisterForEvent(ctx, userIDs[0], event.ID)
+	if err != nil {
+		t.Fatalf("Re-registration failed: %v", err)
+	}
+	if !reactivated.CheckinCode.Valid || reactivated.CheckinCode.String == "" {
+		t.Fatal("Reactivated registration has no check-in code")
+	}
+	if reactivated.CheckinCode.String == oldCode {
+		t.Fatal("Re-registration reused the old check-in code")
+	}
+
+	persisted, err := env.CleanupService.GetMyRegistration(ctx, userIDs[0], event.ID)
+	if err != nil {
+		t.Fatalf("Failed to retrieve reactivated registration: %v", err)
+	}
+	if persisted.CheckinCode.String != reactivated.CheckinCode.String {
+		t.Fatal("New check-in code was not persisted")
+	}
+
+	// Stale check-in code must not verify attendance.
+	_, staleErr := env.Repo.Queries().VerifyEventAttendanceByCode(
+		ctx,
+		db.VerifyEventAttendanceByCodeParams{
+			EventID:            event.ID,
+			UserID:             userIDs[0],
+			VerifiedByUserID:   service.TextFromString(userIDs[1]),
+			VerificationMethod: service.TextFromString("manual_code"),
+			CheckinCode:        service.TextFromString(oldCode),
+		},
+	)
+	if staleErr == nil {
+		t.Fatal("Old check-in code unexpectedly verified attendance")
+	}
+
+	eventAfter, err := env.Repo.Queries().GetEventInstanceByID(ctx, event.ID)
+	if err != nil {
+		t.Fatalf("Failed to retrieve event capacity: %v", err)
+	}
+	if eventAfter.RegisteredCount != 2 {
+		t.Fatalf("Expected 2 registered members, got %d", eventAfter.RegisteredCount)
 	}
 
 	// 9. Reschedule event test

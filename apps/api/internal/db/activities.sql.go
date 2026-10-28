@@ -11,6 +11,60 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 )
 
+const cancelEventInstance = `-- name: CancelEventInstance :one
+UPDATE event_instances
+SET status = 'cancelled',
+    rejection_reason = $2,
+    updated_at = CURRENT_TIMESTAMP
+WHERE id = $1
+RETURNING id, campaign_id, programme_type, title, state_id, lga_id, address, landmark, latitude, longitude, start_time, end_time, capacity, registered_count, coordinator_id, public_contact, accessibility_notes, safety_notes, status, rejection_reason, rescheduled_from, rescheduled_reason, created_at, updated_at, version, waste_collected_kg, waste_bags_count, recyclables_kg, cleanup_duration_hours, environmental_notes, description, zone_id
+`
+
+type CancelEventInstanceParams struct {
+	ID              string      `json:"id"`
+	RejectionReason pgtype.Text `json:"rejection_reason"`
+}
+
+func (q *Queries) CancelEventInstance(ctx context.Context, arg CancelEventInstanceParams) (EventInstance, error) {
+	row := q.db.QueryRow(ctx, cancelEventInstance, arg.ID, arg.RejectionReason)
+	var i EventInstance
+	err := row.Scan(
+		&i.ID,
+		&i.CampaignID,
+		&i.ProgrammeType,
+		&i.Title,
+		&i.StateID,
+		&i.LgaID,
+		&i.Address,
+		&i.Landmark,
+		&i.Latitude,
+		&i.Longitude,
+		&i.StartTime,
+		&i.EndTime,
+		&i.Capacity,
+		&i.RegisteredCount,
+		&i.CoordinatorID,
+		&i.PublicContact,
+		&i.AccessibilityNotes,
+		&i.SafetyNotes,
+		&i.Status,
+		&i.RejectionReason,
+		&i.RescheduledFrom,
+		&i.RescheduledReason,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+		&i.Version,
+		&i.WasteCollectedKg,
+		&i.WasteBagsCount,
+		&i.RecyclablesKg,
+		&i.CleanupDurationHours,
+		&i.EnvironmentalNotes,
+		&i.Description,
+		&i.ZoneID,
+	)
+	return i, err
+}
+
 const countDraftEvents = `-- name: CountDraftEvents :one
 SELECT COUNT(*) FROM event_instances WHERE status = 'draft'
 `
@@ -91,16 +145,16 @@ func (q *Queries) CreateCleanupCampaign(ctx context.Context, arg CreateCleanupCa
 
 const createEventInstance = `-- name: CreateEventInstance :one
 INSERT INTO event_instances (
-    id, campaign_id, programme_type, title, state_id, lga_id, address, landmark,
+    id, campaign_id, programme_type, title, description, zone_id, state_id, lga_id, address, landmark,
     latitude, longitude, start_time, end_time, capacity, registered_count,
     coordinator_id, public_contact, accessibility_notes, safety_notes,
     status, created_at, updated_at, version
 ) VALUES (
-    $1, $2, $3, $4, $5, $6, $7, $8,
-    $9, $10, $11, $12, $13, 0,
-    $14, $15, $16, $17,
-    $18, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, 1
-) RETURNING id, campaign_id, programme_type, title, state_id, lga_id, address, landmark, latitude, longitude, start_time, end_time, capacity, registered_count, coordinator_id, public_contact, accessibility_notes, safety_notes, status, rejection_reason, rescheduled_from, rescheduled_reason, created_at, updated_at, version, waste_collected_kg, waste_bags_count, recyclables_kg, cleanup_duration_hours, environmental_notes
+    $1, $2, $3, $4, $5, $6, $7, $8, $9, $10,
+    $11, $12, $13, $14, $15, 0,
+    $16, $17, $18, $19,
+    $20, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, 1
+) RETURNING id, campaign_id, programme_type, title, state_id, lga_id, address, landmark, latitude, longitude, start_time, end_time, capacity, registered_count, coordinator_id, public_contact, accessibility_notes, safety_notes, status, rejection_reason, rescheduled_from, rescheduled_reason, created_at, updated_at, version, waste_collected_kg, waste_bags_count, recyclables_kg, cleanup_duration_hours, environmental_notes, description, zone_id
 `
 
 type CreateEventInstanceParams struct {
@@ -108,6 +162,8 @@ type CreateEventInstanceParams struct {
 	CampaignID         pgtype.Text        `json:"campaign_id"`
 	ProgrammeType      string             `json:"programme_type"`
 	Title              string             `json:"title"`
+	Description        pgtype.Text        `json:"description"`
+	ZoneID             pgtype.Text        `json:"zone_id"`
 	StateID            string             `json:"state_id"`
 	LgaID              string             `json:"lga_id"`
 	Address            string             `json:"address"`
@@ -130,6 +186,8 @@ func (q *Queries) CreateEventInstance(ctx context.Context, arg CreateEventInstan
 		arg.CampaignID,
 		arg.ProgrammeType,
 		arg.Title,
+		arg.Description,
+		arg.ZoneID,
 		arg.StateID,
 		arg.LgaID,
 		arg.Address,
@@ -177,26 +235,34 @@ func (q *Queries) CreateEventInstance(ctx context.Context, arg CreateEventInstan
 		&i.RecyclablesKg,
 		&i.CleanupDurationHours,
 		&i.EnvironmentalNotes,
+		&i.Description,
+		&i.ZoneID,
 	)
 	return i, err
 }
 
 const createEventRegistration = `-- name: CreateEventRegistration :one
 INSERT INTO event_registrations (
-    id, event_id, user_id, status, registered_at, created_at, updated_at, version
+    id, event_id, user_id, status, checkin_code, registered_at, created_at, updated_at, version
 ) VALUES (
-    $1, $2, $3, 'registered', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, 1
-) RETURNING id, event_id, user_id, status, registered_at, cancelled_at, created_at, updated_at, version
+    $1, $2, $3, 'registered', $4, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, 1
+) RETURNING id, event_id, user_id, status, registered_at, cancelled_at, created_at, updated_at, version, checkin_code, attended_at, verified_at, verified_by_user_id, verification_method
 `
 
 type CreateEventRegistrationParams struct {
-	ID      string `json:"id"`
-	EventID string `json:"event_id"`
-	UserID  string `json:"user_id"`
+	ID          string      `json:"id"`
+	EventID     string      `json:"event_id"`
+	UserID      string      `json:"user_id"`
+	CheckinCode pgtype.Text `json:"checkin_code"`
 }
 
 func (q *Queries) CreateEventRegistration(ctx context.Context, arg CreateEventRegistrationParams) (EventRegistration, error) {
-	row := q.db.QueryRow(ctx, createEventRegistration, arg.ID, arg.EventID, arg.UserID)
+	row := q.db.QueryRow(ctx, createEventRegistration,
+		arg.ID,
+		arg.EventID,
+		arg.UserID,
+		arg.CheckinCode,
+	)
 	var i EventRegistration
 	err := row.Scan(
 		&i.ID,
@@ -208,6 +274,11 @@ func (q *Queries) CreateEventRegistration(ctx context.Context, arg CreateEventRe
 		&i.CreatedAt,
 		&i.UpdatedAt,
 		&i.Version,
+		&i.CheckinCode,
+		&i.AttendedAt,
+		&i.VerifiedAt,
+		&i.VerifiedByUserID,
+		&i.VerificationMethod,
 	)
 	return i, err
 }
@@ -216,7 +287,7 @@ const decrementRegisteredCount = `-- name: DecrementRegisteredCount :one
 UPDATE event_instances
 SET registered_count = GREATEST(0, registered_count - 1), updated_at = CURRENT_TIMESTAMP
 WHERE id = $1
-RETURNING id, campaign_id, programme_type, title, state_id, lga_id, address, landmark, latitude, longitude, start_time, end_time, capacity, registered_count, coordinator_id, public_contact, accessibility_notes, safety_notes, status, rejection_reason, rescheduled_from, rescheduled_reason, created_at, updated_at, version, waste_collected_kg, waste_bags_count, recyclables_kg, cleanup_duration_hours, environmental_notes
+RETURNING id, campaign_id, programme_type, title, state_id, lga_id, address, landmark, latitude, longitude, start_time, end_time, capacity, registered_count, coordinator_id, public_contact, accessibility_notes, safety_notes, status, rejection_reason, rescheduled_from, rescheduled_reason, created_at, updated_at, version, waste_collected_kg, waste_bags_count, recyclables_kg, cleanup_duration_hours, environmental_notes, description, zone_id
 `
 
 func (q *Queries) DecrementRegisteredCount(ctx context.Context, id string) (EventInstance, error) {
@@ -253,6 +324,8 @@ func (q *Queries) DecrementRegisteredCount(ctx context.Context, id string) (Even
 		&i.RecyclablesKg,
 		&i.CleanupDurationHours,
 		&i.EnvironmentalNotes,
+		&i.Description,
+		&i.ZoneID,
 	)
 	return i, err
 }
@@ -309,7 +382,7 @@ func (q *Queries) GetCleanupCampaignByYearMonth(ctx context.Context, arg GetClea
 }
 
 const getEventInstanceByID = `-- name: GetEventInstanceByID :one
-SELECT id, campaign_id, programme_type, title, state_id, lga_id, address, landmark, latitude, longitude, start_time, end_time, capacity, registered_count, coordinator_id, public_contact, accessibility_notes, safety_notes, status, rejection_reason, rescheduled_from, rescheduled_reason, created_at, updated_at, version, waste_collected_kg, waste_bags_count, recyclables_kg, cleanup_duration_hours, environmental_notes FROM event_instances
+SELECT id, campaign_id, programme_type, title, state_id, lga_id, address, landmark, latitude, longitude, start_time, end_time, capacity, registered_count, coordinator_id, public_contact, accessibility_notes, safety_notes, status, rejection_reason, rescheduled_from, rescheduled_reason, created_at, updated_at, version, waste_collected_kg, waste_bags_count, recyclables_kg, cleanup_duration_hours, environmental_notes, description, zone_id FROM event_instances
 WHERE id = $1
 `
 
@@ -347,12 +420,14 @@ func (q *Queries) GetEventInstanceByID(ctx context.Context, id string) (EventIns
 		&i.RecyclablesKg,
 		&i.CleanupDurationHours,
 		&i.EnvironmentalNotes,
+		&i.Description,
+		&i.ZoneID,
 	)
 	return i, err
 }
 
 const getEventInstanceForUpdate = `-- name: GetEventInstanceForUpdate :one
-SELECT id, campaign_id, programme_type, title, state_id, lga_id, address, landmark, latitude, longitude, start_time, end_time, capacity, registered_count, coordinator_id, public_contact, accessibility_notes, safety_notes, status, rejection_reason, rescheduled_from, rescheduled_reason, created_at, updated_at, version, waste_collected_kg, waste_bags_count, recyclables_kg, cleanup_duration_hours, environmental_notes FROM event_instances
+SELECT id, campaign_id, programme_type, title, state_id, lga_id, address, landmark, latitude, longitude, start_time, end_time, capacity, registered_count, coordinator_id, public_contact, accessibility_notes, safety_notes, status, rejection_reason, rescheduled_from, rescheduled_reason, created_at, updated_at, version, waste_collected_kg, waste_bags_count, recyclables_kg, cleanup_duration_hours, environmental_notes, description, zone_id FROM event_instances
 WHERE id = $1 FOR UPDATE
 `
 
@@ -390,12 +465,14 @@ func (q *Queries) GetEventInstanceForUpdate(ctx context.Context, id string) (Eve
 		&i.RecyclablesKg,
 		&i.CleanupDurationHours,
 		&i.EnvironmentalNotes,
+		&i.Description,
+		&i.ZoneID,
 	)
 	return i, err
 }
 
 const getEventRegistration = `-- name: GetEventRegistration :one
-SELECT id, event_id, user_id, status, registered_at, cancelled_at, created_at, updated_at, version FROM event_registrations
+SELECT id, event_id, user_id, status, registered_at, cancelled_at, created_at, updated_at, version, checkin_code, attended_at, verified_at, verified_by_user_id, verification_method FROM event_registrations
 WHERE event_id = $1 AND user_id = $2
 `
 
@@ -417,6 +494,70 @@ func (q *Queries) GetEventRegistration(ctx context.Context, arg GetEventRegistra
 		&i.CreatedAt,
 		&i.UpdatedAt,
 		&i.Version,
+		&i.CheckinCode,
+		&i.AttendedAt,
+		&i.VerifiedAt,
+		&i.VerifiedByUserID,
+		&i.VerificationMethod,
+	)
+	return i, err
+}
+
+const getEventRegistrationByCode = `-- name: GetEventRegistrationByCode :one
+SELECT id, event_id, user_id, status, registered_at, cancelled_at, created_at, updated_at, version, checkin_code, attended_at, verified_at, verified_by_user_id, verification_method FROM event_registrations
+WHERE event_id = $1 AND checkin_code = $2
+`
+
+type GetEventRegistrationByCodeParams struct {
+	EventID     string      `json:"event_id"`
+	CheckinCode pgtype.Text `json:"checkin_code"`
+}
+
+func (q *Queries) GetEventRegistrationByCode(ctx context.Context, arg GetEventRegistrationByCodeParams) (EventRegistration, error) {
+	row := q.db.QueryRow(ctx, getEventRegistrationByCode, arg.EventID, arg.CheckinCode)
+	var i EventRegistration
+	err := row.Scan(
+		&i.ID,
+		&i.EventID,
+		&i.UserID,
+		&i.Status,
+		&i.RegisteredAt,
+		&i.CancelledAt,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+		&i.Version,
+		&i.CheckinCode,
+		&i.AttendedAt,
+		&i.VerifiedAt,
+		&i.VerifiedByUserID,
+		&i.VerificationMethod,
+	)
+	return i, err
+}
+
+const getEventRegistrationByCodeGlobal = `-- name: GetEventRegistrationByCodeGlobal :one
+SELECT id, event_id, user_id, status, registered_at, cancelled_at, created_at, updated_at, version, checkin_code, attended_at, verified_at, verified_by_user_id, verification_method FROM event_registrations
+WHERE checkin_code = $1
+`
+
+func (q *Queries) GetEventRegistrationByCodeGlobal(ctx context.Context, checkinCode pgtype.Text) (EventRegistration, error) {
+	row := q.db.QueryRow(ctx, getEventRegistrationByCodeGlobal, checkinCode)
+	var i EventRegistration
+	err := row.Scan(
+		&i.ID,
+		&i.EventID,
+		&i.UserID,
+		&i.Status,
+		&i.RegisteredAt,
+		&i.CancelledAt,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+		&i.Version,
+		&i.CheckinCode,
+		&i.AttendedAt,
+		&i.VerifiedAt,
+		&i.VerifiedByUserID,
+		&i.VerificationMethod,
 	)
 	return i, err
 }
@@ -425,7 +566,7 @@ const incrementRegisteredCount = `-- name: IncrementRegisteredCount :one
 UPDATE event_instances
 SET registered_count = registered_count + 1, updated_at = CURRENT_TIMESTAMP
 WHERE id = $1
-RETURNING id, campaign_id, programme_type, title, state_id, lga_id, address, landmark, latitude, longitude, start_time, end_time, capacity, registered_count, coordinator_id, public_contact, accessibility_notes, safety_notes, status, rejection_reason, rescheduled_from, rescheduled_reason, created_at, updated_at, version, waste_collected_kg, waste_bags_count, recyclables_kg, cleanup_duration_hours, environmental_notes
+RETURNING id, campaign_id, programme_type, title, state_id, lga_id, address, landmark, latitude, longitude, start_time, end_time, capacity, registered_count, coordinator_id, public_contact, accessibility_notes, safety_notes, status, rejection_reason, rescheduled_from, rescheduled_reason, created_at, updated_at, version, waste_collected_kg, waste_bags_count, recyclables_kg, cleanup_duration_hours, environmental_notes, description, zone_id
 `
 
 func (q *Queries) IncrementRegisteredCount(ctx context.Context, id string) (EventInstance, error) {
@@ -462,12 +603,14 @@ func (q *Queries) IncrementRegisteredCount(ctx context.Context, id string) (Even
 		&i.RecyclablesKg,
 		&i.CleanupDurationHours,
 		&i.EnvironmentalNotes,
+		&i.Description,
+		&i.ZoneID,
 	)
 	return i, err
 }
 
 const listAllEvents = `-- name: ListAllEvents :many
-SELECT e.id, e.campaign_id, e.programme_type, e.title, e.state_id, e.lga_id, e.address, e.landmark, e.latitude, e.longitude, e.start_time, e.end_time, e.capacity, e.registered_count, e.coordinator_id, e.public_contact, e.accessibility_notes, e.safety_notes, e.status, e.rejection_reason, e.rescheduled_from, e.rescheduled_reason, e.created_at, e.updated_at, e.version, e.waste_collected_kg, e.waste_bags_count, e.recyclables_kg, e.cleanup_duration_hours, e.environmental_notes, s.name as state_name, l.name as lga_name, u.display_name as coordinator_name
+SELECT e.id, e.campaign_id, e.programme_type, e.title, e.state_id, e.lga_id, e.address, e.landmark, e.latitude, e.longitude, e.start_time, e.end_time, e.capacity, e.registered_count, e.coordinator_id, e.public_contact, e.accessibility_notes, e.safety_notes, e.status, e.rejection_reason, e.rescheduled_from, e.rescheduled_reason, e.created_at, e.updated_at, e.version, e.waste_collected_kg, e.waste_bags_count, e.recyclables_kg, e.cleanup_duration_hours, e.environmental_notes, e.description, e.zone_id, s.name as state_name, l.name as lga_name, u.display_name as coordinator_name
 FROM event_instances e
 JOIN states s ON e.state_id = s.id
 JOIN lgas l ON e.lga_id = l.id
@@ -506,6 +649,8 @@ type ListAllEventsRow struct {
 	RecyclablesKg        int64              `json:"recyclables_kg"`
 	CleanupDurationHours pgtype.Numeric     `json:"cleanup_duration_hours"`
 	EnvironmentalNotes   pgtype.Text        `json:"environmental_notes"`
+	Description          pgtype.Text        `json:"description"`
+	ZoneID               pgtype.Text        `json:"zone_id"`
 	StateName            string             `json:"state_name"`
 	LgaName              string             `json:"lga_name"`
 	CoordinatorName      string             `json:"coordinator_name"`
@@ -551,6 +696,8 @@ func (q *Queries) ListAllEvents(ctx context.Context) ([]ListAllEventsRow, error)
 			&i.RecyclablesKg,
 			&i.CleanupDurationHours,
 			&i.EnvironmentalNotes,
+			&i.Description,
+			&i.ZoneID,
 			&i.StateName,
 			&i.LgaName,
 			&i.CoordinatorName,
@@ -601,8 +748,295 @@ func (q *Queries) ListCleanupCampaigns(ctx context.Context) ([]CleanupCampaign, 
 	return items, nil
 }
 
+const listEventParticipants = `-- name: ListEventParticipants :many
+SELECT r.id, r.event_id, r.user_id, r.status, r.registered_at, r.cancelled_at, r.created_at, r.updated_at, r.version, r.checkin_code, r.attended_at, r.verified_at, r.verified_by_user_id, r.verification_method,
+       u.display_name as user_name,
+       u.display_name as user_display_name,
+       u.email as user_email,
+       u.phone as user_phone,
+       u.membership_reference as user_membership_ref,
+       verifier.display_name as verifier_name
+FROM event_registrations r
+JOIN users u ON r.user_id = u.id
+LEFT JOIN users verifier ON r.verified_by_user_id = verifier.id
+WHERE r.event_id = $1
+ORDER BY r.registered_at ASC
+`
+
+type ListEventParticipantsRow struct {
+	ID                 string             `json:"id"`
+	EventID            string             `json:"event_id"`
+	UserID             string             `json:"user_id"`
+	Status             string             `json:"status"`
+	RegisteredAt       pgtype.Timestamptz `json:"registered_at"`
+	CancelledAt        pgtype.Timestamptz `json:"cancelled_at"`
+	CreatedAt          pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt          pgtype.Timestamptz `json:"updated_at"`
+	Version            int32              `json:"version"`
+	CheckinCode        pgtype.Text        `json:"checkin_code"`
+	AttendedAt         pgtype.Timestamptz `json:"attended_at"`
+	VerifiedAt         pgtype.Timestamptz `json:"verified_at"`
+	VerifiedByUserID   pgtype.Text        `json:"verified_by_user_id"`
+	VerificationMethod pgtype.Text        `json:"verification_method"`
+	UserName           string             `json:"user_name"`
+	UserDisplayName    string             `json:"user_display_name"`
+	UserEmail          pgtype.Text        `json:"user_email"`
+	UserPhone          pgtype.Text        `json:"user_phone"`
+	UserMembershipRef  string             `json:"user_membership_ref"`
+	VerifierName       pgtype.Text        `json:"verifier_name"`
+}
+
+func (q *Queries) ListEventParticipants(ctx context.Context, eventID string) ([]ListEventParticipantsRow, error) {
+	rows, err := q.db.Query(ctx, listEventParticipants, eventID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []ListEventParticipantsRow
+	for rows.Next() {
+		var i ListEventParticipantsRow
+		if err := rows.Scan(
+			&i.ID,
+			&i.EventID,
+			&i.UserID,
+			&i.Status,
+			&i.RegisteredAt,
+			&i.CancelledAt,
+			&i.CreatedAt,
+			&i.UpdatedAt,
+			&i.Version,
+			&i.CheckinCode,
+			&i.AttendedAt,
+			&i.VerifiedAt,
+			&i.VerifiedByUserID,
+			&i.VerificationMethod,
+			&i.UserName,
+			&i.UserDisplayName,
+			&i.UserEmail,
+			&i.UserPhone,
+			&i.UserMembershipRef,
+			&i.VerifierName,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listEventsByCoordinator = `-- name: ListEventsByCoordinator :many
+SELECT e.id, e.campaign_id, e.programme_type, e.title, e.state_id, e.lga_id, e.address, e.landmark, e.latitude, e.longitude, e.start_time, e.end_time, e.capacity, e.registered_count, e.coordinator_id, e.public_contact, e.accessibility_notes, e.safety_notes, e.status, e.rejection_reason, e.rescheduled_from, e.rescheduled_reason, e.created_at, e.updated_at, e.version, e.waste_collected_kg, e.waste_bags_count, e.recyclables_kg, e.cleanup_duration_hours, e.environmental_notes, e.description, e.zone_id, s.name as state_name, l.name as lga_name, u.display_name as coordinator_name
+FROM event_instances e
+JOIN states s ON e.state_id = s.id
+JOIN lgas l ON e.lga_id = l.id
+JOIN users u ON e.coordinator_id = u.id
+WHERE e.coordinator_id = $1
+ORDER BY e.start_time DESC
+`
+
+type ListEventsByCoordinatorRow struct {
+	ID                   string             `json:"id"`
+	CampaignID           pgtype.Text        `json:"campaign_id"`
+	ProgrammeType        string             `json:"programme_type"`
+	Title                string             `json:"title"`
+	StateID              string             `json:"state_id"`
+	LgaID                string             `json:"lga_id"`
+	Address              string             `json:"address"`
+	Landmark             string             `json:"landmark"`
+	Latitude             pgtype.Float8      `json:"latitude"`
+	Longitude            pgtype.Float8      `json:"longitude"`
+	StartTime            pgtype.Timestamptz `json:"start_time"`
+	EndTime              pgtype.Timestamptz `json:"end_time"`
+	Capacity             int32              `json:"capacity"`
+	RegisteredCount      int32              `json:"registered_count"`
+	CoordinatorID        string             `json:"coordinator_id"`
+	PublicContact        string             `json:"public_contact"`
+	AccessibilityNotes   pgtype.Text        `json:"accessibility_notes"`
+	SafetyNotes          pgtype.Text        `json:"safety_notes"`
+	Status               string             `json:"status"`
+	RejectionReason      pgtype.Text        `json:"rejection_reason"`
+	RescheduledFrom      pgtype.Timestamptz `json:"rescheduled_from"`
+	RescheduledReason    pgtype.Text        `json:"rescheduled_reason"`
+	CreatedAt            pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt            pgtype.Timestamptz `json:"updated_at"`
+	Version              int32              `json:"version"`
+	WasteCollectedKg     int64              `json:"waste_collected_kg"`
+	WasteBagsCount       int32              `json:"waste_bags_count"`
+	RecyclablesKg        int64              `json:"recyclables_kg"`
+	CleanupDurationHours pgtype.Numeric     `json:"cleanup_duration_hours"`
+	EnvironmentalNotes   pgtype.Text        `json:"environmental_notes"`
+	Description          pgtype.Text        `json:"description"`
+	ZoneID               pgtype.Text        `json:"zone_id"`
+	StateName            string             `json:"state_name"`
+	LgaName              string             `json:"lga_name"`
+	CoordinatorName      string             `json:"coordinator_name"`
+}
+
+func (q *Queries) ListEventsByCoordinator(ctx context.Context, coordinatorID string) ([]ListEventsByCoordinatorRow, error) {
+	rows, err := q.db.Query(ctx, listEventsByCoordinator, coordinatorID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []ListEventsByCoordinatorRow
+	for rows.Next() {
+		var i ListEventsByCoordinatorRow
+		if err := rows.Scan(
+			&i.ID,
+			&i.CampaignID,
+			&i.ProgrammeType,
+			&i.Title,
+			&i.StateID,
+			&i.LgaID,
+			&i.Address,
+			&i.Landmark,
+			&i.Latitude,
+			&i.Longitude,
+			&i.StartTime,
+			&i.EndTime,
+			&i.Capacity,
+			&i.RegisteredCount,
+			&i.CoordinatorID,
+			&i.PublicContact,
+			&i.AccessibilityNotes,
+			&i.SafetyNotes,
+			&i.Status,
+			&i.RejectionReason,
+			&i.RescheduledFrom,
+			&i.RescheduledReason,
+			&i.CreatedAt,
+			&i.UpdatedAt,
+			&i.Version,
+			&i.WasteCollectedKg,
+			&i.WasteBagsCount,
+			&i.RecyclablesKg,
+			&i.CleanupDurationHours,
+			&i.EnvironmentalNotes,
+			&i.Description,
+			&i.ZoneID,
+			&i.StateName,
+			&i.LgaName,
+			&i.CoordinatorName,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listEventsByLGA = `-- name: ListEventsByLGA :many
+SELECT e.id, e.campaign_id, e.programme_type, e.title, e.state_id, e.lga_id, e.address, e.landmark, e.latitude, e.longitude, e.start_time, e.end_time, e.capacity, e.registered_count, e.coordinator_id, e.public_contact, e.accessibility_notes, e.safety_notes, e.status, e.rejection_reason, e.rescheduled_from, e.rescheduled_reason, e.created_at, e.updated_at, e.version, e.waste_collected_kg, e.waste_bags_count, e.recyclables_kg, e.cleanup_duration_hours, e.environmental_notes, e.description, e.zone_id, s.name as state_name, l.name as lga_name, u.display_name as coordinator_name
+FROM event_instances e
+JOIN states s ON e.state_id = s.id
+JOIN lgas l ON e.lga_id = l.id
+JOIN users u ON e.coordinator_id = u.id
+WHERE e.lga_id = $1
+ORDER BY e.start_time DESC
+`
+
+type ListEventsByLGARow struct {
+	ID                   string             `json:"id"`
+	CampaignID           pgtype.Text        `json:"campaign_id"`
+	ProgrammeType        string             `json:"programme_type"`
+	Title                string             `json:"title"`
+	StateID              string             `json:"state_id"`
+	LgaID                string             `json:"lga_id"`
+	Address              string             `json:"address"`
+	Landmark             string             `json:"landmark"`
+	Latitude             pgtype.Float8      `json:"latitude"`
+	Longitude            pgtype.Float8      `json:"longitude"`
+	StartTime            pgtype.Timestamptz `json:"start_time"`
+	EndTime              pgtype.Timestamptz `json:"end_time"`
+	Capacity             int32              `json:"capacity"`
+	RegisteredCount      int32              `json:"registered_count"`
+	CoordinatorID        string             `json:"coordinator_id"`
+	PublicContact        string             `json:"public_contact"`
+	AccessibilityNotes   pgtype.Text        `json:"accessibility_notes"`
+	SafetyNotes          pgtype.Text        `json:"safety_notes"`
+	Status               string             `json:"status"`
+	RejectionReason      pgtype.Text        `json:"rejection_reason"`
+	RescheduledFrom      pgtype.Timestamptz `json:"rescheduled_from"`
+	RescheduledReason    pgtype.Text        `json:"rescheduled_reason"`
+	CreatedAt            pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt            pgtype.Timestamptz `json:"updated_at"`
+	Version              int32              `json:"version"`
+	WasteCollectedKg     int64              `json:"waste_collected_kg"`
+	WasteBagsCount       int32              `json:"waste_bags_count"`
+	RecyclablesKg        int64              `json:"recyclables_kg"`
+	CleanupDurationHours pgtype.Numeric     `json:"cleanup_duration_hours"`
+	EnvironmentalNotes   pgtype.Text        `json:"environmental_notes"`
+	Description          pgtype.Text        `json:"description"`
+	ZoneID               pgtype.Text        `json:"zone_id"`
+	StateName            string             `json:"state_name"`
+	LgaName              string             `json:"lga_name"`
+	CoordinatorName      string             `json:"coordinator_name"`
+}
+
+func (q *Queries) ListEventsByLGA(ctx context.Context, lgaID string) ([]ListEventsByLGARow, error) {
+	rows, err := q.db.Query(ctx, listEventsByLGA, lgaID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []ListEventsByLGARow
+	for rows.Next() {
+		var i ListEventsByLGARow
+		if err := rows.Scan(
+			&i.ID,
+			&i.CampaignID,
+			&i.ProgrammeType,
+			&i.Title,
+			&i.StateID,
+			&i.LgaID,
+			&i.Address,
+			&i.Landmark,
+			&i.Latitude,
+			&i.Longitude,
+			&i.StartTime,
+			&i.EndTime,
+			&i.Capacity,
+			&i.RegisteredCount,
+			&i.CoordinatorID,
+			&i.PublicContact,
+			&i.AccessibilityNotes,
+			&i.SafetyNotes,
+			&i.Status,
+			&i.RejectionReason,
+			&i.RescheduledFrom,
+			&i.RescheduledReason,
+			&i.CreatedAt,
+			&i.UpdatedAt,
+			&i.Version,
+			&i.WasteCollectedKg,
+			&i.WasteBagsCount,
+			&i.RecyclablesKg,
+			&i.CleanupDurationHours,
+			&i.EnvironmentalNotes,
+			&i.Description,
+			&i.ZoneID,
+			&i.StateName,
+			&i.LgaName,
+			&i.CoordinatorName,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listEventsByState = `-- name: ListEventsByState :many
-SELECT e.id, e.campaign_id, e.programme_type, e.title, e.state_id, e.lga_id, e.address, e.landmark, e.latitude, e.longitude, e.start_time, e.end_time, e.capacity, e.registered_count, e.coordinator_id, e.public_contact, e.accessibility_notes, e.safety_notes, e.status, e.rejection_reason, e.rescheduled_from, e.rescheduled_reason, e.created_at, e.updated_at, e.version, e.waste_collected_kg, e.waste_bags_count, e.recyclables_kg, e.cleanup_duration_hours, e.environmental_notes, s.name as state_name, l.name as lga_name, u.display_name as coordinator_name
+SELECT e.id, e.campaign_id, e.programme_type, e.title, e.state_id, e.lga_id, e.address, e.landmark, e.latitude, e.longitude, e.start_time, e.end_time, e.capacity, e.registered_count, e.coordinator_id, e.public_contact, e.accessibility_notes, e.safety_notes, e.status, e.rejection_reason, e.rescheduled_from, e.rescheduled_reason, e.created_at, e.updated_at, e.version, e.waste_collected_kg, e.waste_bags_count, e.recyclables_kg, e.cleanup_duration_hours, e.environmental_notes, e.description, e.zone_id, s.name as state_name, l.name as lga_name, u.display_name as coordinator_name
 FROM event_instances e
 JOIN states s ON e.state_id = s.id
 JOIN lgas l ON e.lga_id = l.id
@@ -642,6 +1076,8 @@ type ListEventsByStateRow struct {
 	RecyclablesKg        int64              `json:"recyclables_kg"`
 	CleanupDurationHours pgtype.Numeric     `json:"cleanup_duration_hours"`
 	EnvironmentalNotes   pgtype.Text        `json:"environmental_notes"`
+	Description          pgtype.Text        `json:"description"`
+	ZoneID               pgtype.Text        `json:"zone_id"`
 	StateName            string             `json:"state_name"`
 	LgaName              string             `json:"lga_name"`
 	CoordinatorName      string             `json:"coordinator_name"`
@@ -687,6 +1123,112 @@ func (q *Queries) ListEventsByState(ctx context.Context, stateID string) ([]List
 			&i.RecyclablesKg,
 			&i.CleanupDurationHours,
 			&i.EnvironmentalNotes,
+			&i.Description,
+			&i.ZoneID,
+			&i.StateName,
+			&i.LgaName,
+			&i.CoordinatorName,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listEventsByZone = `-- name: ListEventsByZone :many
+SELECT e.id, e.campaign_id, e.programme_type, e.title, e.state_id, e.lga_id, e.address, e.landmark, e.latitude, e.longitude, e.start_time, e.end_time, e.capacity, e.registered_count, e.coordinator_id, e.public_contact, e.accessibility_notes, e.safety_notes, e.status, e.rejection_reason, e.rescheduled_from, e.rescheduled_reason, e.created_at, e.updated_at, e.version, e.waste_collected_kg, e.waste_bags_count, e.recyclables_kg, e.cleanup_duration_hours, e.environmental_notes, e.description, e.zone_id, s.name as state_name, l.name as lga_name, u.display_name as coordinator_name
+FROM event_instances e
+JOIN states s ON e.state_id = s.id
+JOIN lgas l ON e.lga_id = l.id
+JOIN users u ON e.coordinator_id = u.id
+WHERE s.zone_id = $1 OR e.zone_id = $1
+ORDER BY e.start_time DESC
+`
+
+type ListEventsByZoneRow struct {
+	ID                   string             `json:"id"`
+	CampaignID           pgtype.Text        `json:"campaign_id"`
+	ProgrammeType        string             `json:"programme_type"`
+	Title                string             `json:"title"`
+	StateID              string             `json:"state_id"`
+	LgaID                string             `json:"lga_id"`
+	Address              string             `json:"address"`
+	Landmark             string             `json:"landmark"`
+	Latitude             pgtype.Float8      `json:"latitude"`
+	Longitude            pgtype.Float8      `json:"longitude"`
+	StartTime            pgtype.Timestamptz `json:"start_time"`
+	EndTime              pgtype.Timestamptz `json:"end_time"`
+	Capacity             int32              `json:"capacity"`
+	RegisteredCount      int32              `json:"registered_count"`
+	CoordinatorID        string             `json:"coordinator_id"`
+	PublicContact        string             `json:"public_contact"`
+	AccessibilityNotes   pgtype.Text        `json:"accessibility_notes"`
+	SafetyNotes          pgtype.Text        `json:"safety_notes"`
+	Status               string             `json:"status"`
+	RejectionReason      pgtype.Text        `json:"rejection_reason"`
+	RescheduledFrom      pgtype.Timestamptz `json:"rescheduled_from"`
+	RescheduledReason    pgtype.Text        `json:"rescheduled_reason"`
+	CreatedAt            pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt            pgtype.Timestamptz `json:"updated_at"`
+	Version              int32              `json:"version"`
+	WasteCollectedKg     int64              `json:"waste_collected_kg"`
+	WasteBagsCount       int32              `json:"waste_bags_count"`
+	RecyclablesKg        int64              `json:"recyclables_kg"`
+	CleanupDurationHours pgtype.Numeric     `json:"cleanup_duration_hours"`
+	EnvironmentalNotes   pgtype.Text        `json:"environmental_notes"`
+	Description          pgtype.Text        `json:"description"`
+	ZoneID               pgtype.Text        `json:"zone_id"`
+	StateName            string             `json:"state_name"`
+	LgaName              string             `json:"lga_name"`
+	CoordinatorName      string             `json:"coordinator_name"`
+}
+
+func (q *Queries) ListEventsByZone(ctx context.Context, zoneID string) ([]ListEventsByZoneRow, error) {
+	rows, err := q.db.Query(ctx, listEventsByZone, zoneID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []ListEventsByZoneRow
+	for rows.Next() {
+		var i ListEventsByZoneRow
+		if err := rows.Scan(
+			&i.ID,
+			&i.CampaignID,
+			&i.ProgrammeType,
+			&i.Title,
+			&i.StateID,
+			&i.LgaID,
+			&i.Address,
+			&i.Landmark,
+			&i.Latitude,
+			&i.Longitude,
+			&i.StartTime,
+			&i.EndTime,
+			&i.Capacity,
+			&i.RegisteredCount,
+			&i.CoordinatorID,
+			&i.PublicContact,
+			&i.AccessibilityNotes,
+			&i.SafetyNotes,
+			&i.Status,
+			&i.RejectionReason,
+			&i.RescheduledFrom,
+			&i.RescheduledReason,
+			&i.CreatedAt,
+			&i.UpdatedAt,
+			&i.Version,
+			&i.WasteCollectedKg,
+			&i.WasteBagsCount,
+			&i.RecyclablesKg,
+			&i.CleanupDurationHours,
+			&i.EnvironmentalNotes,
+			&i.Description,
+			&i.ZoneID,
 			&i.StateName,
 			&i.LgaName,
 			&i.CoordinatorName,
@@ -702,7 +1244,7 @@ func (q *Queries) ListEventsByState(ctx context.Context, stateID string) ([]List
 }
 
 const listPublishedEvents = `-- name: ListPublishedEvents :many
-SELECT e.id, e.campaign_id, e.programme_type, e.title, e.state_id, e.lga_id, e.address, e.landmark, e.latitude, e.longitude, e.start_time, e.end_time, e.capacity, e.registered_count, e.coordinator_id, e.public_contact, e.accessibility_notes, e.safety_notes, e.status, e.rejection_reason, e.rescheduled_from, e.rescheduled_reason, e.created_at, e.updated_at, e.version, e.waste_collected_kg, e.waste_bags_count, e.recyclables_kg, e.cleanup_duration_hours, e.environmental_notes, s.name as state_name, l.name as lga_name, u.display_name as coordinator_name
+SELECT e.id, e.campaign_id, e.programme_type, e.title, e.state_id, e.lga_id, e.address, e.landmark, e.latitude, e.longitude, e.start_time, e.end_time, e.capacity, e.registered_count, e.coordinator_id, e.public_contact, e.accessibility_notes, e.safety_notes, e.status, e.rejection_reason, e.rescheduled_from, e.rescheduled_reason, e.created_at, e.updated_at, e.version, e.waste_collected_kg, e.waste_bags_count, e.recyclables_kg, e.cleanup_duration_hours, e.environmental_notes, e.description, e.zone_id, s.name as state_name, l.name as lga_name, u.display_name as coordinator_name
 FROM event_instances e
 JOIN states s ON e.state_id = s.id
 JOIN lgas l ON e.lga_id = l.id
@@ -742,6 +1284,8 @@ type ListPublishedEventsRow struct {
 	RecyclablesKg        int64              `json:"recyclables_kg"`
 	CleanupDurationHours pgtype.Numeric     `json:"cleanup_duration_hours"`
 	EnvironmentalNotes   pgtype.Text        `json:"environmental_notes"`
+	Description          pgtype.Text        `json:"description"`
+	ZoneID               pgtype.Text        `json:"zone_id"`
 	StateName            string             `json:"state_name"`
 	LgaName              string             `json:"lga_name"`
 	CoordinatorName      string             `json:"coordinator_name"`
@@ -787,6 +1331,8 @@ func (q *Queries) ListPublishedEvents(ctx context.Context) ([]ListPublishedEvent
 			&i.RecyclablesKg,
 			&i.CleanupDurationHours,
 			&i.EnvironmentalNotes,
+			&i.Description,
+			&i.ZoneID,
 			&i.StateName,
 			&i.LgaName,
 			&i.CoordinatorName,
@@ -802,7 +1348,7 @@ func (q *Queries) ListPublishedEvents(ctx context.Context) ([]ListPublishedEvent
 }
 
 const listPublishedEventsByState = `-- name: ListPublishedEventsByState :many
-SELECT e.id, e.campaign_id, e.programme_type, e.title, e.state_id, e.lga_id, e.address, e.landmark, e.latitude, e.longitude, e.start_time, e.end_time, e.capacity, e.registered_count, e.coordinator_id, e.public_contact, e.accessibility_notes, e.safety_notes, e.status, e.rejection_reason, e.rescheduled_from, e.rescheduled_reason, e.created_at, e.updated_at, e.version, e.waste_collected_kg, e.waste_bags_count, e.recyclables_kg, e.cleanup_duration_hours, e.environmental_notes, s.name as state_name, l.name as lga_name, u.display_name as coordinator_name
+SELECT e.id, e.campaign_id, e.programme_type, e.title, e.state_id, e.lga_id, e.address, e.landmark, e.latitude, e.longitude, e.start_time, e.end_time, e.capacity, e.registered_count, e.coordinator_id, e.public_contact, e.accessibility_notes, e.safety_notes, e.status, e.rejection_reason, e.rescheduled_from, e.rescheduled_reason, e.created_at, e.updated_at, e.version, e.waste_collected_kg, e.waste_bags_count, e.recyclables_kg, e.cleanup_duration_hours, e.environmental_notes, e.description, e.zone_id, s.name as state_name, l.name as lga_name, u.display_name as coordinator_name
 FROM event_instances e
 JOIN states s ON e.state_id = s.id
 JOIN lgas l ON e.lga_id = l.id
@@ -842,6 +1388,8 @@ type ListPublishedEventsByStateRow struct {
 	RecyclablesKg        int64              `json:"recyclables_kg"`
 	CleanupDurationHours pgtype.Numeric     `json:"cleanup_duration_hours"`
 	EnvironmentalNotes   pgtype.Text        `json:"environmental_notes"`
+	Description          pgtype.Text        `json:"description"`
+	ZoneID               pgtype.Text        `json:"zone_id"`
 	StateName            string             `json:"state_name"`
 	LgaName              string             `json:"lga_name"`
 	CoordinatorName      string             `json:"coordinator_name"`
@@ -887,6 +1435,8 @@ func (q *Queries) ListPublishedEventsByState(ctx context.Context, stateID string
 			&i.RecyclablesKg,
 			&i.CleanupDurationHours,
 			&i.EnvironmentalNotes,
+			&i.Description,
+			&i.ZoneID,
 			&i.StateName,
 			&i.LgaName,
 			&i.CoordinatorName,
@@ -902,7 +1452,7 @@ func (q *Queries) ListPublishedEventsByState(ctx context.Context, stateID string
 }
 
 const listRegistrationsByUser = `-- name: ListRegistrationsByUser :many
-SELECT r.id, r.event_id, r.user_id, r.status, r.registered_at, r.cancelled_at, r.created_at, r.updated_at, r.version, e.title as event_title, e.start_time as event_start_time, e.address as event_address, s.name as state_name
+SELECT r.id, r.event_id, r.user_id, r.status, r.registered_at, r.cancelled_at, r.created_at, r.updated_at, r.version, r.checkin_code, r.attended_at, r.verified_at, r.verified_by_user_id, r.verification_method, e.title as event_title, e.start_time as event_start_time, e.address as event_address, s.name as state_name
 FROM event_registrations r
 JOIN event_instances e ON r.event_id = e.id
 JOIN states s ON e.state_id = s.id
@@ -911,19 +1461,24 @@ ORDER BY r.registered_at DESC
 `
 
 type ListRegistrationsByUserRow struct {
-	ID             string             `json:"id"`
-	EventID        string             `json:"event_id"`
-	UserID         string             `json:"user_id"`
-	Status         string             `json:"status"`
-	RegisteredAt   pgtype.Timestamptz `json:"registered_at"`
-	CancelledAt    pgtype.Timestamptz `json:"cancelled_at"`
-	CreatedAt      pgtype.Timestamptz `json:"created_at"`
-	UpdatedAt      pgtype.Timestamptz `json:"updated_at"`
-	Version        int32              `json:"version"`
-	EventTitle     string             `json:"event_title"`
-	EventStartTime pgtype.Timestamptz `json:"event_start_time"`
-	EventAddress   string             `json:"event_address"`
-	StateName      string             `json:"state_name"`
+	ID                 string             `json:"id"`
+	EventID            string             `json:"event_id"`
+	UserID             string             `json:"user_id"`
+	Status             string             `json:"status"`
+	RegisteredAt       pgtype.Timestamptz `json:"registered_at"`
+	CancelledAt        pgtype.Timestamptz `json:"cancelled_at"`
+	CreatedAt          pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt          pgtype.Timestamptz `json:"updated_at"`
+	Version            int32              `json:"version"`
+	CheckinCode        pgtype.Text        `json:"checkin_code"`
+	AttendedAt         pgtype.Timestamptz `json:"attended_at"`
+	VerifiedAt         pgtype.Timestamptz `json:"verified_at"`
+	VerifiedByUserID   pgtype.Text        `json:"verified_by_user_id"`
+	VerificationMethod pgtype.Text        `json:"verification_method"`
+	EventTitle         string             `json:"event_title"`
+	EventStartTime     pgtype.Timestamptz `json:"event_start_time"`
+	EventAddress       string             `json:"event_address"`
+	StateName          string             `json:"state_name"`
 }
 
 func (q *Queries) ListRegistrationsByUser(ctx context.Context, userID string) ([]ListRegistrationsByUserRow, error) {
@@ -945,6 +1500,11 @@ func (q *Queries) ListRegistrationsByUser(ctx context.Context, userID string) ([
 			&i.CreatedAt,
 			&i.UpdatedAt,
 			&i.Version,
+			&i.CheckinCode,
+			&i.AttendedAt,
+			&i.VerifiedAt,
+			&i.VerifiedByUserID,
+			&i.VerificationMethod,
 			&i.EventTitle,
 			&i.EventStartTime,
 			&i.EventAddress,
@@ -960,11 +1520,51 @@ func (q *Queries) ListRegistrationsByUser(ctx context.Context, userID string) ([
 	return items, nil
 }
 
+const reactivateEventRegistration = `-- name: ReactivateEventRegistration :one
+UPDATE event_registrations
+SET status = 'registered',
+    cancelled_at = NULL,
+    checkin_code = $3,
+    updated_at = CURRENT_TIMESTAMP
+WHERE event_id = $1
+  AND user_id = $2
+  AND status = 'cancelled'
+RETURNING id, event_id, user_id, status, registered_at, cancelled_at, created_at, updated_at, version, checkin_code, attended_at, verified_at, verified_by_user_id, verification_method
+`
+
+type ReactivateEventRegistrationParams struct {
+	EventID     string      `json:"event_id"`
+	UserID      string      `json:"user_id"`
+	CheckinCode pgtype.Text `json:"checkin_code"`
+}
+
+func (q *Queries) ReactivateEventRegistration(ctx context.Context, arg ReactivateEventRegistrationParams) (EventRegistration, error) {
+	row := q.db.QueryRow(ctx, reactivateEventRegistration, arg.EventID, arg.UserID, arg.CheckinCode)
+	var i EventRegistration
+	err := row.Scan(
+		&i.ID,
+		&i.EventID,
+		&i.UserID,
+		&i.Status,
+		&i.RegisteredAt,
+		&i.CancelledAt,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+		&i.Version,
+		&i.CheckinCode,
+		&i.AttendedAt,
+		&i.VerifiedAt,
+		&i.VerifiedByUserID,
+		&i.VerificationMethod,
+	)
+	return i, err
+}
+
 const rescheduleEvent = `-- name: RescheduleEvent :one
 UPDATE event_instances
 SET start_time = $2, end_time = $3, rescheduled_from = $4, rescheduled_reason = $5, updated_at = CURRENT_TIMESTAMP
 WHERE id = $1
-RETURNING id, campaign_id, programme_type, title, state_id, lga_id, address, landmark, latitude, longitude, start_time, end_time, capacity, registered_count, coordinator_id, public_contact, accessibility_notes, safety_notes, status, rejection_reason, rescheduled_from, rescheduled_reason, created_at, updated_at, version, waste_collected_kg, waste_bags_count, recyclables_kg, cleanup_duration_hours, environmental_notes
+RETURNING id, campaign_id, programme_type, title, state_id, lga_id, address, landmark, latitude, longitude, start_time, end_time, capacity, registered_count, coordinator_id, public_contact, accessibility_notes, safety_notes, status, rejection_reason, rescheduled_from, rescheduled_reason, created_at, updated_at, version, waste_collected_kg, waste_bags_count, recyclables_kg, cleanup_duration_hours, environmental_notes, description, zone_id
 `
 
 type RescheduleEventParams struct {
@@ -1015,6 +1615,47 @@ func (q *Queries) RescheduleEvent(ctx context.Context, arg RescheduleEventParams
 		&i.RecyclablesKg,
 		&i.CleanupDurationHours,
 		&i.EnvironmentalNotes,
+		&i.Description,
+		&i.ZoneID,
+	)
+	return i, err
+}
+
+const resetEventAttendance = `-- name: ResetEventAttendance :one
+UPDATE event_registrations
+SET status = 'registered',
+    attended_at = NULL,
+    verified_at = NULL,
+    verified_by_user_id = NULL,
+    verification_method = NULL,
+    updated_at = CURRENT_TIMESTAMP
+WHERE event_id = $1 AND user_id = $2
+RETURNING id, event_id, user_id, status, registered_at, cancelled_at, created_at, updated_at, version, checkin_code, attended_at, verified_at, verified_by_user_id, verification_method
+`
+
+type ResetEventAttendanceParams struct {
+	EventID string `json:"event_id"`
+	UserID  string `json:"user_id"`
+}
+
+func (q *Queries) ResetEventAttendance(ctx context.Context, arg ResetEventAttendanceParams) (EventRegistration, error) {
+	row := q.db.QueryRow(ctx, resetEventAttendance, arg.EventID, arg.UserID)
+	var i EventRegistration
+	err := row.Scan(
+		&i.ID,
+		&i.EventID,
+		&i.UserID,
+		&i.Status,
+		&i.RegisteredAt,
+		&i.CancelledAt,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+		&i.Version,
+		&i.CheckinCode,
+		&i.AttendedAt,
+		&i.VerifiedAt,
+		&i.VerifiedByUserID,
+		&i.VerificationMethod,
 	)
 	return i, err
 }
@@ -1023,7 +1664,7 @@ const updateEventRegistrationStatus = `-- name: UpdateEventRegistrationStatus :o
 UPDATE event_registrations
 SET status = $3, cancelled_at = $4, updated_at = CURRENT_TIMESTAMP
 WHERE event_id = $1 AND user_id = $2
-RETURNING id, event_id, user_id, status, registered_at, cancelled_at, created_at, updated_at, version
+RETURNING id, event_id, user_id, status, registered_at, cancelled_at, created_at, updated_at, version, checkin_code, attended_at, verified_at, verified_by_user_id, verification_method
 `
 
 type UpdateEventRegistrationStatusParams struct {
@@ -1051,6 +1692,11 @@ func (q *Queries) UpdateEventRegistrationStatus(ctx context.Context, arg UpdateE
 		&i.CreatedAt,
 		&i.UpdatedAt,
 		&i.Version,
+		&i.CheckinCode,
+		&i.AttendedAt,
+		&i.VerifiedAt,
+		&i.VerifiedByUserID,
+		&i.VerificationMethod,
 	)
 	return i, err
 }
@@ -1059,7 +1705,7 @@ const updateEventStatus = `-- name: UpdateEventStatus :one
 UPDATE event_instances
 SET status = $2, rejection_reason = $3, updated_at = CURRENT_TIMESTAMP
 WHERE id = $1
-RETURNING id, campaign_id, programme_type, title, state_id, lga_id, address, landmark, latitude, longitude, start_time, end_time, capacity, registered_count, coordinator_id, public_contact, accessibility_notes, safety_notes, status, rejection_reason, rescheduled_from, rescheduled_reason, created_at, updated_at, version, waste_collected_kg, waste_bags_count, recyclables_kg, cleanup_duration_hours, environmental_notes
+RETURNING id, campaign_id, programme_type, title, state_id, lga_id, address, landmark, latitude, longitude, start_time, end_time, capacity, registered_count, coordinator_id, public_contact, accessibility_notes, safety_notes, status, rejection_reason, rescheduled_from, rescheduled_reason, created_at, updated_at, version, waste_collected_kg, waste_bags_count, recyclables_kg, cleanup_duration_hours, environmental_notes, description, zone_id
 `
 
 type UpdateEventStatusParams struct {
@@ -1102,6 +1748,108 @@ func (q *Queries) UpdateEventStatus(ctx context.Context, arg UpdateEventStatusPa
 		&i.RecyclablesKg,
 		&i.CleanupDurationHours,
 		&i.EnvironmentalNotes,
+		&i.Description,
+		&i.ZoneID,
+	)
+	return i, err
+}
+
+const verifyEventAttendance = `-- name: VerifyEventAttendance :one
+UPDATE event_registrations
+SET status = 'attended',
+    attended_at = CURRENT_TIMESTAMP,
+    verified_at = CURRENT_TIMESTAMP,
+    verified_by_user_id = $3,
+    verification_method = $4,
+    updated_at = CURRENT_TIMESTAMP
+WHERE event_id = $1 AND user_id = $2
+  AND status = 'registered'
+  AND verified_at IS NULL
+RETURNING id, event_id, user_id, status, registered_at, cancelled_at, created_at, updated_at, version, checkin_code, attended_at, verified_at, verified_by_user_id, verification_method
+`
+
+type VerifyEventAttendanceParams struct {
+	EventID            string      `json:"event_id"`
+	UserID             string      `json:"user_id"`
+	VerifiedByUserID   pgtype.Text `json:"verified_by_user_id"`
+	VerificationMethod pgtype.Text `json:"verification_method"`
+}
+
+func (q *Queries) VerifyEventAttendance(ctx context.Context, arg VerifyEventAttendanceParams) (EventRegistration, error) {
+	row := q.db.QueryRow(ctx, verifyEventAttendance,
+		arg.EventID,
+		arg.UserID,
+		arg.VerifiedByUserID,
+		arg.VerificationMethod,
+	)
+	var i EventRegistration
+	err := row.Scan(
+		&i.ID,
+		&i.EventID,
+		&i.UserID,
+		&i.Status,
+		&i.RegisteredAt,
+		&i.CancelledAt,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+		&i.Version,
+		&i.CheckinCode,
+		&i.AttendedAt,
+		&i.VerifiedAt,
+		&i.VerifiedByUserID,
+		&i.VerificationMethod,
+	)
+	return i, err
+}
+
+const verifyEventAttendanceByCode = `-- name: VerifyEventAttendanceByCode :one
+UPDATE event_registrations
+SET status = 'attended',
+    attended_at = CURRENT_TIMESTAMP,
+    verified_at = CURRENT_TIMESTAMP,
+    verified_by_user_id = $3,
+    verification_method = $4,
+    updated_at = CURRENT_TIMESTAMP
+WHERE event_id = $1
+  AND user_id = $2
+  AND checkin_code = $5
+  AND status = 'registered'
+  AND verified_at IS NULL
+RETURNING id, event_id, user_id, status, registered_at, cancelled_at, created_at, updated_at, version, checkin_code, attended_at, verified_at, verified_by_user_id, verification_method
+`
+
+type VerifyEventAttendanceByCodeParams struct {
+	EventID            string      `json:"event_id"`
+	UserID             string      `json:"user_id"`
+	VerifiedByUserID   pgtype.Text `json:"verified_by_user_id"`
+	VerificationMethod pgtype.Text `json:"verification_method"`
+	CheckinCode        pgtype.Text `json:"checkin_code"`
+}
+
+func (q *Queries) VerifyEventAttendanceByCode(ctx context.Context, arg VerifyEventAttendanceByCodeParams) (EventRegistration, error) {
+	row := q.db.QueryRow(ctx, verifyEventAttendanceByCode,
+		arg.EventID,
+		arg.UserID,
+		arg.VerifiedByUserID,
+		arg.VerificationMethod,
+		arg.CheckinCode,
+	)
+	var i EventRegistration
+	err := row.Scan(
+		&i.ID,
+		&i.EventID,
+		&i.UserID,
+		&i.Status,
+		&i.RegisteredAt,
+		&i.CancelledAt,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+		&i.Version,
+		&i.CheckinCode,
+		&i.AttendedAt,
+		&i.VerifiedAt,
+		&i.VerifiedByUserID,
+		&i.VerificationMethod,
 	)
 	return i, err
 }

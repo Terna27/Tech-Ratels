@@ -50,7 +50,7 @@ export default function MemberDashboardPage() {
 
           if (events && events.length > 0) {
             setNextEvent(events[0]);
-            const registered = myRegs.some((r) => r.event_id === events[0].id && r.status === "registered");
+            const registered = myRegs.some((r) => r.event_id === events[0].id && ["registered", "attended"].includes(r.status));
             setIsRegisteredNext(registered);
           }
           setBadges(myBadges || []);
@@ -68,6 +68,7 @@ export default function MemberDashboardPage() {
   if (isLoading || loadingData) return <Spinner text="Loading member dashboard..." />;
   if (!user) return null;
 
+  // Phase 68: registration is not verified attendance.
   const pendingClaims = participations.filter((p) => p.status === "pending" || p.status === "appealed");
 
   return (
@@ -162,7 +163,7 @@ export default function MemberDashboardPage() {
 
                   {isRegisteredNext ? (
                     <span className="text-xs text-emerald-700 font-semibold flex items-center gap-1">
-                      <CheckCircle2 className="w-4 h-4" /> Attendance Confirmed
+                      <CheckCircle2 className="w-4 h-4" /> Registration recorded — attendance requires coordinator verification
                     </span>
                   ) : (
                     <Link
