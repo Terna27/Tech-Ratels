@@ -664,6 +664,58 @@ func (q *Queries) RevokeUserSession(ctx context.Context, tokenJti string) error 
 	return err
 }
 
+const searchUsers = `-- name: SearchUsers :many
+SELECT id, email, phone, password_hash, display_name, membership_reference, status, primary_role, is_verified, created_at, updated_at, version FROM users
+WHERE (
+    $1 = ''
+    OR display_name ILIKE '%' || $1 || '%'
+    OR email ILIKE '%' || $1 || '%'
+    OR membership_reference ILIKE '%' || $1 || '%'
+    OR phone ILIKE '%' || $1 || '%'
+)
+ORDER BY created_at DESC
+LIMIT $2 OFFSET $3
+`
+
+type SearchUsersParams struct {
+	Column1 interface{} `json:"column_1"`
+	Limit   int32       `json:"limit"`
+	Offset  int32       `json:"offset"`
+}
+
+func (q *Queries) SearchUsers(ctx context.Context, arg SearchUsersParams) ([]User, error) {
+	rows, err := q.db.Query(ctx, searchUsers, arg.Column1, arg.Limit, arg.Offset)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []User
+	for rows.Next() {
+		var i User
+		if err := rows.Scan(
+			&i.ID,
+			&i.Email,
+			&i.Phone,
+			&i.PasswordHash,
+			&i.DisplayName,
+			&i.MembershipReference,
+			&i.Status,
+			&i.PrimaryRole,
+			&i.IsVerified,
+			&i.CreatedAt,
+			&i.UpdatedAt,
+			&i.Version,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const updateMemberProfile = `-- name: UpdateMemberProfile :one
 UPDATE member_profiles
 SET home_state_id = $2, home_lga_id = $3, address = $4, bio = $5, avatar_url = $6, updated_at = CURRENT_TIMESTAMP

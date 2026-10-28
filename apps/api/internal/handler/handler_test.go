@@ -74,6 +74,8 @@ func setupTestHarness(t *testing.T) *TestHarness {
 	geoSvc := service.NewGeographyService(repo)
 	authSvc := service.NewAuthService(repo, cfg, del, auditSvc)
 	leadSvc := service.NewLeadershipService(repo, auditSvc)
+	notifSvc := service.NewNotificationService(repo, auditSvc, delivery.NewDevSafeEmailSender(), delivery.NewDevSafeSMSSender(), cfg.FrontendBaseURL)
+	leadSvc.SetNotificationService(notifSvc)
 	cleanupSvc := service.NewCleanupService(repo, auditSvc)
 	partSvc := service.NewParticipationService(repo, auditSvc)
 	foundSvc := service.NewFoundationService(repo, cfg, auditSvc)

@@ -12,6 +12,7 @@ import (
 )
 
 type Querier interface {
+	AcquireLeadershipJurisdictionLock(ctx context.Context, arg AcquireLeadershipJurisdictionLockParams) error
 	ActivateBankAccount(ctx context.Context, arg ActivateBankAccountParams) (FinancialBankAccount, error)
 	// -------------------------------------------------------------
 	// Recruiters
@@ -609,6 +610,7 @@ type Querier interface {
 	RevokeAllUserSessions(ctx context.Context, userID string) error
 	RevokeFinancialAuthorization(ctx context.Context, id string) (FinancialAuthorization, error)
 	RevokeUserSession(ctx context.Context, tokenJti string) error
+	SearchUsers(ctx context.Context, arg SearchUsersParams) ([]User, error)
 	SetProductStockQuantity(ctx context.Context, arg SetProductStockQuantityParams) (MarketplaceProduct, error)
 	SetStockBalanceQuantities(ctx context.Context, arg SetStockBalanceQuantitiesParams) (StockBalance, error)
 	SumOrderInventoryRestockedQuantity(ctx context.Context, arg SumOrderInventoryRestockedQuantityParams) (int32, error)

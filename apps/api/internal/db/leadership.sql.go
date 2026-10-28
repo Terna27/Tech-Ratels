@@ -11,6 +11,21 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 )
 
+const acquireLeadershipJurisdictionLock = `-- name: AcquireLeadershipJurisdictionLock :exec
+SELECT pg_advisory_xact_lock(hashtext('appt:' || $1::text || ':' || $2::text || ':' || COALESCE($3::text, ''))::bigint)
+`
+
+type AcquireLeadershipJurisdictionLockParams struct {
+	RoleType         string `json:"role_type"`
+	JurisdictionType string `json:"jurisdiction_type"`
+	JurisdictionID   string `json:"jurisdiction_id"`
+}
+
+func (q *Queries) AcquireLeadershipJurisdictionLock(ctx context.Context, arg AcquireLeadershipJurisdictionLockParams) error {
+	_, err := q.db.Exec(ctx, acquireLeadershipJurisdictionLock, arg.RoleType, arg.JurisdictionType, arg.JurisdictionID)
+	return err
+}
+
 const countActiveAppointments = `-- name: CountActiveAppointments :one
 SELECT COUNT(*) FROM appointments
 WHERE status = 'active'
@@ -324,9 +339,24 @@ func (q *Queries) ListAppointmentHistory(ctx context.Context, appointmentID stri
 }
 
 const listAppointments = `-- name: ListAppointments :many
-SELECT a.id, a.user_id, a.role_title, a.role_type, a.jurisdiction_type, a.jurisdiction_id, a.reporting_to_appointment_id, a.start_date, a.end_date, a.status, a.approval_reference, a.public_contact, a.created_at, a.updated_at, a.version, u.display_name as user_name, u.email as user_email
+SELECT a.id, a.user_id, a.role_title, a.role_type, a.jurisdiction_type, a.jurisdiction_id, a.reporting_to_appointment_id, a.start_date, a.end_date, a.status, a.approval_reference, a.public_contact, a.created_at, a.updated_at, a.version,
+       u.display_name as user_name,
+       u.display_name as user_display_name,
+       u.email as user_email,
+       u.phone as user_phone,
+       u.membership_reference as user_membership_ref,
+       CASE
+           WHEN a.jurisdiction_type = 'national' THEN 'National (Nigeria)'
+           WHEN a.jurisdiction_type = 'zone' THEN COALESCE(z.name, a.jurisdiction_id, '')
+           WHEN a.jurisdiction_type = 'state' THEN COALESCE(s.name, a.jurisdiction_id, '')
+           WHEN a.jurisdiction_type = 'lga' THEN COALESCE(l.name, a.jurisdiction_id, '')
+           ELSE COALESCE(a.jurisdiction_id, '')
+       END AS jurisdiction_name
 FROM appointments a
 JOIN users u ON a.user_id = u.id
+LEFT JOIN zones z ON a.jurisdiction_type = 'zone' AND (a.jurisdiction_id = z.id OR a.jurisdiction_id = z.code)
+LEFT JOIN states s ON a.jurisdiction_type = 'state' AND (a.jurisdiction_id = s.id OR a.jurisdiction_id = s.code)
+LEFT JOIN lgas l ON a.jurisdiction_type = 'lga' AND a.jurisdiction_id = l.id
 ORDER BY a.start_date DESC
 `
 
@@ -347,7 +377,11 @@ type ListAppointmentsRow struct {
 	UpdatedAt                pgtype.Timestamptz `json:"updated_at"`
 	Version                  int32              `json:"version"`
 	UserName                 string             `json:"user_name"`
+	UserDisplayName          string             `json:"user_display_name"`
 	UserEmail                pgtype.Text        `json:"user_email"`
+	UserPhone                pgtype.Text        `json:"user_phone"`
+	UserMembershipRef        string             `json:"user_membership_ref"`
+	JurisdictionName         interface{}        `json:"jurisdiction_name"`
 }
 
 func (q *Queries) ListAppointments(ctx context.Context) ([]ListAppointmentsRow, error) {
@@ -376,7 +410,11 @@ func (q *Queries) ListAppointments(ctx context.Context) ([]ListAppointmentsRow, 
 			&i.UpdatedAt,
 			&i.Version,
 			&i.UserName,
+			&i.UserDisplayName,
 			&i.UserEmail,
+			&i.UserPhone,
+			&i.UserMembershipRef,
+			&i.JurisdictionName,
 		); err != nil {
 			return nil, err
 		}
@@ -390,9 +428,21 @@ func (q *Queries) ListAppointments(ctx context.Context) ([]ListAppointmentsRow, 
 
 const listPublicLeadershipDirectory = `-- name: ListPublicLeadershipDirectory :many
 SELECT a.id, a.user_id, a.role_title, a.role_type, a.jurisdiction_type, a.jurisdiction_id,
-       a.start_date, a.status, a.public_contact, u.display_name as user_name
+       a.start_date, a.status, a.public_contact,
+       u.display_name as user_name,
+       u.display_name as user_display_name,
+       CASE
+           WHEN a.jurisdiction_type = 'national' THEN 'National (Nigeria)'
+           WHEN a.jurisdiction_type = 'zone' THEN COALESCE(z.name, a.jurisdiction_id, '')
+           WHEN a.jurisdiction_type = 'state' THEN COALESCE(s.name, a.jurisdiction_id, '')
+           WHEN a.jurisdiction_type = 'lga' THEN COALESCE(l.name, a.jurisdiction_id, '')
+           ELSE COALESCE(a.jurisdiction_id, '')
+       END AS jurisdiction_name
 FROM appointments a
 JOIN users u ON a.user_id = u.id
+LEFT JOIN zones z ON a.jurisdiction_type = 'zone' AND (a.jurisdiction_id = z.id OR a.jurisdiction_id = z.code)
+LEFT JOIN states s ON a.jurisdiction_type = 'state' AND (a.jurisdiction_id = s.id OR a.jurisdiction_id = s.code)
+LEFT JOIN lgas l ON a.jurisdiction_type = 'lga' AND a.jurisdiction_id = l.id
 WHERE a.status = 'active'
   AND (a.end_date IS NULL OR a.end_date > CURRENT_TIMESTAMP)
 ORDER BY a.role_type, u.display_name
@@ -409,6 +459,8 @@ type ListPublicLeadershipDirectoryRow struct {
 	Status           string             `json:"status"`
 	PublicContact    pgtype.Text        `json:"public_contact"`
 	UserName         string             `json:"user_name"`
+	UserDisplayName  string             `json:"user_display_name"`
+	JurisdictionName interface{}        `json:"jurisdiction_name"`
 }
 
 func (q *Queries) ListPublicLeadershipDirectory(ctx context.Context) ([]ListPublicLeadershipDirectoryRow, error) {
@@ -431,6 +483,8 @@ func (q *Queries) ListPublicLeadershipDirectory(ctx context.Context) ([]ListPubl
 			&i.Status,
 			&i.PublicContact,
 			&i.UserName,
+			&i.UserDisplayName,
+			&i.JurisdictionName,
 		); err != nil {
 			return nil, err
 		}

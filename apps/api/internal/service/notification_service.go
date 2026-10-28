@@ -1117,6 +1117,33 @@ func (s *NotificationService) OnLeadershipAssigned(ctx context.Context, qtx *db.
 		ActionURL:           &actionURL,
 		Priority:            "high",
 	})
+
+	q := s.repo.Queries()
+	if qtx != nil {
+		q = qtx
+	}
+	u, err := q.GetUserByID(ctx, targetUserID)
+	if err == nil && u.Email.Valid && u.Email.String != "" {
+		emailStr := u.Email.String
+		nameStr := u.DisplayName
+		idemp := fmt.Sprintf("email:leadership_assigned:%s:%d", targetUserID, time.Now().UnixNano())
+		payload := map[string]any{
+			"title":        notifTitle,
+			"body":         notifBody,
+			"action_url":   actionURL,
+			"jurisdiction": jurisdiction,
+			"role_title":   title,
+		}
+		_, _ = s.EnqueueOutbox(ctx, qtx, EnqueueOutboxInput{
+			EventType:      "leadership_assigned",
+			RecipientID:    &targetUserID,
+			RecipientEmail: &emailStr,
+			RecipientName:  &nameStr,
+			Channel:        "email",
+			Payload:        payload,
+			IdempotencyKey: &idemp,
+		})
+	}
 }
 
 func (s *NotificationService) OnLeadershipRevoked(ctx context.Context, qtx *db.Queries, targetUserID, title, reason string) {
@@ -1133,6 +1160,119 @@ func (s *NotificationService) OnLeadershipRevoked(ctx context.Context, qtx *db.Q
 		ActionURL:           &actionURL,
 		Priority:            "high",
 	})
+
+	q := s.repo.Queries()
+	if qtx != nil {
+		q = qtx
+	}
+	u, err := q.GetUserByID(ctx, targetUserID)
+	if err == nil && u.Email.Valid && u.Email.String != "" {
+		emailStr := u.Email.String
+		nameStr := u.DisplayName
+		idemp := fmt.Sprintf("email:leadership_revoked:%s:%d", targetUserID, time.Now().UnixNano())
+		payload := map[string]any{
+			"title":      notifTitle,
+			"body":       notifBody,
+			"action_url": actionURL,
+			"reason":     reason,
+			"role_title": title,
+		}
+		_, _ = s.EnqueueOutbox(ctx, qtx, EnqueueOutboxInput{
+			EventType:      "leadership_revoked",
+			RecipientID:    &targetUserID,
+			RecipientEmail: &emailStr,
+			RecipientName:  &nameStr,
+			Channel:        "email",
+			Payload:        payload,
+			IdempotencyKey: &idemp,
+		})
+	}
+}
+
+func (s *NotificationService) OnLeadershipSuspended(ctx context.Context, qtx *db.Queries, targetUserID, title, reason string) {
+	actionURL := fmt.Sprintf("%s/dashboard", s.appBaseURL)
+	notifTitle := "Leadership Role Suspended"
+	notifBody := fmt.Sprintf("Your appointment as %s has been temporarily suspended. Reason: %s", title, reason)
+
+	_, _ = s.CreateInAppNotification(ctx, qtx, CreateInAppNotificationInput{
+		RecipientID:         targetUserID,
+		NotificationType:    "leadership_suspended",
+		Title:               notifTitle,
+		Body:                notifBody,
+		RelatedResourceType: strPtr("appointment"),
+		ActionURL:           &actionURL,
+		Priority:            "high",
+	})
+
+	q := s.repo.Queries()
+	if qtx != nil {
+		q = qtx
+	}
+	u, err := q.GetUserByID(ctx, targetUserID)
+	if err == nil && u.Email.Valid && u.Email.String != "" {
+		emailStr := u.Email.String
+		nameStr := u.DisplayName
+		idemp := fmt.Sprintf("email:leadership_suspended:%s:%d", targetUserID, time.Now().UnixNano())
+		payload := map[string]any{
+			"title":      notifTitle,
+			"body":       notifBody,
+			"action_url": actionURL,
+			"reason":     reason,
+			"role_title": title,
+		}
+		_, _ = s.EnqueueOutbox(ctx, qtx, EnqueueOutboxInput{
+			EventType:      "leadership_suspended",
+			RecipientID:    &targetUserID,
+			RecipientEmail: &emailStr,
+			RecipientName:  &nameStr,
+			Channel:        "email",
+			Payload:        payload,
+			IdempotencyKey: &idemp,
+		})
+	}
+}
+
+func (s *NotificationService) OnLeadershipReactivated(ctx context.Context, qtx *db.Queries, targetUserID, title, jurisdiction string) {
+	actionURL := fmt.Sprintf("%s/dashboard", s.appBaseURL)
+	notifTitle := "Leadership Role Reactivated"
+	notifBody := fmt.Sprintf("Your appointment as %s for %s has been reactivated. Your administrative permissions have been restored.", title, jurisdiction)
+
+	_, _ = s.CreateInAppNotification(ctx, qtx, CreateInAppNotificationInput{
+		RecipientID:         targetUserID,
+		NotificationType:    "leadership_reactivated",
+		Title:               notifTitle,
+		Body:                notifBody,
+		RelatedResourceType: strPtr("appointment"),
+		ActionURL:           &actionURL,
+		Priority:            "high",
+	})
+
+	q := s.repo.Queries()
+	if qtx != nil {
+		q = qtx
+	}
+	u, err := q.GetUserByID(ctx, targetUserID)
+	if err == nil && u.Email.Valid && u.Email.String != "" {
+		emailStr := u.Email.String
+		nameStr := u.DisplayName
+		idemp := fmt.Sprintf("email:leadership_reactivated:%s:%d", targetUserID, time.Now().UnixNano())
+		payload := map[string]any{
+			"title":        notifTitle,
+			"body":         notifBody,
+			"action_url":   actionURL,
+			"jurisdiction": jurisdiction,
+			"role_title":   title,
+		}
+		_, _ = s.EnqueueOutbox(ctx, qtx, EnqueueOutboxInput{
+			EventType:      "leadership_reactivated",
+			RecipientID:    &targetUserID,
+			RecipientEmail: &emailStr,
+			RecipientName:  &nameStr,
+			Channel:        "email",
+			Payload:        payload,
+			IdempotencyKey: &idemp,
+		})
+	}
 }
 
 func (s *NotificationService) OnParticipationClaimApproved(ctx context.Context, qtx *db.Queries, claimID, userID, eventTitle string) {

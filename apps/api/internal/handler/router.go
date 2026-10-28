@@ -100,6 +100,7 @@ func NewRouter(p RouterParams) http.Handler {
 			lead.With(RequireRole("super_admin")).Patch("/appointments/{id}/scope-dates", p.LeadershipHandler.UpdateScopeDates)
 			lead.With(RequireRole("super_admin")).Put("/appointments/{id}/scope-dates", p.LeadershipHandler.UpdateScopeDates)
 			lead.With(RequireRole("super_admin")).Post("/appointments/{id}/suspend", p.LeadershipHandler.SuspendAppointment)
+			lead.With(RequireRole("super_admin")).Post("/appointments/{id}/reactivate", p.LeadershipHandler.ReactivateAppointment)
 			lead.With(RequireRole("super_admin")).Post("/appointments/{id}/revoke", p.LeadershipHandler.RevokeAppointment)
 			lead.With(RequireRole("national_admin", "super_admin")).Get("/appointments/{id}/history", p.LeadershipHandler.ListAppointmentHistory)
 		})

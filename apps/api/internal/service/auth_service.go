@@ -796,3 +796,39 @@ func (s *AuthService) ListMembers(ctx context.Context, page, limit int32) ([]Use
 	}
 	return res, nil
 }
+
+// SearchMembers returns users matching the search query (name, email, phone, reference) or paginated list if empty.
+func (s *AuthService) SearchMembers(ctx context.Context, query string, page, limit int32) ([]UserSummary, error) {
+	if limit <= 0 || limit > 100 {
+		limit = 50
+	}
+	if page <= 0 {
+		page = 1
+	}
+	offset := (page - 1) * limit
+
+	trimmed := strings.TrimSpace(query)
+	users, err := s.repo.Queries().SearchUsers(ctx, db.SearchUsersParams{
+		Column1: trimmed,
+		Limit:   limit,
+		Offset:  offset,
+	})
+	if err != nil {
+		return nil, err
+	}
+
+	res := make([]UserSummary, 0, len(users))
+	for _, u := range users {
+		res = append(res, UserSummary{
+			ID:                  u.ID,
+			Email:               StringFromText(u.Email),
+			Phone:               StringFromText(u.Phone),
+			DisplayName:         u.DisplayName,
+			MembershipReference: u.MembershipReference,
+			Status:              u.Status,
+			PrimaryRole:         u.PrimaryRole,
+			IsVerified:          u.IsVerified,
+		})
+	}
+	return res, nil
+}

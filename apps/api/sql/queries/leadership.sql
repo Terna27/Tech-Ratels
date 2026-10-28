@@ -17,16 +17,43 @@ WHERE user_id = $1 AND status = 'active'
 ORDER BY start_date DESC;
 
 -- name: ListAppointments :many
-SELECT a.*, u.display_name as user_name, u.email as user_email
+SELECT a.*,
+       u.display_name as user_name,
+       u.display_name as user_display_name,
+       u.email as user_email,
+       u.phone as user_phone,
+       u.membership_reference as user_membership_ref,
+       CASE
+           WHEN a.jurisdiction_type = 'national' THEN 'National (Nigeria)'
+           WHEN a.jurisdiction_type = 'zone' THEN COALESCE(z.name, a.jurisdiction_id, '')
+           WHEN a.jurisdiction_type = 'state' THEN COALESCE(s.name, a.jurisdiction_id, '')
+           WHEN a.jurisdiction_type = 'lga' THEN COALESCE(l.name, a.jurisdiction_id, '')
+           ELSE COALESCE(a.jurisdiction_id, '')
+       END AS jurisdiction_name
 FROM appointments a
 JOIN users u ON a.user_id = u.id
+LEFT JOIN zones z ON a.jurisdiction_type = 'zone' AND (a.jurisdiction_id = z.id OR a.jurisdiction_id = z.code)
+LEFT JOIN states s ON a.jurisdiction_type = 'state' AND (a.jurisdiction_id = s.id OR a.jurisdiction_id = s.code)
+LEFT JOIN lgas l ON a.jurisdiction_type = 'lga' AND a.jurisdiction_id = l.id
 ORDER BY a.start_date DESC;
 
 -- name: ListPublicLeadershipDirectory :many
 SELECT a.id, a.user_id, a.role_title, a.role_type, a.jurisdiction_type, a.jurisdiction_id,
-       a.start_date, a.status, a.public_contact, u.display_name as user_name
+       a.start_date, a.status, a.public_contact,
+       u.display_name as user_name,
+       u.display_name as user_display_name,
+       CASE
+           WHEN a.jurisdiction_type = 'national' THEN 'National (Nigeria)'
+           WHEN a.jurisdiction_type = 'zone' THEN COALESCE(z.name, a.jurisdiction_id, '')
+           WHEN a.jurisdiction_type = 'state' THEN COALESCE(s.name, a.jurisdiction_id, '')
+           WHEN a.jurisdiction_type = 'lga' THEN COALESCE(l.name, a.jurisdiction_id, '')
+           ELSE COALESCE(a.jurisdiction_id, '')
+       END AS jurisdiction_name
 FROM appointments a
 JOIN users u ON a.user_id = u.id
+LEFT JOIN zones z ON a.jurisdiction_type = 'zone' AND (a.jurisdiction_id = z.id OR a.jurisdiction_id = z.code)
+LEFT JOIN states s ON a.jurisdiction_type = 'state' AND (a.jurisdiction_id = s.id OR a.jurisdiction_id = s.code)
+LEFT JOIN lgas l ON a.jurisdiction_type = 'lga' AND a.jurisdiction_id = l.id
 WHERE a.status = 'active'
   AND (a.end_date IS NULL OR a.end_date > CURRENT_TIMESTAMP)
 ORDER BY a.role_type, u.display_name;
@@ -78,6 +105,9 @@ LEFT JOIN users prev_u ON h.previous_user_id = prev_u.id
 LEFT JOIN users new_u ON h.new_user_id = new_u.id
 WHERE h.appointment_id = $1
 ORDER BY h.timestamp DESC;
+
+-- name: AcquireLeadershipJurisdictionLock :exec
+SELECT pg_advisory_xact_lock(hashtext('appt:' || @role_type::text || ':' || @jurisdiction_type::text || ':' || COALESCE(@jurisdiction_id::text, ''))::bigint);
 
 -- name: CountActiveAppointments :one
 SELECT COUNT(*) FROM appointments

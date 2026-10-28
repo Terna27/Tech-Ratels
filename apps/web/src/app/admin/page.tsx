@@ -39,6 +39,11 @@ import {
   Database,
   Check,
   XCircle,
+  PlusCircle,
+  X,
+  PauseCircle,
+  PlayCircle,
+  AlertTriangle,
 } from "lucide-react";
 import { useAuth } from "@/lib/auth-context";
 import { apiRequest } from "@/lib/api";
@@ -48,6 +53,11 @@ import {
   StateCoverageRow,
   LGACoverageRow,
   OrganizationSetting,
+  User as UserModel,
+  AppointmentHistory,
+  Zone,
+  State,
+  LGA,
 } from "@/lib/types";
 import { Badge } from "@/components/ui/Badge";
 import { Spinner } from "@/components/ui/Spinner";
@@ -91,6 +101,88 @@ export default function AdminOverviewPage() {
   const [selectedZoneFilter, setSelectedZoneFilter] = useState("all");
   const [lgaSearch, setLgaSearch] = useState("");
 
+  // Status Filter Pills for Directories
+  const [zoneStatusFilter, setZoneStatusFilter] = useState<"all" | "active" | "vacant" | "suspended">("all");
+  const [stateStatusFilter, setStateStatusFilter] = useState<"all" | "active" | "vacant" | "suspended">("all");
+  const [lgaStatusFilter, setLgaStatusFilter] = useState<"all" | "active" | "vacant" | "suspended">("all");
+
+  // Geographic reference lists for appointment dropdowns
+  const [allZones, setAllZones] = useState<Zone[]>([]);
+  const [allStates, setAllStates] = useState<State[]>([]);
+  const [stateLgas, setStateLgas] = useState<LGA[]>([]);
+
+  // Leadership Management Modal States
+  const [leadershipSuccess, setLeadershipSuccess] = useState<string | null>(null);
+
+  // Appointment Modal
+  const [showAppointModal, setShowAppointModal] = useState(false);
+  const [appointStep, setAssignStep] = useState<"form" | "review">("form");
+  const [appointRoleType, setAppointRoleType] = useState<string>("state_coordinator");
+  const [appointRoleTitle, setAppointRoleTitle] = useState<string>("");
+  const [appointJurisdictionType, setAppointJurisdictionType] = useState<string>("state");
+  const [appointJurisdictionId, setAppointJurisdictionId] = useState<string>("");
+  const [appointJurisdictionLabel, setAppointJurisdictionLabel] = useState<string>("");
+  const [appointStateForLga, setAppointStateForLga] = useState<string>("");
+  const [appointStartDate, setAppointStartDate] = useState<string>(new Date().toISOString().split("T")[0]);
+  const [appointRef, setAppointRef] = useState<string>("");
+  const [appointContact, setAppointContact] = useState<string>("");
+  const [appointMemberSearch, setAppointMemberSearch] = useState<string>("");
+  const [appointMemberResults, setAppointMemberResults] = useState<UserModel[]>([]);
+  const [appointSearching, setAppointSearching] = useState(false);
+  const [appointSelectedUser, setAppointSelectedUser] = useState<UserModel | null>(null);
+  const [submittingAppoint, setSubmittingAppoint] = useState(false);
+
+  // Replacement Modal
+  const [replaceTarget, setReplaceTarget] = useState<{
+    appointmentId: string;
+    currentHolder: string;
+    roleTitle: string;
+    jurisdictionName: string;
+  } | null>(null);
+  const [replaceMemberSearch, setReplaceMemberSearch] = useState<string>("");
+  const [replaceMemberResults, setReplaceMemberResults] = useState<UserModel[]>([]);
+  const [replaceSearching, setReplaceSearching] = useState(false);
+  const [replaceSelectedUser, setReplaceSelectedUser] = useState<UserModel | null>(null);
+  const [replaceEffectiveDate, setReplaceEffectiveDate] = useState<string>(new Date().toISOString().split("T")[0]);
+  const [replaceReason, setReplaceReason] = useState<string>("");
+  const [submittingReplace, setSubmittingReplace] = useState(false);
+
+  // Suspend Modal
+  const [suspendTarget, setSuspendTarget] = useState<{
+    appointmentId: string;
+    coordinatorName: string;
+    roleTitle: string;
+  } | null>(null);
+  const [suspendReason, setSuspendReason] = useState<string>("");
+  const [submittingSuspend, setSubmittingSuspend] = useState(false);
+
+  // Reactivate Modal
+  const [reactivateTarget, setReactivateTarget] = useState<{
+    appointmentId: string;
+    coordinatorName: string;
+    roleTitle: string;
+  } | null>(null);
+  const [reactivateReason, setReactivateReason] = useState<string>("");
+  const [submittingReactivate, setSubmittingReactivate] = useState(false);
+
+  // Revoke Modal
+  const [revokeTarget, setRevokeTarget] = useState<{
+    appointmentId: string;
+    coordinatorName: string;
+    roleTitle: string;
+  } | null>(null);
+  const [revokeReason, setRevokeReason] = useState<string>("");
+  const [submittingRevoke, setSubmittingRevoke] = useState(false);
+
+  // History Modal
+  const [historyTarget, setHistoryTarget] = useState<{
+    appointmentId: string;
+    roleTitle: string;
+    jurisdictionName: string;
+  } | null>(null);
+  const [historyRecords, setHistoryRecords] = useState<AppointmentHistory[]>([]);
+  const [loadingHistory, setLoadingHistory] = useState(false);
+
   // System Seeding Status
   const [seedingGeography, setSeedingGeography] = useState(false);
   const [seedSuccessMessage, setSeedSuccessMessage] = useState<string | null>(null);
@@ -106,14 +198,18 @@ export default function AdminOverviewPage() {
     try {
       setError(null);
       if (isSuperAdmin || user?.primary_role === "super_admin") {
-        const [statsData, statesData, settingsData] = await Promise.all([
+        const [statsData, statesData, settingsData, zonesData, statesGeoData] = await Promise.all([
           apiRequest<SuperAdminDashboardStats>("/admin/super/dashboard"),
           apiRequest<StateCoverageRow[]>("/admin/super/coverage/states").catch(() => []),
           apiRequest<OrganizationSetting[]>("/admin/settings").catch(() => []),
+          apiRequest<Zone[]>("/geography/zones").catch(() => []),
+          apiRequest<State[]>("/geography/states").catch(() => []),
         ]);
         setStats(statsData);
         setStateCoverage(statesData || []);
         setSettings(settingsData || []);
+        setAllZones(zonesData || []);
+        setAllStates(statesGeoData || []);
         if (statesData && statesData.length > 0 && !selectedStateForLga) {
           setSelectedStateForLga(statesData[0].state_id);
         }
@@ -126,6 +222,237 @@ export default function AdminOverviewPage() {
     } finally {
       setLoading(false);
       setRefreshing(false);
+    }
+  };
+
+  // Debounced search for appoint member
+  useEffect(() => {
+    if (!appointMemberSearch.trim()) {
+      setAppointMemberResults([]);
+      return;
+    }
+    const timer = setTimeout(async () => {
+      setAppointSearching(true);
+      try {
+        const res = await apiRequest<UserModel[]>(`/members?search=${encodeURIComponent(appointMemberSearch.trim())}&limit=10`);
+        setAppointMemberResults(res || []);
+      } catch {
+        setAppointMemberResults([]);
+      } finally {
+        setAppointSearching(false);
+      }
+    }, 300);
+    return () => clearTimeout(timer);
+  }, [appointMemberSearch]);
+
+  // Debounced search for replace member
+  useEffect(() => {
+    if (!replaceMemberSearch.trim()) {
+      setReplaceMemberResults([]);
+      return;
+    }
+    const timer = setTimeout(async () => {
+      setReplaceSearching(true);
+      try {
+        const res = await apiRequest<UserModel[]>(`/members?search=${encodeURIComponent(replaceMemberSearch.trim())}&limit=10`);
+        setReplaceMemberResults(res || []);
+      } catch {
+        setReplaceMemberResults([]);
+      } finally {
+        setReplaceSearching(false);
+      }
+    }, 300);
+    return () => clearTimeout(timer);
+  }, [replaceMemberSearch]);
+
+  // Fetch LGAs when state changes for LGA appointment
+  useEffect(() => {
+    if (appointJurisdictionType === "lga" && appointStateForLga) {
+      apiRequest<LGA[]>(`/geography/states/${appointStateForLga}/lgas`)
+        .then((data) => setStateLgas(data || []))
+        .catch(() => setStateLgas([]));
+    }
+  }, [appointJurisdictionType, appointStateForLga]);
+
+  const openAppointModal = (prefill?: {
+    roleType: string;
+    jurisdictionType: string;
+    jurisdictionId: string;
+    jurisdictionName: string;
+  }) => {
+    setError(null);
+    setLeadershipSuccess(null);
+    setAssignStep("form");
+    setAppointSelectedUser(null);
+    setAppointMemberSearch("");
+    setAppointStartDate(new Date().toISOString().split("T")[0]);
+    setAppointRef(`APPT-${Date.now().toString().slice(-6)}`);
+    setAppointContact("");
+
+    if (prefill) {
+      setAppointRoleType(prefill.roleType);
+      setAppointJurisdictionType(prefill.jurisdictionType);
+      setAppointJurisdictionId(prefill.jurisdictionId);
+      setAppointJurisdictionLabel(prefill.jurisdictionName);
+      setAppointRoleTitle(`${prefill.roleType.replace(/_/g, " ").toUpperCase()} - ${prefill.jurisdictionName}`);
+      if (prefill.jurisdictionType === "lga") {
+        setAppointStateForLga(selectedStateForLga);
+      }
+    } else {
+      setAppointRoleType("state_coordinator");
+      setAppointJurisdictionType("state");
+      setAppointJurisdictionId(allStates[0]?.id || "");
+      setAppointJurisdictionLabel(allStates[0]?.name || "");
+      setAppointRoleTitle(`State Coordinator - ${allStates[0]?.name || ""}`);
+    }
+    setShowAppointModal(true);
+  };
+
+  const openHistoryModal = async (target: { appointmentId: string; roleTitle: string; jurisdictionName: string }) => {
+    setHistoryTarget(target);
+    setLoadingHistory(true);
+    try {
+      const hist = await apiRequest<AppointmentHistory[]>(`/leadership/appointments/${target.appointmentId}/history`);
+      setHistoryRecords(hist || []);
+    } catch {
+      setHistoryRecords([]);
+    } finally {
+      setLoadingHistory(false);
+    }
+  };
+
+  const handleAppointSubmit = async () => {
+    if (!appointSelectedUser) {
+      setError("Please search and select a registered member.");
+      return;
+    }
+    setSubmittingAppoint(true);
+    setError(null);
+    try {
+      await apiRequest("/leadership/appointments", {
+        method: "POST",
+        body: JSON.stringify({
+          user_id: appointSelectedUser.id,
+          role_title: appointRoleTitle,
+          role_type: appointRoleType,
+          jurisdiction_type: appointJurisdictionType,
+          jurisdiction_id: appointJurisdictionType === "national" ? null : appointJurisdictionId,
+          start_date: new Date(appointStartDate).toISOString(),
+          approval_reference: appointRef,
+          public_contact: appointContact || undefined,
+        }),
+      });
+      setLeadershipSuccess(`Successfully appointed ${appointSelectedUser.display_name} to ${appointRoleTitle}.`);
+      setShowAppointModal(false);
+      await loadData();
+      if (activeTab === "lgas" && selectedStateForLga) {
+        const lgasData = await apiRequest<LGACoverageRow[]>(`/admin/super/coverage/lgas?state_id=${encodeURIComponent(selectedStateForLga)}`);
+        setLgaCoverage(lgasData || []);
+      }
+    } catch (err: any) {
+      setError(err.message || "Failed to record coordinator appointment.");
+    } finally {
+      setSubmittingAppoint(false);
+    }
+  };
+
+  const handleReplaceSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!replaceTarget || !replaceSelectedUser) return;
+    setSubmittingReplace(true);
+    setError(null);
+    try {
+      await apiRequest(`/leadership/appointments/${replaceTarget.appointmentId}/replace`, {
+        method: "POST",
+        body: JSON.stringify({
+          new_user_id: replaceSelectedUser.id,
+          effective_date: new Date(replaceEffectiveDate).toISOString(),
+          reason: replaceReason,
+        }),
+      });
+      setLeadershipSuccess(`Successfully replaced coordinator for ${replaceTarget.roleTitle}.`);
+      setReplaceTarget(null);
+      await loadData();
+      if (activeTab === "lgas" && selectedStateForLga) {
+        const lgasData = await apiRequest<LGACoverageRow[]>(`/admin/super/coverage/lgas?state_id=${encodeURIComponent(selectedStateForLga)}`);
+        setLgaCoverage(lgasData || []);
+      }
+    } catch (err: any) {
+      setError(err.message || "Replacement failed.");
+    } finally {
+      setSubmittingReplace(false);
+    }
+  };
+
+  const handleSuspendSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!suspendTarget) return;
+    setSubmittingSuspend(true);
+    setError(null);
+    try {
+      await apiRequest(`/leadership/appointments/${suspendTarget.appointmentId}/suspend`, {
+        method: "POST",
+        body: JSON.stringify({ reason: suspendReason || "Suspended by Super Administrator" }),
+      });
+      setLeadershipSuccess(`Appointment for ${suspendTarget.coordinatorName} suspended.`);
+      setSuspendTarget(null);
+      await loadData();
+      if (activeTab === "lgas" && selectedStateForLga) {
+        const lgasData = await apiRequest<LGACoverageRow[]>(`/admin/super/coverage/lgas?state_id=${encodeURIComponent(selectedStateForLga)}`);
+        setLgaCoverage(lgasData || []);
+      }
+    } catch (err: any) {
+      setError(err.message || "Suspension failed.");
+    } finally {
+      setSubmittingSuspend(false);
+    }
+  };
+
+  const handleReactivateSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!reactivateTarget) return;
+    setSubmittingReactivate(true);
+    setError(null);
+    try {
+      await apiRequest(`/leadership/appointments/${reactivateTarget.appointmentId}/reactivate`, {
+        method: "POST",
+        body: JSON.stringify({ reason: reactivateReason || "Reactivated by Super Administrator" }),
+      });
+      setLeadershipSuccess(`Appointment for ${reactivateTarget.coordinatorName} reactivated.`);
+      setReactivateTarget(null);
+      await loadData();
+      if (activeTab === "lgas" && selectedStateForLga) {
+        const lgasData = await apiRequest<LGACoverageRow[]>(`/admin/super/coverage/lgas?state_id=${encodeURIComponent(selectedStateForLga)}`);
+        setLgaCoverage(lgasData || []);
+      }
+    } catch (err: any) {
+      setError(err.message || "Reactivation failed.");
+    } finally {
+      setSubmittingReactivate(false);
+    }
+  };
+
+  const handleRevokeSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!revokeTarget) return;
+    setSubmittingRevoke(true);
+    setError(null);
+    try {
+      await apiRequest(`/leadership/appointments/${revokeTarget.appointmentId}/revoke`, {
+        method: "POST",
+        body: JSON.stringify({ reason: revokeReason || "Revoked by Super Administrator" }),
+      });
+      setLeadershipSuccess(`Appointment for ${revokeTarget.coordinatorName} revoked.`);
+      setRevokeTarget(null);
+      await loadData();
+      if (activeTab === "lgas" && selectedStateForLga) {
+        const lgasData = await apiRequest<LGACoverageRow[]>(`/admin/super/coverage/lgas?state_id=${encodeURIComponent(selectedStateForLga)}`);
+        setLgaCoverage(lgasData || []);
+      }
+    } catch (err: any) {
+      setError(err.message || "Revocation failed.");
+    } finally {
+      setSubmittingRevoke(false);
     }
   };
 
@@ -325,6 +652,15 @@ export default function AdminOverviewPage() {
   // ---------------------------------------------------------------------------
   if (!stats) return null;
 
+  // Filtered Zones list
+  const filteredZones = (stats.zone_coverage || []).filter((z) => {
+    if (zoneStatusFilter === "all") return true;
+    if (zoneStatusFilter === "active") return z.coordinator_name && z.appointment_status !== "suspended";
+    if (zoneStatusFilter === "suspended") return z.appointment_status === "suspended";
+    if (zoneStatusFilter === "vacant") return !z.coordinator_name;
+    return true;
+  });
+
   // Filtered States list
   const filteredStates = stateCoverage.filter((st) => {
     const matchesSearch =
@@ -332,15 +668,25 @@ export default function AdminOverviewPage() {
       st.state_code.toLowerCase().includes(stateSearch.toLowerCase()) ||
       (st.coordinator_name || "").toLowerCase().includes(stateSearch.toLowerCase());
     const matchesZone = selectedZoneFilter === "all" || st.zone_code === selectedZoneFilter;
-    return matchesSearch && matchesZone;
+    const matchesStatus =
+      stateStatusFilter === "all" ||
+      (stateStatusFilter === "active" && st.coordinator_name && st.appointment_status !== "suspended") ||
+      (stateStatusFilter === "suspended" && st.appointment_status === "suspended") ||
+      (stateStatusFilter === "vacant" && !st.coordinator_name);
+    return matchesSearch && matchesZone && matchesStatus;
   });
 
   // Filtered LGAs list
   const filteredLgas = lgaCoverage.filter((lg) => {
-    return (
+    const matchesSearch =
       lg.lga_name.toLowerCase().includes(lgaSearch.toLowerCase()) ||
-      (lg.coordinator_name || "").toLowerCase().includes(lgaSearch.toLowerCase())
-    );
+      (lg.coordinator_name || "").toLowerCase().includes(lgaSearch.toLowerCase());
+    const matchesStatus =
+      lgaStatusFilter === "all" ||
+      (lgaStatusFilter === "active" && lg.coordinator_name && lg.appointment_status !== "suspended") ||
+      (lgaStatusFilter === "suspended" && lg.appointment_status === "suspended") ||
+      (lgaStatusFilter === "vacant" && !lg.coordinator_name);
+    return matchesSearch && matchesStatus;
   });
 
   return (
@@ -392,6 +738,7 @@ export default function AdminOverviewPage() {
 
       {error && <Alert type="error">{error}</Alert>}
       {seedSuccessMessage && <Alert type="success">{seedSuccessMessage}</Alert>}
+      {leadershipSuccess && <Alert type="success">{leadershipSuccess}</Alert>}
 
       {/* 2. Navigation Tabs (Desktop, Tablet, Mobile responsive) */}
       <div className="border-b border-gray-200 overflow-x-auto scrollbar-none">
@@ -723,23 +1070,81 @@ export default function AdminOverviewPage() {
                 Direct oversight of the 6 Nigerian Geopolitical Zones. Only Super Admin may appoint or replace zonal coordinators.
               </p>
             </div>
-            <Link
-              href="/admin/leadership"
-              className="inline-flex items-center px-4 py-2 bg-emerald-800 hover:bg-emerald-700 text-white text-xs font-bold rounded-lg transition"
-            >
-              <ShieldCheck className="w-4 h-4 mr-1.5" />
-              Manage Zonal Appointments
-            </Link>
+            <div className="flex flex-wrap items-center gap-2">
+              <button
+                type="button"
+                onClick={() =>
+                  openAppointModal({
+                    roleType: "zonal_coordinator",
+                    jurisdictionType: "zone",
+                    jurisdictionId: allZones[0]?.id || "",
+                    jurisdictionName: allZones[0]?.name || "",
+                  })
+                }
+                className="inline-flex items-center px-4 py-2 bg-emerald-800 hover:bg-emerald-700 text-white text-xs font-bold rounded-lg transition"
+              >
+                <PlusCircle className="w-4 h-4 mr-1.5" />
+                Appoint Zonal Leader
+              </button>
+              <Link
+                href="/admin/leadership"
+                className="inline-flex items-center px-3.5 py-2 border border-gray-300 bg-white hover:bg-gray-50 text-gray-700 text-xs font-semibold rounded-lg transition"
+              >
+                <ShieldCheck className="w-4 h-4 mr-1.5" />
+                Full Governance Roster
+              </Link>
+            </div>
+          </div>
+
+          {/* Zone Status Filter Pills */}
+          <div className="flex flex-wrap items-center gap-1.5 bg-white p-3 rounded-xl border border-gray-200">
+            <span className="text-[11px] font-bold text-gray-500 uppercase mr-2">Filter:</span>
+            {[
+              { id: "all", label: "All Zones", count: stats.zone_coverage.length },
+              {
+                id: "active",
+                label: "Active",
+                count: stats.zone_coverage.filter((z) => z.coordinator_name && z.appointment_status !== "suspended").length,
+              },
+              {
+                id: "vacant",
+                label: "Vacant",
+                count: stats.zone_coverage.filter((z) => !z.coordinator_name).length,
+              },
+              {
+                id: "suspended",
+                label: "Suspended",
+                count: stats.zone_coverage.filter((z) => z.appointment_status === "suspended").length,
+              },
+            ].map((p) => {
+              const isSelected = zoneStatusFilter === p.id;
+              return (
+                <button
+                  key={p.id}
+                  onClick={() => setZoneStatusFilter(p.id as any)}
+                  className={`px-3 py-1 rounded-full text-xs font-semibold transition ${
+                    isSelected
+                      ? "bg-emerald-800 text-white shadow-sm"
+                      : "bg-gray-100 text-gray-600 hover:bg-gray-200"
+                  }`}
+                >
+                  {p.label} ({p.count})
+                </button>
+              );
+            })}
           </div>
 
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-            {stats.zone_coverage.map((z) => {
+            {filteredZones.map((z) => {
               const isAssigned = Boolean(z.coordinator_name);
+              const isSuspended = z.appointment_status === "suspended";
               return (
                 <div
                   key={z.zone_id}
                   className={`p-6 rounded-2xl border transition shadow-sm space-y-4 ${
-                    isAssigned
+                    isSuspended
+                      ? "bg-yellow-50/50 border-yellow-300"
+                      : isAssigned
                       ? "bg-white border-gray-200"
                       : "bg-amber-50/40 border-amber-300"
                   }`}
@@ -751,40 +1156,131 @@ export default function AdminOverviewPage() {
                       </span>
                       <h3 className="text-lg font-black text-gray-900">{z.zone_name}</h3>
                     </div>
-                    <Badge variant={isAssigned ? "success" : "warning"} size="sm">
-                      {isAssigned ? "COORDINATOR APPOINTED" : "VACANT"}
+                    <Badge
+                      variant={isSuspended ? "warning" : isAssigned ? "success" : "warning"}
+                      size="sm"
+                    >
+                      {isSuspended ? "SUSPENDED" : isAssigned ? "COORDINATOR ACTIVE" : "VACANT"}
                     </Badge>
                   </div>
 
                   {isAssigned ? (
-                    <div className="space-y-2 text-xs border-t border-gray-100 pt-3">
-                      <div className="flex items-center gap-2 text-gray-900 font-semibold">
-                        <UserCheck className="w-4 h-4 text-emerald-700" />
-                        <span>{z.coordinator_name}</span>
-                      </div>
-                      {z.coordinator_email && (
-                        <div className="text-gray-500 text-[11px] pl-6">{z.coordinator_email}</div>
-                      )}
-                      {z.coordinator_phone && (
-                        <div className="text-gray-500 text-[11px] pl-6">{z.coordinator_phone}</div>
-                      )}
-                      {z.start_date && (
-                        <div className="text-gray-400 text-[10px] pl-6">
-                          Appointed: {new Date(z.start_date).toLocaleDateString("en-NG")}
+                    <div className="space-y-3 text-xs border-t border-gray-100 pt-3">
+                      <div className="space-y-1">
+                        <div className="flex items-center gap-2 text-gray-900 font-semibold">
+                          <UserCheck className="w-4 h-4 text-emerald-700" />
+                          <span>{z.coordinator_name}</span>
                         </div>
-                      )}
+                        {z.coordinator_email && (
+                          <div className="text-gray-500 text-[11px] pl-6">{z.coordinator_email}</div>
+                        )}
+                        {z.coordinator_phone && (
+                          <div className="text-gray-500 text-[11px] pl-6">{z.coordinator_phone}</div>
+                        )}
+                        {z.start_date && (
+                          <div className="text-gray-400 text-[10px] pl-6">
+                            Appointed: {new Date(z.start_date).toLocaleDateString("en-NG")}
+                          </div>
+                        )}
+                      </div>
+
+                      <div className="flex flex-wrap items-center gap-1.5 pt-2 border-t border-gray-100">
+                        {z.appointment_id && (
+                          <button
+                            type="button"
+                            onClick={() =>
+                              openHistoryModal({
+                                appointmentId: z.appointment_id!,
+                                roleTitle: `Zonal Coordinator - ${z.zone_name}`,
+                                jurisdictionName: z.zone_name,
+                              })
+                            }
+                            className="px-2 py-1 border border-gray-200 hover:bg-gray-100 text-gray-700 font-semibold rounded-lg text-[11px] transition"
+                          >
+                            History
+                          </button>
+                        )}
+
+                        <button
+                          type="button"
+                          onClick={() =>
+                            setReplaceTarget({
+                              appointmentId: z.appointment_id || "",
+                              currentHolder: z.coordinator_name || "",
+                              roleTitle: `Zonal Coordinator - ${z.zone_name}`,
+                              jurisdictionName: z.zone_name,
+                            })
+                          }
+                          className="px-2 py-1 bg-amber-50 hover:bg-amber-100 text-amber-800 font-semibold rounded-lg text-[11px] transition"
+                        >
+                          Replace
+                        </button>
+
+                        {isSuspended ? (
+                          <button
+                            type="button"
+                            onClick={() =>
+                              setReactivateTarget({
+                                appointmentId: z.appointment_id || "",
+                                coordinatorName: z.coordinator_name || "",
+                                roleTitle: `Zonal Coordinator - ${z.zone_name}`,
+                              })
+                            }
+                            className="px-2 py-1 bg-emerald-50 hover:bg-emerald-100 text-emerald-800 font-semibold rounded-lg text-[11px] transition"
+                          >
+                            Reactivate
+                          </button>
+                        ) : (
+                          <button
+                            type="button"
+                            onClick={() =>
+                              setSuspendTarget({
+                                appointmentId: z.appointment_id || "",
+                                coordinatorName: z.coordinator_name || "",
+                                roleTitle: `Zonal Coordinator - ${z.zone_name}`,
+                              })
+                            }
+                            className="px-2 py-1 bg-yellow-50 hover:bg-yellow-100 text-yellow-800 font-semibold rounded-lg text-[11px] transition"
+                          >
+                            Suspend
+                          </button>
+                        )}
+
+                        <button
+                          type="button"
+                          onClick={() =>
+                            setRevokeTarget({
+                              appointmentId: z.appointment_id || "",
+                              coordinatorName: z.coordinator_name || "",
+                              roleTitle: `Zonal Coordinator - ${z.zone_name}`,
+                            })
+                          }
+                          className="px-2 py-1 bg-red-50 hover:bg-red-100 text-red-800 font-semibold rounded-lg text-[11px] transition"
+                        >
+                          Revoke
+                        </button>
+                      </div>
                     </div>
                   ) : (
                     <div className="space-y-3 text-xs border-t border-amber-200 pt-3 text-amber-900">
                       <p className="text-[11px] text-amber-800">
                         No active zonal coordinator is assigned to {z.zone_name}.
                       </p>
-                      <Link
-                        href="/admin/leadership"
-                        className="inline-flex items-center px-3 py-1.5 rounded-lg bg-amber-600 hover:bg-amber-700 text-white font-bold text-xs transition"
+                      <button
+                        type="button"
+                        onClick={() =>
+                          openAppointModal({
+                            roleType: "zonal_coordinator",
+                            jurisdictionType: "zone",
+                            jurisdictionId: z.zone_id,
+                            jurisdictionName: z.zone_name,
+                          })
+                        }
+                        className="inline-flex items-center px-3.5 py-1.5 rounded-lg bg-emerald-800 hover:bg-emerald-900 text-white font-bold text-xs transition"
                       >
-                        Appoint Zonal Leader <ArrowRight className="w-3.5 h-3.5 ml-1" />
-                      </Link>
+                        <PlusCircle className="w-3.5 h-3.5 mr-1" />
+                        Appoint Zonal Leader
+                      </button>
                     </div>
                   )}
                 </div>
@@ -806,42 +1302,99 @@ export default function AdminOverviewPage() {
                 Complete roster of state coordinators across all 36 States and the Federal Capital Territory.
               </p>
             </div>
-            <Link
-              href="/admin/leadership"
-              className="inline-flex items-center px-4 py-2 bg-emerald-800 hover:bg-emerald-700 text-white text-xs font-bold rounded-lg transition"
-            >
-              <ShieldCheck className="w-4 h-4 mr-1.5" />
-              Appoint / Replace State Coordinators
-            </Link>
+            <div className="flex flex-wrap items-center gap-2">
+              <button
+                type="button"
+                onClick={() =>
+                  openAppointModal({
+                    roleType: "state_coordinator",
+                    jurisdictionType: "state",
+                    jurisdictionId: allStates[0]?.id || "",
+                    jurisdictionName: allStates[0]?.name || "",
+                  })
+                }
+                className="inline-flex items-center px-4 py-2 bg-emerald-800 hover:bg-emerald-700 text-white text-xs font-bold rounded-lg transition"
+              >
+                <PlusCircle className="w-4 h-4 mr-1.5" />
+                Appoint State Coordinator
+              </button>
+              <Link
+                href="/admin/leadership"
+                className="inline-flex items-center px-3.5 py-2 border border-gray-300 bg-white hover:bg-gray-50 text-gray-700 text-xs font-semibold rounded-lg transition"
+              >
+                <ShieldCheck className="w-4 h-4 mr-1.5" />
+                Full Leadership Portal
+              </Link>
+            </div>
           </div>
 
-          {/* Search & Zone Filter Bar */}
-          <div className="flex flex-col sm:flex-row gap-4 bg-white p-4 rounded-xl border border-gray-200 shadow-sm">
-            <div className="relative flex-1">
-              <Search className="w-4 h-4 text-gray-400 absolute left-3 top-3" />
-              <input
-                type="text"
-                placeholder="Search state name, code, or coordinator..."
-                value={stateSearch}
-                onChange={(e) => setStateSearch(e.target.value)}
-                className="w-full pl-9 pr-4 py-2 border border-gray-200 rounded-lg text-xs focus:ring-emerald-500 focus:border-emerald-500"
-              />
+          {/* Search, Zone Filter, & Status Filter Bar */}
+          <div className="bg-white p-4 rounded-xl border border-gray-200 shadow-sm space-y-3">
+            <div className="flex flex-col sm:flex-row gap-3">
+              <div className="relative flex-1">
+                <Search className="w-4 h-4 text-gray-400 absolute left-3 top-3" />
+                <input
+                  type="text"
+                  placeholder="Search state name, code, or coordinator..."
+                  value={stateSearch}
+                  onChange={(e) => setStateSearch(e.target.value)}
+                  className="w-full pl-9 pr-4 py-2 border border-gray-200 rounded-lg text-xs focus:ring-emerald-500 focus:border-emerald-500"
+                />
+              </div>
+              <div className="flex items-center gap-2">
+                <Filter className="w-4 h-4 text-gray-500" />
+                <select
+                  value={selectedZoneFilter}
+                  onChange={(e) => setSelectedZoneFilter(e.target.value)}
+                  className="border border-gray-200 rounded-lg text-xs py-2 px-3 focus:ring-emerald-500 focus:border-emerald-500 bg-white"
+                >
+                  <option value="all">All Geopolitical Zones</option>
+                  <option value="NC">North Central (NC)</option>
+                  <option value="NE">North East (NE)</option>
+                  <option value="NW">North West (NW)</option>
+                  <option value="SE">South East (SE)</option>
+                  <option value="SS">South South (SS)</option>
+                  <option value="SW">South West (SW)</option>
+                </select>
+              </div>
             </div>
-            <div className="flex items-center gap-2">
-              <Filter className="w-4 h-4 text-gray-500" />
-              <select
-                value={selectedZoneFilter}
-                onChange={(e) => setSelectedZoneFilter(e.target.value)}
-                className="border border-gray-200 rounded-lg text-xs py-2 px-3 focus:ring-emerald-500 focus:border-emerald-500 bg-white"
-              >
-                <option value="all">All Geopolitical Zones</option>
-                <option value="NC">North Central (NC)</option>
-                <option value="NE">North East (NE)</option>
-                <option value="NW">North West (NW)</option>
-                <option value="SE">South East (SE)</option>
-                <option value="SS">South South (SS)</option>
-                <option value="SW">South West (SW)</option>
-              </select>
+
+            {/* Status Pills */}
+            <div className="flex flex-wrap items-center gap-1.5 pt-2 border-t border-gray-100">
+              <span className="text-[11px] font-bold text-gray-500 uppercase mr-2">Status:</span>
+              {[
+                { id: "all", label: "All States", count: stateCoverage.length },
+                {
+                  id: "active",
+                  label: "Active",
+                  count: stateCoverage.filter((st) => st.coordinator_name && st.appointment_status !== "suspended").length,
+                },
+                {
+                  id: "vacant",
+                  label: "Vacant",
+                  count: stateCoverage.filter((st) => !st.coordinator_name).length,
+                },
+                {
+                  id: "suspended",
+                  label: "Suspended",
+                  count: stateCoverage.filter((st) => st.appointment_status === "suspended").length,
+                },
+              ].map((p) => {
+                const isSelected = stateStatusFilter === p.id;
+                return (
+                  <button
+                    key={p.id}
+                    onClick={() => setStateStatusFilter(p.id as any)}
+                    className={`px-3 py-1 rounded-full text-xs font-semibold transition ${
+                      isSelected
+                        ? "bg-emerald-800 text-white shadow-sm"
+                        : "bg-gray-100 text-gray-600 hover:bg-gray-200"
+                    }`}
+                  >
+                    {p.label} ({p.count})
+                  </button>
+                );
+              })}
             </div>
           </div>
 
@@ -855,12 +1408,13 @@ export default function AdminOverviewPage() {
                   <th className="px-4 py-3 text-left">Status</th>
                   <th className="px-4 py-3 text-left">Appointed Coordinator</th>
                   <th className="px-4 py-3 text-left">Contact Info</th>
-                  <th className="px-4 py-3 text-right">Action</th>
+                  <th className="px-4 py-3 text-right">Actions</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-gray-100">
                 {filteredStates.map((st) => {
                   const isAssigned = Boolean(st.coordinator_name);
+                  const isSuspended = st.appointment_status === "suspended";
                   return (
                     <tr key={st.state_id} className="hover:bg-gray-50 transition">
                       <td className="px-4 py-3 font-bold text-gray-900">
@@ -874,8 +1428,11 @@ export default function AdminOverviewPage() {
                       </td>
                       <td className="px-4 py-3 font-semibold text-gray-600">{st.zone_code}</td>
                       <td className="px-4 py-3">
-                        <Badge variant={isAssigned ? "success" : "warning"} size="sm">
-                          {isAssigned ? "ASSIGNED" : "VACANT"}
+                        <Badge
+                          variant={isSuspended ? "warning" : isAssigned ? "success" : "warning"}
+                          size="sm"
+                        >
+                          {isSuspended ? "SUSPENDED" : isAssigned ? "ASSIGNED" : "VACANT"}
                         </Badge>
                       </td>
                       <td className="px-4 py-3 font-medium text-gray-800">
@@ -886,12 +1443,101 @@ export default function AdminOverviewPage() {
                         {st.coordinator_phone && <div>{st.coordinator_phone}</div>}
                       </td>
                       <td className="px-4 py-3 text-right">
-                        <Link
-                          href="/admin/leadership"
-                          className="text-xs font-bold text-emerald-700 hover:text-emerald-900"
-                        >
-                          {isAssigned ? "Replace" : "Appoint"}
-                        </Link>
+                        <div className="flex items-center justify-end gap-1.5">
+                          {isAssigned ? (
+                            <>
+                              {st.appointment_id && (
+                                <button
+                                  type="button"
+                                  onClick={() =>
+                                    openHistoryModal({
+                                      appointmentId: st.appointment_id!,
+                                      roleTitle: `State Coordinator - ${st.state_name}`,
+                                      jurisdictionName: st.state_name,
+                                    })
+                                  }
+                                  className="px-2 py-1 border border-gray-200 hover:bg-gray-100 text-gray-700 font-semibold rounded-lg text-[11px] transition"
+                                >
+                                  History
+                                </button>
+                              )}
+
+                              <button
+                                type="button"
+                                onClick={() =>
+                                  setReplaceTarget({
+                                    appointmentId: st.appointment_id || "",
+                                    currentHolder: st.coordinator_name || "",
+                                    roleTitle: `State Coordinator - ${st.state_name}`,
+                                    jurisdictionName: st.state_name,
+                                  })
+                                }
+                                className="px-2 py-1 bg-amber-50 hover:bg-amber-100 text-amber-800 font-semibold rounded-lg text-[11px] transition"
+                              >
+                                Replace
+                              </button>
+
+                              {isSuspended ? (
+                                <button
+                                  type="button"
+                                  onClick={() =>
+                                    setReactivateTarget({
+                                      appointmentId: st.appointment_id || "",
+                                      coordinatorName: st.coordinator_name || "",
+                                      roleTitle: `State Coordinator - ${st.state_name}`,
+                                    })
+                                  }
+                                  className="px-2 py-1 bg-emerald-50 hover:bg-emerald-100 text-emerald-800 font-semibold rounded-lg text-[11px] transition"
+                                >
+                                  Reactivate
+                                </button>
+                              ) : (
+                                <button
+                                  type="button"
+                                  onClick={() =>
+                                    setSuspendTarget({
+                                      appointmentId: st.appointment_id || "",
+                                      coordinatorName: st.coordinator_name || "",
+                                      roleTitle: `State Coordinator - ${st.state_name}`,
+                                    })
+                                  }
+                                  className="px-2 py-1 bg-yellow-50 hover:bg-yellow-100 text-yellow-800 font-semibold rounded-lg text-[11px] transition"
+                                >
+                                  Suspend
+                                </button>
+                              )}
+
+                              <button
+                                type="button"
+                                onClick={() =>
+                                  setRevokeTarget({
+                                    appointmentId: st.appointment_id || "",
+                                    coordinatorName: st.coordinator_name || "",
+                                    roleTitle: `State Coordinator - ${st.state_name}`,
+                                  })
+                                }
+                                className="px-2 py-1 bg-red-50 hover:bg-red-100 text-red-800 font-semibold rounded-lg text-[11px] transition"
+                              >
+                                Revoke
+                              </button>
+                            </>
+                          ) : (
+                            <button
+                              type="button"
+                              onClick={() =>
+                                openAppointModal({
+                                  roleType: "state_coordinator",
+                                  jurisdictionType: "state",
+                                  jurisdictionId: st.state_id,
+                                  jurisdictionName: st.state_name,
+                                })
+                              }
+                              className="px-3 py-1 bg-emerald-800 hover:bg-emerald-900 text-white font-bold rounded-lg text-xs transition"
+                            >
+                              + Appoint
+                            </button>
+                          )}
+                        </div>
                       </td>
                     </tr>
                   );
@@ -914,48 +1560,105 @@ export default function AdminOverviewPage() {
                 Grassroots coordinator and representative coverage across Nigeria's 774 Local Government Areas.
               </p>
             </div>
-            <Link
-              href="/admin/leadership"
-              className="inline-flex items-center px-4 py-2 bg-emerald-800 hover:bg-emerald-700 text-white text-xs font-bold rounded-lg transition"
-            >
-              <ShieldCheck className="w-4 h-4 mr-1.5" />
-              Manage LGA Appointments
-            </Link>
+            <div className="flex flex-wrap items-center gap-2">
+              <button
+                type="button"
+                onClick={() =>
+                  openAppointModal({
+                    roleType: "lga_representative",
+                    jurisdictionType: "lga",
+                    jurisdictionId: "",
+                    jurisdictionName: "",
+                  })
+                }
+                className="inline-flex items-center px-4 py-2 bg-emerald-800 hover:bg-emerald-700 text-white text-xs font-bold rounded-lg transition"
+              >
+                <PlusCircle className="w-4 h-4 mr-1.5" />
+                Appoint LGA Representative
+              </button>
+              <Link
+                href="/admin/leadership"
+                className="inline-flex items-center px-3.5 py-2 border border-gray-300 bg-white hover:bg-gray-50 text-gray-700 text-xs font-semibold rounded-lg transition"
+              >
+                <ShieldCheck className="w-4 h-4 mr-1.5" />
+                Manage LGA Appointments
+              </Link>
+            </div>
           </div>
 
           {/* State Selector & LGA Search */}
-          <div className="flex flex-col sm:flex-row gap-4 bg-white p-4 rounded-xl border border-gray-200 shadow-sm">
-            <div className="w-full sm:w-72">
-              <label className="block text-[11px] font-bold text-gray-700 uppercase mb-1">
-                Select State to Inspect LGAs:
-              </label>
-              <select
-                value={selectedStateForLga}
-                onChange={(e) => setSelectedStateForLga(e.target.value)}
-                className="w-full border border-gray-200 rounded-lg text-xs py-2 px-3 focus:ring-emerald-500 focus:border-emerald-500 bg-white"
-              >
-                {stateCoverage.map((st) => (
-                  <option key={st.state_id} value={st.state_id}>
-                    {st.state_name} ({st.zone_code})
-                  </option>
-                ))}
-              </select>
+          <div className="bg-white p-4 rounded-xl border border-gray-200 shadow-sm space-y-3">
+            <div className="flex flex-col sm:flex-row gap-4">
+              <div className="w-full sm:w-72">
+                <label className="block text-[11px] font-bold text-gray-700 uppercase mb-1">
+                  Select State to Inspect LGAs:
+                </label>
+                <select
+                  value={selectedStateForLga}
+                  onChange={(e) => setSelectedStateForLga(e.target.value)}
+                  className="w-full border border-gray-200 rounded-lg text-xs py-2 px-3 focus:ring-emerald-500 focus:border-emerald-500 bg-white"
+                >
+                  {stateCoverage.map((st) => (
+                    <option key={st.state_id} value={st.state_id}>
+                      {st.state_name} ({st.zone_code})
+                    </option>
+                  ))}
+                </select>
+              </div>
+
+              <div className="flex-1">
+                <label className="block text-[11px] font-bold text-gray-700 uppercase mb-1">
+                  Filter LGA by Name / Coordinator:
+                </label>
+                <div className="relative">
+                  <Search className="w-4 h-4 text-gray-400 absolute left-3 top-2.5" />
+                  <input
+                    type="text"
+                    placeholder="Filter local councils..."
+                    value={lgaSearch}
+                    onChange={(e) => setLgaSearch(e.target.value)}
+                    className="w-full pl-9 pr-4 py-2 border border-gray-200 rounded-lg text-xs focus:ring-emerald-500 focus:border-emerald-500"
+                  />
+                </div>
+              </div>
             </div>
 
-            <div className="flex-1">
-              <label className="block text-[11px] font-bold text-gray-700 uppercase mb-1">
-                Filter LGA by Name / Coordinator:
-              </label>
-              <div className="relative">
-                <Search className="w-4 h-4 text-gray-400 absolute left-3 top-2.5" />
-                <input
-                  type="text"
-                  placeholder="Filter local councils..."
-                  value={lgaSearch}
-                  onChange={(e) => setLgaSearch(e.target.value)}
-                  className="w-full pl-9 pr-4 py-2 border border-gray-200 rounded-lg text-xs focus:ring-emerald-500 focus:border-emerald-500"
-                />
-              </div>
+            {/* Status Pills */}
+            <div className="flex flex-wrap items-center gap-1.5 pt-2 border-t border-gray-100">
+              <span className="text-[11px] font-bold text-gray-500 uppercase mr-2">Status:</span>
+              {[
+                { id: "all", label: "All Councils", count: lgaCoverage.length },
+                {
+                  id: "active",
+                  label: "Active",
+                  count: lgaCoverage.filter((lg) => lg.coordinator_name && lg.appointment_status !== "suspended").length,
+                },
+                {
+                  id: "vacant",
+                  label: "Vacant",
+                  count: lgaCoverage.filter((lg) => !lg.coordinator_name).length,
+                },
+                {
+                  id: "suspended",
+                  label: "Suspended",
+                  count: lgaCoverage.filter((lg) => lg.appointment_status === "suspended").length,
+                },
+              ].map((p) => {
+                const isSelected = lgaStatusFilter === p.id;
+                return (
+                  <button
+                    key={p.id}
+                    onClick={() => setLgaStatusFilter(p.id as any)}
+                    className={`px-3 py-1 rounded-full text-xs font-semibold transition ${
+                      isSelected
+                        ? "bg-emerald-800 text-white shadow-sm"
+                        : "bg-gray-100 text-gray-600 hover:bg-gray-200"
+                    }`}
+                  >
+                    {p.label} ({p.count})
+                  </button>
+                );
+              })}
             </div>
           </div>
 
@@ -978,12 +1681,13 @@ export default function AdminOverviewPage() {
                     <th className="px-4 py-3 text-left">Status</th>
                     <th className="px-4 py-3 text-left">Coordinator / Representative</th>
                     <th className="px-4 py-3 text-left">Contact Info</th>
-                    <th className="px-4 py-3 text-right">Action</th>
+                    <th className="px-4 py-3 text-right">Actions</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-gray-100">
                   {filteredLgas.map((lg) => {
                     const isAssigned = Boolean(lg.coordinator_name);
+                    const isSuspended = lg.appointment_status === "suspended";
                     return (
                       <tr key={lg.lga_id} className="hover:bg-gray-50 transition">
                         <td className="px-4 py-3 font-bold text-gray-900">{lg.lga_name}</td>
@@ -991,8 +1695,11 @@ export default function AdminOverviewPage() {
                           {lg.is_area_council ? "Area Council" : "LGA"}
                         </td>
                         <td className="px-4 py-3">
-                          <Badge variant={isAssigned ? "success" : "warning"} size="sm">
-                            {isAssigned ? "ASSIGNED" : "VACANT"}
+                          <Badge
+                            variant={isSuspended ? "warning" : isAssigned ? "success" : "warning"}
+                            size="sm"
+                          >
+                            {isSuspended ? "SUSPENDED" : isAssigned ? "ASSIGNED" : "VACANT"}
                           </Badge>
                         </td>
                         <td className="px-4 py-3 font-medium text-gray-800">
@@ -1005,12 +1712,101 @@ export default function AdminOverviewPage() {
                           {lg.coordinator_phone && <div>{lg.coordinator_phone}</div>}
                         </td>
                         <td className="px-4 py-3 text-right">
-                          <Link
-                            href="/admin/leadership"
-                            className="text-xs font-bold text-emerald-700 hover:text-emerald-900"
-                          >
-                            {isAssigned ? "Replace" : "Appoint"}
-                          </Link>
+                          <div className="flex items-center justify-end gap-1.5">
+                            {isAssigned ? (
+                              <>
+                                {lg.appointment_id && (
+                                  <button
+                                    type="button"
+                                    onClick={() =>
+                                      openHistoryModal({
+                                        appointmentId: lg.appointment_id!,
+                                        roleTitle: `LGA Representative - ${lg.lga_name}`,
+                                        jurisdictionName: lg.lga_name,
+                                      })
+                                    }
+                                    className="px-2 py-1 border border-gray-200 hover:bg-gray-100 text-gray-700 font-semibold rounded-lg text-[11px] transition"
+                                  >
+                                    History
+                                  </button>
+                                )}
+
+                                <button
+                                  type="button"
+                                  onClick={() =>
+                                    setReplaceTarget({
+                                      appointmentId: lg.appointment_id || "",
+                                      currentHolder: lg.coordinator_name || "",
+                                      roleTitle: `LGA Representative - ${lg.lga_name}`,
+                                      jurisdictionName: lg.lga_name,
+                                    })
+                                  }
+                                  className="px-2 py-1 bg-amber-50 hover:bg-amber-100 text-amber-800 font-semibold rounded-lg text-[11px] transition"
+                                >
+                                  Replace
+                                </button>
+
+                                {isSuspended ? (
+                                  <button
+                                    type="button"
+                                    onClick={() =>
+                                      setReactivateTarget({
+                                        appointmentId: lg.appointment_id || "",
+                                        coordinatorName: lg.coordinator_name || "",
+                                        roleTitle: `LGA Representative - ${lg.lga_name}`,
+                                      })
+                                    }
+                                    className="px-2 py-1 bg-emerald-50 hover:bg-emerald-100 text-emerald-800 font-semibold rounded-lg text-[11px] transition"
+                                  >
+                                    Reactivate
+                                  </button>
+                                ) : (
+                                  <button
+                                    type="button"
+                                    onClick={() =>
+                                      setSuspendTarget({
+                                        appointmentId: lg.appointment_id || "",
+                                        coordinatorName: lg.coordinator_name || "",
+                                        roleTitle: `LGA Representative - ${lg.lga_name}`,
+                                      })
+                                    }
+                                    className="px-2 py-1 bg-yellow-50 hover:bg-yellow-100 text-yellow-800 font-semibold rounded-lg text-[11px] transition"
+                                  >
+                                    Suspend
+                                  </button>
+                                )}
+
+                                <button
+                                  type="button"
+                                  onClick={() =>
+                                    setRevokeTarget({
+                                      appointmentId: lg.appointment_id || "",
+                                      coordinatorName: lg.coordinator_name || "",
+                                      roleTitle: `LGA Representative - ${lg.lga_name}`,
+                                    })
+                                  }
+                                  className="px-2 py-1 bg-red-50 hover:bg-red-100 text-red-800 font-semibold rounded-lg text-[11px] transition"
+                                >
+                                  Revoke
+                                </button>
+                              </>
+                            ) : (
+                              <button
+                                type="button"
+                                onClick={() =>
+                                  openAppointModal({
+                                    roleType: "lga_representative",
+                                    jurisdictionType: "lga",
+                                    jurisdictionId: lg.lga_id,
+                                    jurisdictionName: lg.lga_name,
+                                  })
+                                }
+                                className="px-3 py-1 bg-emerald-800 hover:bg-emerald-900 text-white font-bold rounded-lg text-xs transition"
+                              >
+                                + Appoint
+                              </button>
+                            )}
+                          </div>
                         </td>
                       </tr>
                     );
@@ -1667,6 +2463,744 @@ export default function AdminOverviewPage() {
                   </span>
                 </div>
               </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* =========================================================================
+          MODAL 1: Appointment Workflow (Super Admin)
+         ========================================================================= */}
+      {showAppointModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4 backdrop-blur-sm overflow-y-auto">
+          <div className="bg-white rounded-2xl max-w-xl w-full p-6 space-y-5 shadow-2xl border border-gray-200 my-8">
+            <div className="flex justify-between items-start border-b pb-3">
+              <div>
+                <span className="text-[10px] font-black uppercase tracking-wider text-emerald-700 block">
+                  Super Admin Governance
+                </span>
+                <h2 className="text-lg font-black text-gray-900 mt-0.5">
+                  {appointStep === "form" ? "Assign Leadership Position" : "Review & Confirm Appointment"}
+                </h2>
+              </div>
+              <button
+                onClick={() => {
+                  setShowAppointModal(false);
+                  setAssignStep("form");
+                }}
+                className="text-gray-400 hover:text-gray-600"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            {appointStep === "form" ? (
+              <div className="space-y-4 text-xs">
+                {/* 1. Appointee Member Search & Select */}
+                <div>
+                  <label className="block font-bold text-gray-700 mb-1">
+                    Search Registered Member *
+                  </label>
+                  {appointSelectedUser ? (
+                    <div className="flex items-center justify-between p-3 rounded-xl bg-emerald-50 border border-emerald-300">
+                      <div>
+                        <div className="font-bold text-emerald-950 text-sm">
+                          {appointSelectedUser.display_name}
+                        </div>
+                        <div className="text-gray-600 font-mono text-[11px]">
+                          Ref: {appointSelectedUser.membership_reference} • Role: {appointSelectedUser.primary_role}
+                        </div>
+                        {appointSelectedUser.email && (
+                          <div className="text-gray-500 text-[10px]">{appointSelectedUser.email}</div>
+                        )}
+                      </div>
+                      <button
+                        type="button"
+                        onClick={() => setAppointSelectedUser(null)}
+                        className="px-2.5 py-1 text-xs font-semibold text-emerald-900 hover:bg-emerald-200 rounded-lg transition"
+                      >
+                        Change Member
+                      </button>
+                    </div>
+                  ) : (
+                    <div className="space-y-2">
+                      <div className="relative">
+                        <Search className="w-4 h-4 text-gray-400 absolute left-3 top-2.5" />
+                        <input
+                          type="text"
+                          placeholder="Search members by name, email, or reference..."
+                          value={appointMemberSearch}
+                          onChange={(e) => setAppointMemberSearch(e.target.value)}
+                          className="w-full pl-9 pr-3 py-2 border border-gray-300 rounded-xl text-xs focus:ring-emerald-600 focus:border-emerald-600"
+                        />
+                      </div>
+                      {appointSearching && (
+                        <div className="text-[11px] text-gray-500 italic">Searching members...</div>
+                      )}
+                      {appointMemberResults.length > 0 && (
+                        <div className="border border-gray-200 rounded-xl max-h-44 overflow-y-auto divide-y bg-white shadow-sm">
+                          {appointMemberResults.map((m) => (
+                            <button
+                              key={m.id}
+                              type="button"
+                              onClick={() => {
+                                setAppointSelectedUser(m);
+                                setAppointMemberResults([]);
+                                setAppointMemberSearch("");
+                              }}
+                              className="w-full text-left p-2.5 hover:bg-gray-50 flex items-center justify-between transition"
+                            >
+                              <div>
+                                <div className="font-bold text-gray-900">{m.display_name}</div>
+                                <div className="text-[10px] text-gray-500 font-mono">
+                                  {m.membership_reference} • {m.email || m.phone}
+                                </div>
+                              </div>
+                              <span className="text-[10px] font-bold text-emerald-700 uppercase">
+                                Select
+                              </span>
+                            </button>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+                  )}
+                </div>
+
+                {/* 2. Role Type */}
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                  <div>
+                    <label className="block font-bold text-gray-700 mb-1">Coordinator Role *</label>
+                    <select
+                      value={appointRoleType}
+                      onChange={(e) => {
+                        const r = e.target.value;
+                        setAppointRoleType(r);
+                        if (r === "national_admin" || r === "super_admin") {
+                          setAppointJurisdictionType("national");
+                          setAppointJurisdictionId("");
+                          setAppointJurisdictionLabel("National (All Nigeria)");
+                        } else if (r === "zonal_coordinator") {
+                          setAppointJurisdictionType("zone");
+                          if (allZones.length > 0 && !appointJurisdictionId) {
+                            setAppointJurisdictionId(allZones[0].id);
+                            setAppointJurisdictionLabel(allZones[0].name);
+                          }
+                        } else if (r === "state_coordinator") {
+                          setAppointJurisdictionType("state");
+                          if (allStates.length > 0 && !appointJurisdictionId) {
+                            setAppointJurisdictionId(allStates[0].id);
+                            setAppointJurisdictionLabel(allStates[0].name);
+                          }
+                        } else if (r === "lga_representative") {
+                          setAppointJurisdictionType("lga");
+                          if (allStates.length > 0 && !appointStateForLga) {
+                            setAppointStateForLga(allStates[0].id);
+                          }
+                        }
+                      }}
+                      className="w-full border border-gray-300 rounded-xl px-3 py-2 text-xs focus:ring-emerald-600 focus:border-emerald-600 bg-white"
+                    >
+                      <option value="state_coordinator">State Coordinator</option>
+                      <option value="zonal_coordinator">Zonal Coordinator</option>
+                      <option value="lga_representative">LGA Representative</option>
+                      <option value="national_admin">National Administrator</option>
+                      <option value="super_admin">Super Administrator</option>
+                    </select>
+                  </div>
+
+                  <div>
+                    <label className="block font-bold text-gray-700 mb-1">Official Role Title *</label>
+                    <input
+                      type="text"
+                      required
+                      value={appointRoleTitle}
+                      onChange={(e) => setAppointRoleTitle(e.target.value)}
+                      placeholder="e.g. State Coordinator - Kano"
+                      className="w-full px-3 py-2 border border-gray-300 rounded-xl text-xs focus:ring-emerald-600 focus:border-emerald-600"
+                    />
+                  </div>
+                </div>
+
+                {/* 3. Jurisdiction Selector */}
+                {appointJurisdictionType === "zone" && (
+                  <div>
+                    <label className="block font-bold text-gray-700 mb-1">Geopolitical Zone *</label>
+                    <select
+                      required
+                      value={appointJurisdictionId}
+                      onChange={(e) => {
+                        const id = e.target.value;
+                        setAppointJurisdictionId(id);
+                        const z = allZones.find((item) => item.id === id || item.code === id);
+                        if (z) setAppointJurisdictionLabel(`${z.name} (${z.code})`);
+                      }}
+                      className="w-full border border-gray-300 rounded-xl px-3 py-2 text-xs focus:ring-emerald-600 focus:border-emerald-600 bg-white"
+                    >
+                      <option value="">Select geopolitical zone...</option>
+                      {allZones.map((z) => (
+                        <option key={z.id} value={z.id}>
+                          {z.name} ({z.code})
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                )}
+
+                {appointJurisdictionType === "state" && (
+                  <div>
+                    <label className="block font-bold text-gray-700 mb-1">State / FCT *</label>
+                    <select
+                      required
+                      value={appointJurisdictionId}
+                      onChange={(e) => {
+                        const id = e.target.value;
+                        setAppointJurisdictionId(id);
+                        const s = allStates.find((item) => item.id === id || item.code === id);
+                        if (s) setAppointJurisdictionLabel(`${s.name} (${s.code})`);
+                      }}
+                      className="w-full border border-gray-300 rounded-xl px-3 py-2 text-xs focus:ring-emerald-600 focus:border-emerald-600 bg-white"
+                    >
+                      <option value="">Select state or territory...</option>
+                      {allStates.map((s) => (
+                        <option key={s.id} value={s.id}>
+                          {s.name} ({s.code}) {s.is_fct ? "— FCT" : ""}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                )}
+
+                {appointJurisdictionType === "lga" && (
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                    <div>
+                      <label className="block font-bold text-gray-700 mb-1">State for LGA *</label>
+                      <select
+                        value={appointStateForLga}
+                        onChange={(e) => {
+                          setAppointStateForLga(e.target.value);
+                          setAppointJurisdictionId("");
+                        }}
+                        className="w-full border border-gray-300 rounded-xl px-3 py-2 text-xs focus:ring-emerald-600 focus:border-emerald-600 bg-white"
+                      >
+                        <option value="">Select State...</option>
+                        {allStates.map((s) => (
+                          <option key={s.id} value={s.id}>
+                            {s.name} ({s.code})
+                          </option>
+                        ))}
+                      </select>
+                    </div>
+
+                    <div>
+                      <label className="block font-bold text-gray-700 mb-1">Local Council *</label>
+                      <select
+                        required
+                        value={appointJurisdictionId}
+                        onChange={(e) => {
+                          const id = e.target.value;
+                          setAppointJurisdictionId(id);
+                          const l = stateLgas.find((item) => item.id === id);
+                          if (l) setAppointJurisdictionLabel(l.name);
+                        }}
+                        className="w-full border border-gray-300 rounded-xl px-3 py-2 text-xs focus:ring-emerald-600 focus:border-emerald-600 bg-white"
+                      >
+                        <option value="">Select LGA...</option>
+                        {stateLgas.map((l) => (
+                          <option key={l.id} value={l.id}>
+                            {l.name}
+                          </option>
+                        ))}
+                      </select>
+                    </div>
+                  </div>
+                )}
+
+                {/* 4. Start Date & Reference */}
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                  <div>
+                    <label className="block font-bold text-gray-700 mb-1">Start Date *</label>
+                    <input
+                      type="date"
+                      required
+                      value={appointStartDate}
+                      onChange={(e) => setAppointStartDate(e.target.value)}
+                      className="w-full px-3 py-2 border border-gray-300 rounded-xl text-xs focus:ring-emerald-600 focus:border-emerald-600"
+                    />
+                  </div>
+
+                  <div>
+                    <label className="block font-bold text-gray-700 mb-1">Approval Reference</label>
+                    <input
+                      type="text"
+                      value={appointRef}
+                      onChange={(e) => setAppointRef(e.target.value)}
+                      placeholder="e.g. APPT-2026-HQ-001"
+                      className="w-full px-3 py-2 border border-gray-300 rounded-xl text-xs font-mono focus:ring-emerald-600 focus:border-emerald-600"
+                    />
+                  </div>
+                </div>
+
+                <div>
+                  <label className="block font-bold text-gray-700 mb-1">Public Official Contact (Optional)</label>
+                  <input
+                    type="text"
+                    value={appointContact}
+                    onChange={(e) => setAppointContact(e.target.value)}
+                    placeholder="e.g. lagos.ratels@example.org or official line"
+                    className="w-full px-3 py-2 border border-gray-300 rounded-xl text-xs focus:ring-emerald-600 focus:border-emerald-600"
+                  />
+                </div>
+
+                <div className="flex justify-end gap-2 pt-4 border-t">
+                  <button
+                    type="button"
+                    onClick={() => setShowAppointModal(false)}
+                    className="px-4 py-2 border border-gray-300 rounded-xl font-semibold text-gray-700 hover:bg-gray-50"
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    type="button"
+                    disabled={!appointSelectedUser || (appointJurisdictionType !== "national" && !appointJurisdictionId)}
+                    onClick={() => setAssignStep("review")}
+                    className="px-5 py-2 bg-emerald-800 hover:bg-emerald-900 text-white rounded-xl font-bold shadow-sm disabled:opacity-50 transition"
+                  >
+                    Proceed to Review
+                  </button>
+                </div>
+              </div>
+            ) : (
+              /* Review & Confirmation Step */
+              <div className="space-y-4 text-xs">
+                <div className="bg-emerald-50 border border-emerald-200 rounded-xl p-4 space-y-2">
+                  <h3 className="font-bold text-emerald-950 text-sm flex items-center gap-1.5">
+                    <CheckCircle2 className="w-4 h-4 text-emerald-700" />
+                    Appointment Summary Verification
+                  </h3>
+                  <div className="grid grid-cols-2 gap-2 text-xs pt-1">
+                    <div>
+                      <span className="text-gray-500 block">Appointee:</span>
+                      <span className="font-bold text-gray-900">{appointSelectedUser?.display_name}</span>
+                    </div>
+                    <div>
+                      <span className="text-gray-500 block">Membership Reference:</span>
+                      <span className="font-mono text-gray-800">{appointSelectedUser?.membership_reference}</span>
+                    </div>
+                    <div>
+                      <span className="text-gray-500 block">Role Mandate:</span>
+                      <span className="font-bold text-gray-900 capitalize">
+                        {appointRoleType.replace(/_/g, " ")}
+                      </span>
+                    </div>
+                    <div>
+                      <span className="text-gray-500 block">Jurisdiction:</span>
+                      <span className="font-bold text-emerald-900">{appointJurisdictionLabel || appointJurisdictionType}</span>
+                    </div>
+                    <div>
+                      <span className="text-gray-500 block">Effective Date:</span>
+                      <span className="font-medium text-gray-800">{appointStartDate}</span>
+                    </div>
+                    <div>
+                      <span className="text-gray-500 block">Approval Reference:</span>
+                      <span className="font-mono text-gray-800">
+                        {appointRef || "Auto-generated"}
+                      </span>
+                    </div>
+                  </div>
+                </div>
+
+                <div className="bg-amber-50 border border-amber-200 rounded-xl p-3 text-[11px] text-amber-900 flex items-start gap-2">
+                  <AlertTriangle className="w-4 h-4 text-amber-700 flex-shrink-0 mt-0.5" />
+                  <span>
+                    Confirming this appointment will immediately grant administrative leadership access for this jurisdiction and dispatch an official notification to the member.
+                  </span>
+                </div>
+
+                <div className="flex justify-end gap-2 pt-3 border-t">
+                  <button
+                    type="button"
+                    onClick={() => setAssignStep("form")}
+                    className="px-4 py-2 border border-gray-300 rounded-xl font-semibold text-gray-700 hover:bg-gray-50"
+                  >
+                    Back to Edit
+                  </button>
+                  <button
+                    type="button"
+                    disabled={submittingAppoint}
+                    onClick={handleAppointSubmit}
+                    className="px-5 py-2 bg-emerald-800 hover:bg-emerald-900 text-white rounded-xl font-bold shadow-sm transition"
+                  >
+                    {submittingAppoint ? "Confirming Appointment..." : "Confirm & Appoint"}
+                  </button>
+                </div>
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+
+      {/* =========================================================================
+          MODAL 2: Replacement Workflow (Super Admin)
+         ========================================================================= */}
+      {replaceTarget && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4 backdrop-blur-sm">
+          <div className="bg-white rounded-2xl max-w-lg w-full p-6 space-y-4 shadow-2xl border border-gray-200">
+            <div className="flex justify-between items-start border-b pb-3">
+              <div>
+                <span className="text-[10px] font-black text-amber-700 uppercase tracking-wider block">
+                  Coordinator Replacement Handover
+                </span>
+                <h2 className="text-base font-bold text-gray-900 mt-0.5">
+                  Replace: {replaceTarget.roleTitle}
+                </h2>
+                <div className="text-xs text-gray-500 mt-0.5">
+                  Current holder: <span className="font-semibold">{replaceTarget.currentHolder}</span> ({replaceTarget.jurisdictionName})
+                </div>
+              </div>
+              <button onClick={() => setReplaceTarget(null)} className="text-gray-400 hover:text-gray-600">
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            <form onSubmit={handleReplaceSubmit} className="space-y-4 text-xs">
+              <div>
+                <label className="block font-bold text-gray-700 mb-1">
+                  Select Replacement Member *
+                </label>
+                {replaceSelectedUser ? (
+                  <div className="flex items-center justify-between p-3 rounded-xl bg-amber-50 border border-amber-300">
+                    <div>
+                      <div className="font-bold text-amber-950 text-sm">
+                        {replaceSelectedUser.display_name}
+                      </div>
+                      <div className="text-gray-600 font-mono text-[11px]">
+                        Ref: {replaceSelectedUser.membership_reference}
+                      </div>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => setReplaceSelectedUser(null)}
+                      className="px-2.5 py-1 text-xs font-semibold text-amber-900 hover:bg-amber-200 rounded-lg transition"
+                    >
+                      Change
+                    </button>
+                  </div>
+                ) : (
+                  <div className="space-y-2">
+                    <div className="relative">
+                      <Search className="w-4 h-4 text-gray-400 absolute left-3 top-2.5" />
+                      <input
+                        type="text"
+                        placeholder="Search replacement candidate by name or ref..."
+                        value={replaceMemberSearch}
+                        onChange={(e) => setReplaceMemberSearch(e.target.value)}
+                        className="w-full pl-9 pr-3 py-2 border border-gray-300 rounded-xl text-xs focus:ring-amber-600 focus:border-amber-600"
+                      />
+                    </div>
+                    {replaceSearching && (
+                      <div className="text-[11px] text-gray-500 italic">Searching candidates...</div>
+                    )}
+                    {replaceMemberResults.length > 0 && (
+                      <div className="border border-gray-200 rounded-xl max-h-40 overflow-y-auto divide-y bg-white shadow-sm">
+                        {replaceMemberResults.map((m) => (
+                          <button
+                            key={m.id}
+                            type="button"
+                            onClick={() => {
+                              setReplaceSelectedUser(m);
+                              setReplaceMemberResults([]);
+                              setReplaceMemberSearch("");
+                            }}
+                            className="w-full text-left p-2.5 hover:bg-gray-50 flex items-center justify-between transition"
+                          >
+                            <div>
+                              <div className="font-bold text-gray-900">{m.display_name}</div>
+                              <div className="text-[10px] text-gray-500 font-mono">
+                                {m.membership_reference} • {m.email}
+                              </div>
+                            </div>
+                            <span className="text-[10px] font-bold text-amber-700 uppercase">
+                              Select
+                            </span>
+                          </button>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                )}
+              </div>
+
+              <div>
+                <label className="block font-bold text-gray-700 mb-1">
+                  Effective Handover Date *
+                </label>
+                <input
+                  type="date"
+                  required
+                  value={replaceEffectiveDate}
+                  onChange={(e) => setReplaceEffectiveDate(e.target.value)}
+                  className="w-full border border-gray-300 rounded-xl p-2 bg-white"
+                />
+              </div>
+
+              <div>
+                <label className="block font-bold text-gray-700 mb-1">
+                  Formal Reason for Replacement * (Minimum 5 characters)
+                </label>
+                <textarea
+                  required
+                  minLength={5}
+                  rows={3}
+                  value={replaceReason}
+                  onChange={(e) => setReplaceReason(e.target.value)}
+                  placeholder="State the governance justification: e.g. term conclusion, rotation, relocation, or performance review..."
+                  className="w-full border border-gray-300 rounded-xl p-2.5 text-xs focus:ring-amber-600 focus:border-amber-600"
+                />
+              </div>
+
+              <div className="flex justify-end gap-2 pt-3 border-t">
+                <button
+                  type="button"
+                  onClick={() => setReplaceTarget(null)}
+                  className="px-4 py-2 border rounded-xl font-semibold text-gray-700 hover:bg-gray-50"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  disabled={submittingReplace || !replaceSelectedUser}
+                  className="px-5 py-2 bg-amber-700 hover:bg-amber-800 text-white rounded-xl font-bold transition disabled:opacity-50"
+                >
+                  {submittingReplace ? "Executing Handover..." : "Confirm Replacement"}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* =========================================================================
+          MODAL 3: Suspend Coordinator Modal
+         ========================================================================= */}
+      {suspendTarget && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4 backdrop-blur-sm">
+          <div className="bg-white rounded-2xl max-w-md w-full p-6 space-y-4 shadow-2xl border border-gray-200">
+            <div className="flex items-center gap-2 text-yellow-700 font-bold">
+              <PauseCircle className="w-5 h-5 text-yellow-600" />
+              <span>Suspend Coordinator Mandate</span>
+            </div>
+            <p className="text-xs text-gray-600">
+              You are about to suspend <span className="font-bold text-gray-900">{suspendTarget.coordinatorName}</span> from the role of <span className="font-bold text-gray-900">{suspendTarget.roleTitle}</span>. Their administrative permissions will be halted immediately.
+            </p>
+
+            <form onSubmit={handleSuspendSubmit} className="space-y-4 text-xs">
+              <div>
+                <label className="block font-bold text-gray-700 mb-1">
+                  Mandatory Suspension Reason *
+                </label>
+                <textarea
+                  required
+                  minLength={5}
+                  rows={3}
+                  value={suspendReason}
+                  onChange={(e) => setSuspendReason(e.target.value)}
+                  placeholder="State the formal cause for temporary suspension..."
+                  className="w-full border border-gray-300 rounded-xl p-2.5 text-xs focus:ring-yellow-600 focus:border-yellow-600"
+                />
+              </div>
+
+              <div className="flex justify-end gap-2 pt-2 border-t">
+                <button
+                  type="button"
+                  onClick={() => setSuspendTarget(null)}
+                  className="px-4 py-2 border rounded-xl font-semibold text-gray-700 hover:bg-gray-50"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  disabled={submittingSuspend}
+                  className="px-5 py-2 bg-yellow-600 hover:bg-yellow-700 text-white rounded-xl font-bold transition"
+                >
+                  {submittingSuspend ? "Suspending..." : "Confirm Suspension"}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* =========================================================================
+          MODAL 4: Reactivate Coordinator Modal
+         ========================================================================= */}
+      {reactivateTarget && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4 backdrop-blur-sm">
+          <div className="bg-white rounded-2xl max-w-md w-full p-6 space-y-4 shadow-2xl border border-gray-200">
+            <div className="flex items-center gap-2 text-emerald-800 font-bold">
+              <PlayCircle className="w-5 h-5 text-emerald-700" />
+              <span>Reactivate Suspended Coordinator</span>
+            </div>
+            <p className="text-xs text-gray-600">
+              Restore active mandate and administrative privileges for <span className="font-bold text-gray-900">{reactivateTarget.coordinatorName}</span> as <span className="font-bold text-gray-900">{reactivateTarget.roleTitle}</span>.
+            </p>
+
+            <form onSubmit={handleReactivateSubmit} className="space-y-4 text-xs">
+              <div>
+                <label className="block font-bold text-gray-700 mb-1">
+                  Reactivation Note / Reason *
+                </label>
+                <input
+                  type="text"
+                  required
+                  value={reactivateReason}
+                  onChange={(e) => setReactivateReason(e.target.value)}
+                  placeholder="e.g. Investigation concluded with full clearance"
+                  className="w-full border border-gray-300 rounded-xl p-2.5 text-xs focus:ring-emerald-600 focus:border-emerald-600"
+                />
+              </div>
+
+              <div className="flex justify-end gap-2 pt-2 border-t">
+                <button
+                  type="button"
+                  onClick={() => setReactivateTarget(null)}
+                  className="px-4 py-2 border rounded-xl font-semibold text-gray-700 hover:bg-gray-50"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  disabled={submittingReactivate}
+                  className="px-5 py-2 bg-emerald-800 hover:bg-emerald-900 text-white rounded-xl font-bold transition"
+                >
+                  {submittingReactivate ? "Reactivating..." : "Confirm Reactivation"}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* =========================================================================
+          MODAL 5: Revoke Coordinator Modal
+         ========================================================================= */}
+      {revokeTarget && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4 backdrop-blur-sm">
+          <div className="bg-white rounded-2xl max-w-md w-full p-6 space-y-4 shadow-2xl border border-gray-200">
+            <div className="flex items-center gap-2 text-red-700 font-bold">
+              <AlertCircle className="w-5 h-5 text-red-600" />
+              <span>Permanent Revocation of Appointment</span>
+            </div>
+            <p className="text-xs text-gray-600">
+              This action permanently terminates the appointment of <span className="font-bold text-gray-900">{revokeTarget.coordinatorName}</span> for <span className="font-bold text-gray-900">{revokeTarget.roleTitle}</span>. Historical audit logs will be permanently retained.
+            </p>
+
+            <form onSubmit={handleRevokeSubmit} className="space-y-4 text-xs">
+              <div>
+                <label className="block font-bold text-gray-700 mb-1">
+                  Official Revocation Reason *
+                </label>
+                <textarea
+                  required
+                  minLength={5}
+                  rows={3}
+                  value={revokeReason}
+                  onChange={(e) => setRevokeReason(e.target.value)}
+                  placeholder="State the permanent termination grounds..."
+                  className="w-full border border-gray-300 rounded-xl p-2.5 text-xs focus:ring-red-600 focus:border-red-600"
+                />
+              </div>
+
+              <div className="flex justify-end gap-2 pt-2 border-t">
+                <button
+                  type="button"
+                  onClick={() => setRevokeTarget(null)}
+                  className="px-4 py-2 border rounded-xl font-semibold text-gray-700 hover:bg-gray-50"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  disabled={submittingRevoke}
+                  className="px-5 py-2 bg-red-700 hover:bg-red-800 text-white rounded-xl font-bold transition"
+                >
+                  {submittingRevoke ? "Revoking..." : "Confirm Revocation"}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* =========================================================================
+          MODAL 6: Appointment History Modal
+         ========================================================================= */}
+      {historyTarget && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4 backdrop-blur-sm">
+          <div className="bg-white rounded-2xl max-w-xl w-full p-6 space-y-4 shadow-2xl border border-gray-200">
+            <div className="flex justify-between items-start border-b pb-3">
+              <div>
+                <h2 className="text-base font-bold text-gray-900 flex items-center gap-1.5">
+                  <History className="w-5 h-5 text-emerald-800" />
+                  Appointment Audit History
+                </h2>
+                <span className="text-xs text-gray-500">
+                  {historyTarget.roleTitle} • {historyTarget.jurisdictionName}
+                </span>
+              </div>
+              <button onClick={() => setHistoryTarget(null)} className="text-gray-400 hover:text-gray-600">
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            {loadingHistory ? (
+              <Spinner text="Loading appointment history..." />
+            ) : historyRecords.length === 0 ? (
+              <div className="p-6 text-center text-xs text-gray-500">
+                No appointment history records found for this position.
+              </div>
+            ) : (
+              <div className="space-y-3 max-h-80 overflow-y-auto text-xs pr-1">
+                {historyRecords.map((hRec) => (
+                  <div key={hRec.id} className="p-3 bg-gray-50 rounded-xl border border-gray-200 space-y-1">
+                    <div className="flex justify-between items-center">
+                      <span className="font-bold text-gray-900 capitalize">
+                        {hRec.action.replace(/_/g, " ")}
+                      </span>
+                      <span className="text-[10px] text-gray-400 font-mono">
+                        {new Date(hRec.timestamp).toLocaleString()}
+                      </span>
+                    </div>
+
+                    <div className="flex items-center gap-2 text-gray-600 text-[11px]">
+                      <span>{hRec.previous_user_name || "Initial"}</span>
+                      <ArrowRight className="w-3 h-3 text-gray-400" />
+                      <span className="font-semibold text-emerald-900">{hRec.new_user_name || "None"}</span>
+                    </div>
+
+                    {hRec.reason && (
+                      <p className="text-[11px] text-gray-700 bg-white p-2 rounded border border-gray-100">
+                        Reason: {hRec.reason}
+                      </p>
+                    )}
+
+                    <div className="text-[10px] text-gray-500 pt-1">
+                      Recorded by: {hRec.changed_by_name || "Super Admin"} • Effective:{" "}
+                      {new Date(hRec.effective_date).toLocaleDateString()}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+
+            <div className="flex justify-end pt-2 border-t">
+              <button
+                type="button"
+                onClick={() => setHistoryTarget(null)}
+                className="px-4 py-2 bg-gray-100 hover:bg-gray-200 text-gray-700 rounded-xl text-xs font-semibold"
+              >
+                Close
+              </button>
             </div>
           </div>
         </div>

@@ -190,6 +190,7 @@ func main() {
 
 	notifService := service.NewNotificationService(repo, auditService, emailSender, smsSender, cfg.FrontendBaseURL)
 	cleanupService.SetNotificationService(notifService)
+	leadService.SetNotificationService(notifService)
 
 	// Launch Outbox Background Worker if enabled
 	var outboxWorker *worker.OutboxWorker

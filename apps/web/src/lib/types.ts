@@ -79,6 +79,9 @@ export interface Appointment {
   user_id: string;
   user_display_name?: string;
   user_membership_ref?: string;
+  user_name?: string;
+  user_email?: string;
+  user_phone?: string;
   role_title: string;
   role_type: string;
   jurisdiction_type: string;
@@ -86,7 +89,7 @@ export interface Appointment {
   jurisdiction_name?: string;
   start_date: string;
   end_date?: string;
-  status: "active" | "acting" | "expired" | "revoked";
+  status: "active" | "acting" | "expired" | "revoked" | "suspended" | "replaced";
   approval_reference: string;
   public_contact?: string;
   created_at: string;

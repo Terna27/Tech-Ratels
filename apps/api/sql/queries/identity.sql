@@ -104,6 +104,18 @@ SELECT COUNT(*) FROM users WHERE status = 'active';
 -- name: ListUsers :many
 SELECT * FROM users ORDER BY created_at DESC LIMIT $1 OFFSET $2;
 
+-- name: SearchUsers :many
+SELECT * FROM users
+WHERE (
+    $1 = ''
+    OR display_name ILIKE '%' || $1 || '%'
+    OR email ILIKE '%' || $1 || '%'
+    OR membership_reference ILIKE '%' || $1 || '%'
+    OR phone ILIKE '%' || $1 || '%'
+)
+ORDER BY created_at DESC
+LIMIT $2 OFFSET $3;
+
 -- name: CountPendingVerificationUsers :one
 SELECT COUNT(*) FROM users WHERE status = 'pending_verification' OR is_verified = false;
 

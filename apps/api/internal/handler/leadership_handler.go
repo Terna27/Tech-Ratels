@@ -55,6 +55,14 @@ func (h *LeadershipHandler) CreateAppointment(w http.ResponseWriter, r *http.Req
 			ErrorJSON(w, http.StatusForbidden, "FORBIDDEN", err.Error(), nil)
 			return
 		}
+		if err == service.ErrDuplicateActiveAppointment {
+			ErrorJSON(w, http.StatusConflict, "CONFLICT", err.Error(), nil)
+			return
+		}
+		if err == service.ErrInvalidJurisdiction {
+			ErrorJSON(w, http.StatusBadRequest, "INVALID_JURISDICTION", err.Error(), nil)
+			return
+		}
 		ErrorJSON(w, http.StatusBadRequest, "APPOINTMENT_FAILED", err.Error(), nil)
 		return
 	}
@@ -119,7 +127,7 @@ func (h *LeadershipHandler) UpdateScopeDates(w http.ResponseWriter, r *http.Requ
 
 	updated, err := h.leadService.UpdateAppointmentScopeAndDates(r.Context(), user.ID, actorRole, appointmentID, req)
 	if err != nil {
-		if err == service.ErrSuperAdminRequired {
+		if err == service.ErrSuperAdminRequired || err == service.ErrSelfModificationProhibited {
 			ErrorJSON(w, http.StatusForbidden, "FORBIDDEN", err.Error(), nil)
 			return
 		}
@@ -131,6 +139,10 @@ func (h *LeadershipHandler) UpdateScopeDates(w http.ResponseWriter, r *http.Requ
 }
 
 type RevokeAppointmentPayload struct {
+	Reason string `json:"reason"`
+}
+
+type ReactivateAppointmentPayload struct {
 	Reason string `json:"reason"`
 }
 
@@ -157,7 +169,7 @@ func (h *LeadershipHandler) RevokeAppointment(w http.ResponseWriter, r *http.Req
 
 	err := h.leadService.RevokeAppointment(r.Context(), user.ID, actorRole, appointmentID, payload.Reason)
 	if err != nil {
-		if err == service.ErrSuperAdminRequired {
+		if err == service.ErrSuperAdminRequired || err == service.ErrSelfModificationProhibited {
 			ErrorJSON(w, http.StatusForbidden, "FORBIDDEN", err.Error(), nil)
 			return
 		}
@@ -193,7 +205,7 @@ func (h *LeadershipHandler) SuspendAppointment(w http.ResponseWriter, r *http.Re
 
 	err := h.leadService.SuspendAppointment(r.Context(), user.ID, actorRole, appointmentID, payload.Reason)
 	if err != nil {
-		if err == service.ErrSuperAdminRequired {
+		if err == service.ErrSuperAdminRequired || err == service.ErrSelfModificationProhibited {
 			ErrorJSON(w, http.StatusForbidden, "FORBIDDEN", err.Error(), nil)
 			return
 		}
@@ -204,6 +216,48 @@ func (h *LeadershipHandler) SuspendAppointment(w http.ResponseWriter, r *http.Re
 	JSON(w, http.StatusOK, map[string]string{
 		"message": "Appointment suspended successfully",
 	})
+}
+
+func (h *LeadershipHandler) ReactivateAppointment(w http.ResponseWriter, r *http.Request) {
+	user := GetCurrentUser(r.Context())
+	if user == nil {
+		ErrorJSON(w, http.StatusUnauthorized, "UNAUTHORIZED", "Authentication required", nil)
+		return
+	}
+
+	appointmentID := chi.URLParam(r, "id")
+	if appointmentID == "" {
+		ErrorJSON(w, http.StatusBadRequest, "INVALID_ID", "Appointment ID required", nil)
+		return
+	}
+
+	actorRole := GetUserEffectiveRole(r.Context())
+
+	var payload ReactivateAppointmentPayload
+	_ = json.NewDecoder(r.Body).Decode(&payload)
+	if payload.Reason == "" {
+		payload.Reason = "Reactivated by administrator"
+	}
+
+	app, err := h.leadService.ReactivateAppointment(r.Context(), user.ID, actorRole, appointmentID, payload.Reason)
+	if err != nil {
+		if err == service.ErrSuperAdminRequired || err == service.ErrSelfModificationProhibited {
+			ErrorJSON(w, http.StatusForbidden, "FORBIDDEN", err.Error(), nil)
+			return
+		}
+		if err == service.ErrDuplicateActiveAppointment {
+			ErrorJSON(w, http.StatusConflict, "CONFLICT", err.Error(), nil)
+			return
+		}
+		if err == service.ErrInvalidStatusTransition {
+			ErrorJSON(w, http.StatusBadRequest, "INVALID_TRANSITION", err.Error(), nil)
+			return
+		}
+		ErrorJSON(w, http.StatusBadRequest, "REACTIVATE_FAILED", err.Error(), nil)
+		return
+	}
+
+	JSON(w, http.StatusOK, app)
 }
 
 func (h *LeadershipHandler) ListAppointmentHistory(w http.ResponseWriter, r *http.Request) {

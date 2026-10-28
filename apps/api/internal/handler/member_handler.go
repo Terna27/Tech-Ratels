@@ -77,7 +77,18 @@ func (h *MemberHandler) ListMembers(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	members, err := h.authService.ListMembers(r.Context(), page, limit)
+	search := r.URL.Query().Get("search")
+	if search == "" {
+		search = r.URL.Query().Get("q")
+	}
+
+	var members []service.UserSummary
+	var err error
+	if search != "" {
+		members, err = h.authService.SearchMembers(r.Context(), search, page, limit)
+	} else {
+		members, err = h.authService.ListMembers(r.Context(), page, limit)
+	}
 	if err != nil {
 		ErrorJSON(w, http.StatusInternalServerError, "INTERNAL_ERROR", err.Error(), nil)
 		return
