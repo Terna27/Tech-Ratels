@@ -43,7 +43,7 @@ export default function MemberDashboardPage() {
         try {
           const [events, myBadges, myClaims, myRegs] = await Promise.all([
             apiRequest<EventInstance[]>("/activities/events?status=published&limit=1"),
-            apiRequest<BadgeAward[]>("/participations/badges/my"),
+            apiRequest<BadgeAward[]>("/participations/my-badges"),
             apiRequest<ParticipationClaim[]>("/participations/my"),
             apiRequest<EventRegistration[]>("/activities/my-registrations"),
           ]);
@@ -86,6 +86,7 @@ export default function MemberDashboardPage() {
           </div>
           <h1 className="text-2xl sm:text-3xl font-extrabold">{user.display_name}</h1>
           <p className="text-xs text-emerald-200">
+            <Link href="/member/card" className="underline block mb-2">View digital membership card</Link>
             Membership Reference: <strong className="font-mono text-white">{user.membership_reference}</strong>
           </p>
         </div>

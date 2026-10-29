@@ -4,16 +4,19 @@ import (
 	"encoding/json"
 	"net/http"
 	"strconv"
+	"time"
 
+	"ratels-api/internal/security"
 	"ratels-api/internal/service"
 )
 
 type MemberHandler struct {
-	authService *service.AuthService
+	authService         *service.AuthService
+	verificationLimiter *security.DownloadRateLimiter
 }
 
 func NewMemberHandler(authService *service.AuthService) *MemberHandler {
-	return &MemberHandler{authService: authService}
+	return &MemberHandler{authService: authService, verificationLimiter: security.NewDownloadRateLimiter(60, time.Minute)}
 }
 
 func (h *MemberHandler) GetMe(w http.ResponseWriter, r *http.Request) {
@@ -32,14 +35,6 @@ func (h *MemberHandler) GetMe(w http.ResponseWriter, r *http.Request) {
 	JSON(w, http.StatusOK, summary)
 }
 
-type UpdateProfilePayload struct {
-	HomeStateID *string `json:"home_state_id"`
-	HomeLGAID   *string `json:"home_lga_id"`
-	Address     *string `json:"address"`
-	Bio         *string `json:"bio"`
-	AvatarURL   *string `json:"avatar_url"`
-}
-
 func (h *MemberHandler) UpdateProfile(w http.ResponseWriter, r *http.Request) {
 	user := GetCurrentUser(r.Context())
 	if user == nil {
@@ -47,15 +42,17 @@ func (h *MemberHandler) UpdateProfile(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	var req UpdateProfilePayload
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+	var req service.ProfileUpdate
+	decoder := json.NewDecoder(http.MaxBytesReader(w, r.Body, 16384))
+	decoder.DisallowUnknownFields()
+	if err := decoder.Decode(&req); err != nil {
 		ErrorJSON(w, http.StatusBadRequest, "INVALID_REQUEST", "Invalid request payload", nil)
 		return
 	}
 
-	profile, err := h.authService.UpdateProfile(r.Context(), user.ID, req.HomeStateID, req.HomeLGAID, req.Address, req.Bio, req.AvatarURL)
+	profile, err := h.authService.EditMemberProfile(r.Context(), user.ID, req)
 	if err != nil {
-		ErrorJSON(w, http.StatusInternalServerError, "UPDATE_FAILED", err.Error(), nil)
+		ErrorJSON(w, http.StatusBadRequest, "UPDATE_FAILED", err.Error(), nil)
 		return
 	}
 

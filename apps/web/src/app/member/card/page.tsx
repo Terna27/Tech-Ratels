@@ -1,0 +1,18 @@
+"use client";
+import {useEffect,useState} from "react";
+import Link from "next/link";
+import {createPortal} from "react-dom";
+import {useAuth} from "@/lib/auth-context";
+import {apiRequest} from "@/lib/api";
+import {MembershipCard,membershipLabel} from "@/lib/membership";
+export default function MemberCardPage(){
+ const {user,isLoading}=useAuth();const [card,setCard]=useState<MembershipCard|null>(null),[error,setError]=useState("");
+ useEffect(()=>{if(user)apiRequest<MembershipCard>("/members/me/card").then(setCard).catch(e=>setError(e.message));},[user]);
+ if(isLoading)return <p className="p-6">Loading membership…</p>;
+ if(!user)return <main className="p-6"><Link href="/login?redirect=/member/card">Sign in to view your membership card</Link></main>;
+ return <main className="max-w-3xl mx-auto p-4 sm:p-8 space-y-6"><div className="card-controls"><Link className="underline text-emerald-800" href="/member">Member dashboard</Link><h1 className="text-3xl font-bold my-4">Digital membership card</h1><p>Keep your card private. Anyone with its QR link can check your name, reference and current membership status. Printed cards show a snapshot; always scan for current status.</p></div>{error&&<p role="alert">{error}</p>}
+ {card&&<><CardView card={card}/><div className="card-controls flex flex-wrap gap-3"><button className="bg-emerald-800 text-white rounded-lg px-5 py-3" onClick={()=>window.print()}>Print / save as PDF</button><a href="/api/v1/members/me/card/download" download className="border rounded-lg px-5 py-3">Download card</a><Link className="underline p-3" href="/member/profile">Edit profile and photo</Link></div></>}
+ {card&&createPortal(<div id="membership-print"><CardView card={card}/></div>,document.body)}
+ <style jsx global>{`#membership-print{display:none}@media print {body > :not(#membership-print){display:none!important} body{min-height:0!important;background:white} #membership-print{display:block!important;padding:24px} #membership-print .membership-card{max-width:640px;margin:auto;box-shadow:none;break-inside:avoid} .card-controls{display:none!important} }`}</style></main>;
+}
+function CardView({card}:{card:MembershipCard}){return <article aria-label="Digital membership card" className="membership-card border-2 border-emerald-800 rounded-2xl bg-white p-5 sm:p-8 shadow-sm space-y-5"><header className="border-b border-emerald-100 pb-4"><p className="text-xl font-extrabold text-emerald-900">NIGERIAN RATELS</p><p className="text-sm text-gray-600">Digital membership card</p></header><div className="flex flex-col sm:flex-row gap-5 items-start"><div className="flex-1 min-w-0">{card.photo_url?<img src={card.photo_url} alt="Member photo" referrerPolicy="no-referrer" className="w-24 h-24 rounded-xl object-cover border"/>:<div className="w-24 h-24 rounded-xl bg-emerald-100 grid place-items-center text-3xl" aria-label="Photo not set">{card.display_name.charAt(0)}</div>}<h2 className="text-2xl font-bold mt-4 break-words">{card.display_name}</h2><p className="font-mono break-all text-sm my-2">{card.membership_reference}</p><p className={card.status==="active"?"text-emerald-800 font-bold":"text-red-800 font-bold"}>Status: {membershipLabel(card.status)}</p></div><div className="text-center self-center sm:self-start"><img src={card.qr_image_data} width={160} height={160} alt="Scan to verify current membership"/><Link className="underline text-emerald-800 text-sm" href={card.verification_path}>Verify current status</Link></div></div><p className="text-xs text-gray-600">Membership does not grant administrative or appointment authority.</p></article>;}

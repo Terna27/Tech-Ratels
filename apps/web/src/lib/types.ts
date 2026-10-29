@@ -4,7 +4,7 @@ export interface User {
   phone?: string;
   display_name: string;
   membership_reference: string;
-  status: "pending_verification" | "active" | "suspended" | "closed";
+  status: "pending_verification" | "active" | "inactive" | "suspended" | "revoked" | "closed";
   primary_role: "member" | "lga_representative" | "state_coordinator" | "zonal_coordinator" | "national_admin" | "super_admin";
   is_verified: boolean;
   created_at: string;

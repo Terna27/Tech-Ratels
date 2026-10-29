@@ -352,11 +352,7 @@ func (s *AuthService) VerifyContact(ctx context.Context, req VerifyContactReques
 		if _, err := q.MarkVerificationUsed(ctx, record.ID); err != nil {
 			return err
 		}
-		if _, err := q.UpdateUserStatus(ctx, db.UpdateUserStatusParams{
-			ID:         req.UserID,
-			Status:     "active",
-			IsVerified: true,
-		}); err != nil {
+		if err := q.ActivateVerifiedMember(ctx, req.UserID); err != nil {
 			return err
 		}
 		return nil
@@ -412,11 +408,7 @@ func (s *AuthService) VerifyEmailToken(ctx context.Context, rawToken string) (*V
 			return err
 		}
 		// Mark user verified and active
-		if _, err := q.UpdateUserStatus(ctx, db.UpdateUserStatusParams{
-			ID:         record.UserID,
-			Status:     "active",
-			IsVerified: true,
-		}); err != nil {
+		if err := q.ActivateVerifiedMember(ctx, record.UserID); err != nil {
 			return err
 		}
 		return nil
@@ -624,36 +616,19 @@ func (s *AuthService) Login(ctx context.Context, req LoginRequest, ip, userAgent
 		return nil, ErrInvalidCredentials
 	}
 
-	// Super Admin always passes verification requirement
-	if user.PrimaryRole == "super_admin" {
-		if !user.IsVerified || user.Status != "active" {
-			// Auto-heal super_admin in DB
-			_ = s.repo.WithTx(ctx, func(q *db.Queries) error {
-				_, uErr := q.UpdateUserStatus(ctx, db.UpdateUserStatusParams{
-					ID:         user.ID,
-					Status:     "active",
-					IsVerified: true,
-				})
-				return uErr
-			})
-			user.Status = "active"
-			user.IsVerified = true
+	// Contact verification and legacy account repair must never lift a restriction.
+	if user.Status != "active" && user.Status != "pending_verification" {
+		return nil, ErrAccountInactive
+	}
+	if (user.PrimaryRole == "super_admin" && (!user.IsVerified || user.Status != "active")) || (user.Status == "active" && !user.IsVerified) {
+		if err := s.repo.WithTx(ctx, func(q *db.Queries) error { return q.ActivateVerifiedMember(ctx, user.ID) }); err != nil {
+			return nil, ErrAccountInactive
 		}
-	} else if user.Status == "active" && !user.IsVerified {
-		// Existing active user from pre-verification era: auto-heal is_verified so they are not locked out
-		_ = s.repo.WithTx(ctx, func(q *db.Queries) error {
-			_, uErr := q.UpdateUserStatus(ctx, db.UpdateUserStatusParams{
-				ID:         user.ID,
-				Status:     "active",
-				IsVerified: true,
-			})
-			return uErr
-		})
+		user.Status = "active"
 		user.IsVerified = true
 	} else if user.Status == "pending_verification" || !user.IsVerified {
 		return nil, ErrUserNotVerified
 	}
-
 	if user.Status != "active" {
 		return nil, ErrAccountInactive
 	}
@@ -749,18 +724,7 @@ func (s *AuthService) GetMe(ctx context.Context, userID string) (*UserSummary, e
 }
 
 func (s *AuthService) UpdateProfile(ctx context.Context, userID string, homeStateID, homeLGAID, address, bio, avatarURL *string) (*db.MemberProfile, error) {
-	p, err := s.repo.Queries().UpdateMemberProfile(ctx, db.UpdateMemberProfileParams{
-		UserID:      userID,
-		HomeStateID: Text(homeStateID),
-		HomeLgaID:   Text(homeLGAID),
-		Address:     Text(address),
-		Bio:         Text(bio),
-		AvatarUrl:   Text(avatarURL),
-	})
-	if err != nil {
-		return nil, err
-	}
-	return &p, nil
+	return s.EditMemberProfile(ctx, userID, ProfileUpdate{HomeStateID: homeStateID, HomeLGAID: homeLGAID, Address: address, Bio: bio, AvatarURL: avatarURL})
 }
 
 // ListMembers returns a paginated list of members for administrative overview, appointments, and authorizations.

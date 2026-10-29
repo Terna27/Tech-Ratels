@@ -84,6 +84,10 @@ func NewRouter(p RouterParams) http.Handler {
 		// Members
 		api.Route("/members", func(members chi.Router) {
 			members.With(RequireAuth).Get("/me", p.MemberHandler.GetMe)
+			members.Get("/verify/{token}", p.MemberHandler.VerifyCard)
+			members.With(RequireAuth).Get("/me/card", p.MemberHandler.Card)
+			members.With(RequireAuth).Get("/me/card/{format:download}", p.MemberHandler.Card)
+			members.With(RequireAuth).Patch("/{id}/status", p.MemberHandler.MembershipStatus)
 			members.With(RequireAuth).Put("/me/profile", p.MemberHandler.UpdateProfile)
 			members.With(RequireRole("national_admin", "super_admin")).Get("/", p.MemberHandler.ListMembers)
 		})

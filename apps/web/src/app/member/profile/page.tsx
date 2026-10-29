@@ -5,6 +5,7 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { User, MapPin, Shield, ArrowLeft, Check, AlertCircle } from "lucide-react";
 import { useAuth } from "@/lib/auth-context";
+import { profilePayload } from "@/lib/membership";
 import { apiRequest } from "@/lib/api";
 import { State, LGA } from "@/lib/types";
 import { Alert } from "@/components/ui/Alert";
@@ -23,6 +24,7 @@ export default function MemberProfilePage() {
   const [homeLgaId, setHomeLgaId] = useState("");
   const [address, setAddress] = useState("");
   const [bio, setBio] = useState("");
+  const [photo, setPhoto] = useState("");
   const [isPublicBadges, setIsPublicBadges] = useState(true);
 
   const [saving, setSaving] = useState(false);
@@ -41,6 +43,7 @@ export default function MemberProfilePage() {
         setHomeLgaId(user.profile.home_lga_id || "");
         setAddress(user.profile.address || "");
         setBio(user.profile.bio || "");
+        setPhoto(user.profile.avatar_url || "");
         setIsPublicBadges(user.profile.is_public_badges ?? true);
       }
     }
@@ -80,16 +83,9 @@ export default function MemberProfilePage() {
     setFeedback(null);
 
     try {
-      await apiRequest("/members/me", {
+      await apiRequest("/members/me/profile", {
         method: "PUT",
-        body: JSON.stringify({
-          display_name: displayName,
-          home_state_id: homeStateId || null,
-          home_lga_id: homeLgaId || null,
-          address: address || null,
-          bio: bio || null,
-          is_public_badges: isPublicBadges,
-        }),
+        body: JSON.stringify(profilePayload(displayName, homeStateId, homeLgaId, address, bio, photo, isPublicBadges)),
       });
 
       await refreshUser();
@@ -113,6 +109,7 @@ export default function MemberProfilePage() {
         <ArrowLeft className="w-4 h-4 mr-1" />
         Back to Dashboard
       </Link>
+      <Link href="/member/card" className="block underline text-emerald-800">View membership card</Link>
 
       <div className="space-y-2">
         <h1 className="text-2xl sm:text-3xl font-extrabold text-gray-900">Member Profile</h1>
@@ -153,6 +150,8 @@ export default function MemberProfilePage() {
           <input
             type="text"
             required
+            aria-label="Display name"
+            maxLength={100}
             value={displayName}
             onChange={(e) => setDisplayName(e.target.value)}
             className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:ring-emerald-700 focus:border-emerald-700"
@@ -219,6 +218,10 @@ export default function MemberProfilePage() {
           />
         </div>
 
+        <label className="block text-sm">Profile photo URL (HTTPS)
+          <input aria-label="Profile photo URL" type="url" maxLength={255} value={photo} onChange={e=>setPhoto(e.target.value)} className="w-full border rounded-lg p-3 mt-1" placeholder="https://…"/>
+          <span className="text-xs text-gray-600">Use a photo URL you control. Your photo appears on your private card; public verification does not publish it.</span>
+        </label>
         <div className="pt-2">
           <label className="flex items-center gap-2 cursor-pointer text-xs text-gray-700">
             <input
