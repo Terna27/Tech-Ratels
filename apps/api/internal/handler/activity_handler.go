@@ -34,6 +34,20 @@ func (h *ActivityHandler) ListEvents(w http.ResponseWriter, r *http.Request) {
 		pState = &stateFilter
 	}
 
+	if !publishedOnly {
+		user := GetCurrentUser(r.Context())
+		if user == nil {
+			ErrorJSON(w, 401, "UNAUTHORIZED", "Authentication required for unpublished activities", nil)
+			return
+		}
+		events, err := h.cleanupService.ListOperationalEvents(r.Context(), user, stateFilter)
+		if err != nil {
+			coordinatorError(w, err)
+			return
+		}
+		JSON(w, 200, events)
+		return
+	}
 	events, err := h.cleanupService.ListEvents(r.Context(), pState, publishedOnly)
 	if err != nil {
 		ErrorJSON(w, http.StatusInternalServerError, "INTERNAL_ERROR", err.Error(), nil)
@@ -53,6 +67,12 @@ func (h *ActivityHandler) GetEvent(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		ErrorJSON(w, http.StatusNotFound, "NOT_FOUND", err.Error(), nil)
 		return
+	}
+	if event.Status != "published" {
+		if err := h.cleanupService.AuthorizeEventRead(r.Context(), GetCurrentUser(r.Context()), event.ID); err != nil {
+			ErrorJSON(w, 404, "NOT_FOUND", "Event not found", nil)
+			return
+		}
 	}
 	JSON(w, http.StatusOK, event)
 }

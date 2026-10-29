@@ -64,7 +64,7 @@ export default function AdminReportsDashboardPage() {
   const router = useRouter();
   const { user, isCoordinator, isSuperAdmin, isAdmin, isLoading: authLoading } = useAuth();
   const isNationalAdmin = Boolean(
-    user && (user.primary_role === "national_admin" || user.primary_role === "super_admin" || isSuperAdmin)
+    user && (user.primary_role === "national_admin" || user.primary_role === "super_admin" || isSuperAdmin || isAdmin)
   );
 
   // Active navigation tab
@@ -165,6 +165,7 @@ export default function AdminReportsDashboardPage() {
 
   // Fetch Dashboard Stats
   const fetchStats = async () => {
+    if (!isNationalAdmin) {setStatsLoading(false);return;}
     setStatsLoading(true);
     setStatsError(null);
     try {
@@ -276,6 +277,7 @@ export default function AdminReportsDashboardPage() {
   // Initial load & Tab switching
   useEffect(() => {
     if (!user || !isCoordinator) return;
+    if (!isNationalAdmin && activeTab !== "snapshots") {setActiveTab("snapshots");return;}
     if (activeTab === "overview") {
       fetchStats();
     } else if (activeTab === "snapshots") {
@@ -303,6 +305,7 @@ export default function AdminReportsDashboardPage() {
     auditOutcomeFilter,
     user,
     isCoordinator,
+    isNationalAdmin,
   ]);
 
   // Set default historical periods when opening manual generation modal
@@ -547,6 +550,7 @@ export default function AdminReportsDashboardPage() {
             <ShieldCheck className="w-4 h-4 text-emerald-700" />
             <span>Governance & Compliance</span>
           </div>
+          <Link href="/coordinator" className="block text-emerald-700 underline">Coordinator operational reports</Link>
           <h1 className="text-2xl sm:text-3xl font-bold text-gray-900 tracking-tight mt-1">
             Reports & Transparency Administration
           </h1>
@@ -587,7 +591,7 @@ export default function AdminReportsDashboardPage() {
         aria-label="Reports Administration Subnavigation"
         className="flex border-b border-gray-200 space-x-1 overflow-x-auto scrollbar-none"
       >
-        <button
+        {isNationalAdmin && (<button
           onClick={() => setActiveTab("overview")}
           className={`py-3 px-4 text-sm font-medium border-b-2 whitespace-nowrap transition-colors flex items-center gap-2 ${
             activeTab === "overview"
@@ -598,7 +602,7 @@ export default function AdminReportsDashboardPage() {
         >
           <BarChart3 className="w-4 h-4" />
           <span>Overview</span>
-        </button>
+        </button>)}
 
         <button
           onClick={() => setActiveTab("snapshots")}
@@ -618,7 +622,7 @@ export default function AdminReportsDashboardPage() {
           )}
         </button>
 
-        <button
+        {isNationalAdmin && (<button
           onClick={() => setActiveTab("scheduler")}
           className={`py-3 px-4 text-sm font-medium border-b-2 whitespace-nowrap transition-colors flex items-center gap-2 ${
             activeTab === "scheduler"
@@ -629,9 +633,9 @@ export default function AdminReportsDashboardPage() {
         >
           <Clock className="w-4 h-4" />
           <span>Scheduled Jobs</span>
-        </button>
+        </button>)}
 
-        <button
+        {isNationalAdmin && (<button
           onClick={() => setActiveTab("exports")}
           className={`py-3 px-4 text-sm font-medium border-b-2 whitespace-nowrap transition-colors flex items-center gap-2 ${
             activeTab === "exports"
@@ -642,9 +646,9 @@ export default function AdminReportsDashboardPage() {
         >
           <Download className="w-4 h-4" />
           <span>Exports & R2 Storage</span>
-        </button>
+        </button>)}
 
-        <button
+        {isNationalAdmin && (<button
           onClick={() => setActiveTab("audit")}
           className={`py-3 px-4 text-sm font-medium border-b-2 whitespace-nowrap transition-colors flex items-center gap-2 ${
             activeTab === "audit"
@@ -655,7 +659,7 @@ export default function AdminReportsDashboardPage() {
         >
           <History className="w-4 h-4" />
           <span>Audit History</span>
-        </button>
+        </button>)}
       </nav>
 
       {/* =========================================================================

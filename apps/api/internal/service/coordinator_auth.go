@@ -10,14 +10,14 @@ import (
 )
 
 var (
-	ErrCoordinatorUnauthorized   = errors.New("COORDINATOR_UNAUTHORIZED: active approved coordinator appointment required")
+	ErrCoordinatorUnauthorized    = errors.New("COORDINATOR_UNAUTHORIZED: active approved coordinator appointment required")
 	ErrSelfVerificationNotAllowed = errors.New("ANTI_SELF_VERIFICATION: coordinators cannot verify their own attendance")
-	ErrCheckinWindowClosed       = errors.New("CHECKIN_WINDOW_CLOSED: attendance verification is only permitted during or immediately following the event")
-	ErrAlreadyVerified           = errors.New("ALREADY_VERIFIED: member attendance has already been verified for this event")
-	ErrInvalidCheckinCode        = errors.New("INVALID_CHECKIN_CODE: no matching registration found for this event and code")
-	ErrEventCancelled            = errors.New("EVENT_CANCELLED: event has been cancelled")
-	ErrClaimAlreadyReversed      = errors.New("CLAIM_ALREADY_REVERSED: participation claim is already reversed")
-	ErrClaimNotApproved          = errors.New("CLAIM_NOT_APPROVED: only approved or verified claims can be reversed")
+	ErrCheckinWindowClosed        = errors.New("CHECKIN_WINDOW_CLOSED: attendance verification is only permitted during or immediately following the event")
+	ErrAlreadyVerified            = errors.New("ALREADY_VERIFIED: member attendance has already been verified for this event")
+	ErrInvalidCheckinCode         = errors.New("INVALID_CHECKIN_CODE: no matching registration found for this event and code")
+	ErrEventCancelled             = errors.New("EVENT_CANCELLED: event has been cancelled")
+	ErrClaimAlreadyReversed       = errors.New("CLAIM_ALREADY_REVERSED: participation claim is already reversed")
+	ErrClaimNotApproved           = errors.New("CLAIM_NOT_APPROVED: only approved or verified claims can be reversed")
 )
 
 // AuthorizeCoordinatorForJurisdiction performs database-backed authorization verification.
@@ -25,9 +25,19 @@ var (
 // that has reached its effective start date and has not expired or been suspended/revoked/replaced,
 // or if they hold nationwide Super Admin authority.
 func AuthorizeCoordinatorForJurisdiction(ctx context.Context, repo *repository.Repository, userID string, stateID, lgaID string) (*db.Appointment, error) {
+
+	if stateID != "" && lgaID != "" {
+		lga, err := repo.Queries().GetLGAByID(ctx, lgaID)
+		if err != nil || lga.StateID != stateID {
+			return nil, ErrScopeUnauthorized
+		}
+	}
 	// 1. Check if user is Super Admin in users table
 	user, err := repo.Queries().GetUserByID(ctx, userID)
-	if err == nil && user.PrimaryRole == "super_admin" {
+	if err != nil || user.Status != "active" {
+		return nil, ErrCoordinatorUnauthorized
+	}
+	if err == nil && user.Status == "active" && user.PrimaryRole == "super_admin" {
 		// Super Admin has nationwide authority
 		return &db.Appointment{
 			ID:               "super_admin_root",
@@ -65,6 +75,9 @@ func AuthorizeCoordinatorForJurisdiction(ctx context.Context, repo *repository.R
 	for _, app := range apps {
 		switch app.RoleType {
 		case "super_admin", "national_admin":
+			if app.JurisdictionType != "national" {
+				continue
+			}
 			// Nationwide coverage
 			return &db.Appointment{
 				ID:               app.ID,

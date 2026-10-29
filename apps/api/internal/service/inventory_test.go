@@ -40,9 +40,10 @@ func TestInventoryService_CatalogueAndLocations(t *testing.T) {
 	env := setupTestEnv(t)
 	defer env.Pool.Close()
 	ctx := context.Background()
+	admin := createRegisteredUser(t, env, "catalogue_admin", "super_admin")
 
 	// 1. Create inventory items
-	item1, err := env.InventoryService.CreateItem(ctx, nil, service.CreateItemRequest{
+	item1, err := env.InventoryService.CreateItem(ctx, admin, service.CreateItemRequest{
 		SKU:                  fmt.Sprintf("TEST-ITM-%d", time.Now().UnixNano()),
 		Name:                 "Industrial Waste Cleanup Rake",
 		Description:          strPtr("Reinforced steel rake for outdoor cleanup"),
@@ -68,7 +69,7 @@ func TestInventoryService_CatalogueAndLocations(t *testing.T) {
 	}
 
 	// 3. Create storage locations (National and State warehouses)
-	wh1, err := env.InventoryService.CreateLocation(ctx, nil, service.CreateLocationRequest{
+	wh1, err := env.InventoryService.CreateLocation(ctx, admin, service.CreateLocationRequest{
 		Code:         fmt.Sprintf("WH-NAT-%d", time.Now().UnixNano()),
 		Name:         "Abuja Central Distribution Hub",
 		LocationType: "national",
@@ -78,7 +79,7 @@ func TestInventoryService_CatalogueAndLocations(t *testing.T) {
 		t.Fatalf("Failed to create national warehouse: %v", err)
 	}
 
-	wh2, err := env.InventoryService.CreateLocation(ctx, nil, service.CreateLocationRequest{
+	wh2, err := env.InventoryService.CreateLocation(ctx, admin, service.CreateLocationRequest{
 		Code:         fmt.Sprintf("WH-ST-LAG-%d", time.Now().UnixNano()),
 		Name:         "Lagos State Sanitation Depot",
 		LocationType: "state",

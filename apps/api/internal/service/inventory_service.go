@@ -88,13 +88,13 @@ type UpdateLocationRequest struct {
 }
 
 type ReceiveStockRequest struct {
-	LocationID   string    `json:"location_id"`
-	ItemID       string    `json:"item_id"`
-	Quantity     int64     `json:"quantity"`
-	BatchNumber  string    `json:"batch_number"`
+	LocationID   string     `json:"location_id"`
+	ItemID       string     `json:"item_id"`
+	Quantity     int64      `json:"quantity"`
+	BatchNumber  string     `json:"batch_number"`
 	ExpiryDate   *time.Time `json:"expiry_date"`
-	MovementType string    `json:"movement_type"` // initial_receipt, donation_in_kind, return
-	Notes        *string   `json:"notes"`
+	MovementType string     `json:"movement_type"` // initial_receipt, donation_in_kind, return
+	Notes        *string    `json:"notes"`
 }
 
 type MaterialRequestItemInput struct {
@@ -179,6 +179,10 @@ type InventorySummary struct {
 // -------------------------------------------------------------
 
 func (s *InventoryService) CreateItem(ctx context.Context, actor *db.User, req CreateItemRequest) (*db.InventoryItem, error) {
+
+	if err := s.authorizeCatalogue(ctx, actor); err != nil {
+		return nil, err
+	}
 	uom := req.UnitOfMeasure
 	if uom == "" {
 		uom = "pcs"
@@ -228,7 +232,7 @@ func (s *InventoryService) ListItems(ctx context.Context, category *string, isAc
 	if category != nil {
 		catText = *category
 	}
-	var activeVal pgtype.Bool
+	activeVal := pgtype.Bool{Bool: true, Valid: true}
 	if isActive != nil {
 		activeVal = pgtype.Bool{Bool: *isActive, Valid: true}
 	}
@@ -240,6 +244,10 @@ func (s *InventoryService) ListItems(ctx context.Context, category *string, isAc
 }
 
 func (s *InventoryService) UpdateItem(ctx context.Context, actor *db.User, id string, req UpdateItemRequest) (*db.InventoryItem, error) {
+
+	if err := s.authorizeCatalogue(ctx, actor); err != nil {
+		return nil, err
+	}
 	uom := req.UnitOfMeasure
 	if uom == "" {
 		uom = "pcs"
@@ -280,6 +288,37 @@ func (s *InventoryService) UpdateItem(ctx context.Context, actor *db.User, id st
 // -------------------------------------------------------------
 
 func (s *InventoryService) CreateLocation(ctx context.Context, actor *db.User, req CreateLocationRequest) (*db.GetStorageLocationByIDRow, error) {
+
+	if err := s.authorizeCatalogue(ctx, actor); err != nil {
+		return nil, err
+	}
+	// Validate supplied geographic parents independently of an actor's privilege.
+	targetState := valueOrEmpty(req.StateID)
+	if valueOrEmpty(req.LGAID) != "" {
+		lga, e := s.repo.Queries().GetLGAByID(ctx, *req.LGAID)
+		if e != nil || (targetState != "" && lga.StateID != targetState) {
+			return nil, ErrInvalidJurisdiction
+		}
+		targetState = lga.StateID
+	}
+	if targetState != "" {
+		state, e := s.repo.Queries().GetStateByID(ctx, targetState)
+		if e != nil || (valueOrEmpty(req.ZoneID) != "" && *req.ZoneID != state.ZoneID) {
+			return nil, ErrInvalidJurisdiction
+		}
+	} else if valueOrEmpty(req.ZoneID) != "" {
+		if _, e := s.repo.Queries().GetZoneByID(ctx, *req.ZoneID); e != nil {
+			return nil, ErrInvalidJurisdiction
+		}
+	}
+
+	scope, err := operationalScopeForActor(ctx, s.repo, actor)
+	if err != nil {
+		return nil, err
+	}
+	if !scope.Covers(valueOrEmpty(req.StateID), valueOrEmpty(req.LGAID), valueOrEmpty(req.ZoneID)) {
+		return nil, ErrJurisdictionMismatch
+	}
 	locID := security.GenerateUUID()
 	loc, err := s.repo.Queries().CreateStorageLocation(ctx, db.CreateStorageLocationParams{
 		ID:              locID,
@@ -308,6 +347,12 @@ func (s *InventoryService) CreateLocation(ctx context.Context, actor *db.User, r
 }
 
 func (s *InventoryService) GetLocation(ctx context.Context, id string) (*db.GetStorageLocationByIDRow, error) {
+
+	if operationalActor(ctx) != nil {
+		if err := s.authorizeLocation(ctx, operationalActor(ctx), id); err != nil {
+			return nil, err
+		}
+	}
 	loc, err := s.repo.Queries().GetStorageLocationByID(ctx, id)
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
@@ -332,18 +377,23 @@ func (s *InventoryService) ListLocations(ctx context.Context, locType, zoneID, s
 	if lgaID != nil {
 		lid = *lgaID
 	}
-	var activeVal pgtype.Bool
+	activeVal := pgtype.Bool{Bool: true, Valid: true}
 	if isActive != nil {
 		activeVal = pgtype.Bool{Bool: *isActive, Valid: true}
 	}
 
-	return s.repo.Queries().ListStorageLocations(ctx, db.ListStorageLocationsParams{
+	rows, err := s.repo.Queries().ListStorageLocations(ctx, db.ListStorageLocationsParams{
 		Column1: lt,
 		Column2: zid,
 		Column3: sid,
 		Column4: lid,
 		Column5: activeVal.Bool,
 	})
+	if err != nil {
+		return nil, err
+	}
+	return filterInventoryRows(ctx, s.repo, rows, func(r db.ListStorageLocationsRow) []string { return []string{r.ID} }, nil)
+
 }
 
 // -------------------------------------------------------------
@@ -351,6 +401,10 @@ func (s *InventoryService) ListLocations(ctx context.Context, locType, zoneID, s
 // -------------------------------------------------------------
 
 func (s *InventoryService) ReceiveStock(ctx context.Context, actor *db.User, req ReceiveStockRequest) (*db.StockBalance, error) {
+
+	if err := s.authorizeLocation(ctx, actor, req.LocationID); err != nil {
+		return nil, err
+	}
 	if req.Quantity <= 0 {
 		return nil, errors.New("received quantity must be greater than zero")
 	}
@@ -467,15 +521,24 @@ func (s *InventoryService) ListStockBalances(ctx context.Context, locationID, it
 	if category != nil {
 		cat = *category
 	}
-	return s.repo.Queries().ListAllStockBalances(ctx, db.ListAllStockBalancesParams{
+	rows, err := s.repo.Queries().ListAllStockBalances(ctx, db.ListAllStockBalancesParams{
 		Column1: loc,
 		Column2: itm,
 		Column3: cat,
 	})
+	if err != nil {
+		return nil, err
+	}
+	return filterInventoryRows(ctx, s.repo, rows, func(r db.ListAllStockBalancesRow) []string { return []string{r.LocationID} }, nil)
+
 }
 
 func (s *InventoryService) ListLowStockAlerts(ctx context.Context) ([]db.ListLowStockAlertsRow, error) {
-	return s.repo.Queries().ListLowStockAlerts(ctx)
+	rows, err := s.repo.Queries().ListLowStockAlerts(ctx)
+	if err != nil {
+		return nil, err
+	}
+	return filterInventoryRows(ctx, s.repo, rows, func(r db.ListLowStockAlertsRow) []string { return []string{r.LocationID} }, nil)
 }
 
 // -------------------------------------------------------------
@@ -563,6 +626,12 @@ func (s *InventoryService) CreateMaterialRequest(ctx context.Context, requester 
 }
 
 func (s *InventoryService) GetMaterialRequest(ctx context.Context, id string) (*db.GetMaterialRequestByIDRow, error) {
+
+	if operationalActor(ctx) != nil {
+		if err := s.authorizeRequestRead(ctx, id); err != nil {
+			return nil, err
+		}
+	}
 	req, err := s.repo.Queries().GetMaterialRequestByID(ctx, id)
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
@@ -588,15 +657,26 @@ func (s *InventoryService) ListMaterialRequests(ctx context.Context, status, des
 		jur = *jurisdictionType
 	}
 
-	return s.repo.Queries().ListMaterialRequests(ctx, db.ListMaterialRequestsParams{
+	rows, err := s.repo.Queries().ListMaterialRequests(ctx, db.ListMaterialRequestsParams{
 		Column1: st,
 		Column2: dest,
 		Column3: usr,
 		Column4: jur,
 	})
+	if err != nil {
+		return nil, err
+	}
+	return filterInventoryRows(ctx, s.repo, rows, func(r db.ListMaterialRequestsRow) []string { return []string{r.DestinationLocationID} }, func(r db.ListMaterialRequestsRow) string { return r.RequestingUserID })
+
 }
 
 func (s *InventoryService) ListMaterialRequestItems(ctx context.Context, requestID string) ([]db.ListMaterialRequestItemsByRequestRow, error) {
+
+	if operationalActor(ctx) != nil {
+		if err := s.authorizeRequestRead(ctx, requestID); err != nil {
+			return nil, err
+		}
+	}
 	return s.repo.Queries().ListMaterialRequestItemsByRequest(ctx, requestID)
 }
 
@@ -620,7 +700,7 @@ func (s *InventoryService) ReviewMaterialRequest(ctx context.Context, reviewer *
 	}
 
 	// 2. Jurisdiction authority check
-	if !s.hasJurisdictionAuthority(reviewer, appointments, req.JurisdictionType, StringFromText(req.JurisdictionID)) {
+	if s.authorizeLocation(ctx, reviewer, req.DestinationLocationID) != nil {
 		return nil, ErrJurisdictionMismatch
 	}
 
@@ -652,7 +732,17 @@ func (s *InventoryService) ReviewMaterialRequest(ctx context.Context, reviewer *
 		return nil, fmt.Errorf("invalid review action: '%s'. Allowed actions: approve, reduce, reject", action)
 	}
 
-	err = s.repo.WithTx(ctx, func(q *db.Queries) error {
+	err = s.withOperationalAudit(ctx, reviewer, "review_material_request", "material_request", requestID, func(q *db.Queries) error {
+		if err := q.LockMaterialRequest(ctx, requestID); err != nil {
+			return err
+		}
+		locked, err := q.GetMaterialRequestByID(ctx, requestID)
+		if err != nil {
+			return err
+		}
+		if locked.Status != "submitted" {
+			return ErrInvalidRequestStatus
+		}
 		// Fetch request items to set approved quantities
 		items, err := q.ListMaterialRequestItemsByRequest(ctx, requestID)
 		if err != nil {
@@ -702,8 +792,6 @@ func (s *InventoryService) ReviewMaterialRequest(ctx context.Context, reviewer *
 		return nil, err
 	}
 
-	_ = s.audit.Log(ctx, &reviewer.ID, nil, "review_material_request", "material_request", requestID, nil, nil, nil, nil)
-
 	return s.GetMaterialRequest(ctx, requestID)
 }
 
@@ -714,7 +802,14 @@ func (s *InventoryService) ReviewMaterialRequest(ctx context.Context, reviewer *
 // AllocateAndReserveStock allocates and reserves stock from a supplying warehouse for an approved/reduced request.
 // It acquires row locks (SELECT ... FOR UPDATE) to prevent race conditions and concurrent over-allocation.
 func (s *InventoryService) AllocateAndReserveStock(ctx context.Context, actor *db.User, requestID, supplyingLocationID string) error {
-	return s.repo.WithTx(ctx, func(q *db.Queries) error {
+
+	if err := s.authorizeLocation(ctx, actor, supplyingLocationID); err != nil {
+		return err
+	}
+	return s.withOperationalAudit(ctx, actor, "allocate_material_stock", "material_request", requestID, func(q *db.Queries) error {
+		if err := q.LockMaterialRequest(ctx, requestID); err != nil {
+			return err
+		}
 		req, err := q.GetMaterialRequestByID(ctx, requestID)
 		if err != nil {
 			if errors.Is(err, pgx.ErrNoRows) {
@@ -802,6 +897,10 @@ func (s *InventoryService) AllocateAndReserveStock(ctx context.Context, actor *d
 // -------------------------------------------------------------
 
 func (s *InventoryService) CreateTransfer(ctx context.Context, actor *db.User, input CreateTransferInput) (*db.GetMaterialTransferByIDRow, error) {
+
+	if err := s.authorizeLocation(ctx, actor, input.SourceLocationID); err != nil {
+		return nil, err
+	}
 	if actor == nil {
 		return nil, errors.New("authenticated actor required")
 	}
@@ -816,6 +915,9 @@ func (s *InventoryService) CreateTransfer(ctx context.Context, actor *db.User, i
 	if input.IdempotencyKey != nil && *input.IdempotencyKey != "" {
 		existing, err := s.repo.Queries().GetMaterialTransferByIdempotencyKey(ctx, Text(input.IdempotencyKey))
 		if err == nil && existing.ID != "" {
+			if existing.SourceLocationID != input.SourceLocationID || existing.DestinationLocationID != input.DestinationLocationID {
+				return nil, ErrDuplicateTransfer
+			}
 			return s.GetTransfer(ctx, existing.ID)
 		}
 	}
@@ -828,7 +930,7 @@ func (s *InventoryService) CreateTransfer(ctx context.Context, actor *db.User, i
 		ref = fmt.Sprintf("TRF-%s-%s", time.Now().Format("20060102"), strings.ToUpper(security.GenerateUUID()[:6]))
 	}
 
-	err := s.repo.WithTx(ctx, func(q *db.Queries) error {
+	err := s.withOperationalAudit(ctx, actor, "create_material_transfer", "material_transfer", transferID, func(q *db.Queries) error {
 		// Check locations
 		if _, err := q.GetStorageLocationByID(ctx, input.SourceLocationID); err != nil {
 			return fmt.Errorf("source %w", ErrLocationNotFound)
@@ -863,14 +965,14 @@ func (s *InventoryService) CreateTransfer(ctx context.Context, actor *db.User, i
 				uom = "pcs"
 			}
 			_, err := q.CreateMaterialTransferItem(ctx, db.CreateMaterialTransferItemParams{
-				ID:                 security.GenerateUUID(),
-				TransferID:         transferID,
-				ItemID:             itm.ItemID,
-				BatchNumber:        strings.TrimSpace(itm.BatchNumber),
-				DispatchedQuantity: itm.DispatchedQuantity,
-				ReceivedQuantity:   0,
+				ID:                  security.GenerateUUID(),
+				TransferID:          transferID,
+				ItemID:              itm.ItemID,
+				BatchNumber:         strings.TrimSpace(itm.BatchNumber),
+				DispatchedQuantity:  itm.DispatchedQuantity,
+				ReceivedQuantity:    0,
 				DiscrepancyQuantity: 0,
-				UnitOfMeasure:      uom,
+				UnitOfMeasure:       uom,
 			})
 			if err != nil {
 				return fmt.Errorf("failed to create transfer item: %w", err)
@@ -883,8 +985,6 @@ func (s *InventoryService) CreateTransfer(ctx context.Context, actor *db.User, i
 	if err != nil {
 		return nil, err
 	}
-
-	_ = s.audit.Log(ctx, &actor.ID, nil, "create_material_transfer", "material_transfer", transferID, nil, nil, nil, nil)
 
 	if input.AutoDispatch {
 		return s.DispatchTransfer(ctx, actor, transferID, DispatchTransferInput{
@@ -899,6 +999,12 @@ func (s *InventoryService) CreateTransfer(ctx context.Context, actor *db.User, i
 }
 
 func (s *InventoryService) GetTransfer(ctx context.Context, id string) (*db.GetMaterialTransferByIDRow, error) {
+
+	if operationalActor(ctx) != nil {
+		if err := s.authorizeTransferRead(ctx, id); err != nil {
+			return nil, err
+		}
+	}
 	t, err := s.repo.Queries().GetMaterialTransferByID(ctx, id)
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
@@ -920,14 +1026,27 @@ func (s *InventoryService) ListTransfers(ctx context.Context, status, sourceLoca
 	if destinationLocationID != nil {
 		dst = *destinationLocationID
 	}
-	return s.repo.Queries().ListMaterialTransfers(ctx, db.ListMaterialTransfersParams{
+	rows, err := s.repo.Queries().ListMaterialTransfers(ctx, db.ListMaterialTransfersParams{
 		Column1: st,
 		Column2: src,
 		Column3: dst,
 	})
+	if err != nil {
+		return nil, err
+	}
+	return filterInventoryRows(ctx, s.repo, rows, func(r db.ListMaterialTransfersRow) []string {
+		return []string{r.SourceLocationID, r.DestinationLocationID}
+	}, nil)
+
 }
 
 func (s *InventoryService) ListTransferItems(ctx context.Context, transferID string) ([]db.ListMaterialTransferItemsByTransferRow, error) {
+
+	if operationalActor(ctx) != nil {
+		if err := s.authorizeTransferRead(ctx, transferID); err != nil {
+			return nil, err
+		}
+	}
 	return s.repo.Queries().ListMaterialTransferItemsByTransfer(ctx, transferID)
 }
 
@@ -942,7 +1061,18 @@ func (s *InventoryService) DispatchTransfer(ctx context.Context, actor *db.User,
 		return nil, errors.New("authenticated actor required")
 	}
 
-	err := s.repo.WithTx(ctx, func(q *db.Queries) error {
+	target, authErr := s.repo.Queries().GetMaterialTransferByID(ctx, transferID)
+	if authErr != nil {
+		return nil, ErrTransferNotFound
+	}
+	if authErr = s.authorizeLocation(ctx, actor, target.SourceLocationID); authErr != nil {
+		return nil, authErr
+	}
+
+	err := s.withOperationalAudit(ctx, actor, "dispatch_material_transfer", "material_transfer", transferID, func(q *db.Queries) error {
+		if err := q.LockMaterialTransfer(ctx, transferID); err != nil {
+			return err
+		}
 		t, err := q.GetMaterialTransferByID(ctx, transferID)
 		if err != nil {
 			if errors.Is(err, pgx.ErrNoRows) {
@@ -1064,8 +1194,6 @@ func (s *InventoryService) DispatchTransfer(ctx context.Context, actor *db.User,
 		return nil, err
 	}
 
-	_ = s.audit.Log(ctx, &actor.ID, nil, "dispatch_material_transfer", "material_transfer", transferID, nil, nil, nil, nil)
-
 	return s.GetTransfer(ctx, transferID)
 }
 
@@ -1085,7 +1213,18 @@ func (s *InventoryService) ConfirmTransferReceipt(ctx context.Context, actor *db
 		return nil, errors.New("authenticated actor required")
 	}
 
-	err := s.repo.WithTx(ctx, func(q *db.Queries) error {
+	target, authErr := s.repo.Queries().GetMaterialTransferByID(ctx, transferID)
+	if authErr != nil {
+		return nil, ErrTransferNotFound
+	}
+	if authErr = s.authorizeLocation(ctx, actor, target.DestinationLocationID); authErr != nil {
+		return nil, authErr
+	}
+
+	err := s.withOperationalAudit(ctx, actor, "confirm_transfer_receipt", "material_transfer", transferID, func(q *db.Queries) error {
+		if err := q.LockMaterialTransfer(ctx, transferID); err != nil {
+			return err
+		}
 		t, err := q.GetMaterialTransferByID(ctx, transferID)
 		if err != nil {
 			if errors.Is(err, pgx.ErrNoRows) {
@@ -1095,6 +1234,7 @@ func (s *InventoryService) ConfirmTransferReceipt(ctx context.Context, actor *db
 		}
 
 		// Idempotency: if already received or disputed, return safely without double crediting
+
 		if t.Status == "received" || t.Status == "disputed" || t.Status == "partially_received" {
 			return nil
 		}
@@ -1135,7 +1275,7 @@ func (s *InventoryService) ConfirmTransferReceipt(ctx context.Context, actor *db
 			// Update transfer item with actual received & discrepancy quantities
 			_, err = q.UpdateMaterialTransferItemReceipt(ctx, db.UpdateMaterialTransferItemReceiptParams{
 				ID:                  itm.ID,
-				ReceivedQuantity:   recvQty,
+				ReceivedQuantity:    recvQty,
 				DiscrepancyQuantity: discrepancyQty,
 			})
 			if err != nil {
@@ -1240,9 +1380,9 @@ func (s *InventoryService) ConfirmTransferReceipt(ctx context.Context, actor *db
 		}
 
 		_, err = q.MarkMaterialTransferReceived(ctx, db.MarkMaterialTransferReceivedParams{
-			ID:                 transferID,
-			Status:             targetStatus,
-			ReceivedByUserID:   TextFromString(actor.ID),
+			ID:               transferID,
+			Status:           targetStatus,
+			ReceivedByUserID: TextFromString(actor.ID),
 		})
 		if err != nil {
 			return fmt.Errorf("failed to mark transfer received: %w", err)
@@ -1270,8 +1410,6 @@ func (s *InventoryService) ConfirmTransferReceipt(ctx context.Context, actor *db
 		return nil, err
 	}
 
-	_ = s.audit.Log(ctx, &actor.ID, nil, "confirm_transfer_receipt", "material_transfer", transferID, nil, nil, nil, nil)
-
 	return s.GetTransfer(ctx, transferID)
 }
 
@@ -1287,10 +1425,24 @@ func (s *InventoryService) ListDiscrepancies(ctx context.Context, status, transf
 	if transferID != nil {
 		tx = *transferID
 	}
-	return s.repo.Queries().ListTransferDiscrepancies(ctx, db.ListTransferDiscrepanciesParams{
+	rows, err := s.repo.Queries().ListTransferDiscrepancies(ctx, db.ListTransferDiscrepanciesParams{
 		Column1: st,
 		Column2: tx,
 	})
+	if err != nil {
+		return nil, err
+	}
+	if operationalActor(ctx) == nil {
+		return rows, nil
+	}
+	out := []db.ListTransferDiscrepanciesRow{}
+	for _, row := range rows {
+		if s.authorizeTransferRead(ctx, row.TransferID) == nil {
+			out = append(out, row)
+		}
+	}
+	return out, nil
+
 }
 
 func (s *InventoryService) GetDiscrepancy(ctx context.Context, id string) (*db.GetTransferDiscrepancyByIDRow, error) {
@@ -1301,12 +1453,27 @@ func (s *InventoryService) GetDiscrepancy(ctx context.Context, id string) (*db.G
 		}
 		return nil, err
 	}
+	if err := s.authorizeTransferRead(ctx, d.TransferID); err != nil {
+		return nil, err
+	}
 	return &d, nil
 }
 
 func (s *InventoryService) ResolveDiscrepancy(ctx context.Context, actor *db.User, discrepancyID string, input ResolveDiscrepancyInput) (*db.GetTransferDiscrepancyByIDRow, error) {
 	if actor == nil {
 		return nil, errors.New("authenticated actor required")
+	}
+
+	d, err := s.repo.Queries().GetTransferDiscrepancyByID(ctx, discrepancyID)
+	if err != nil {
+		return nil, ErrDiscrepancyNotFound
+	}
+	transfer, err := s.repo.Queries().GetMaterialTransferByID(ctx, d.TransferID)
+	if err != nil {
+		return nil, err
+	}
+	if s.authorizeLocation(ctx, actor, transfer.SourceLocationID) != nil && s.authorizeLocation(ctx, actor, transfer.DestinationLocationID) != nil {
+		return nil, ErrJurisdictionMismatch
 	}
 
 	resolution := strings.ToLower(strings.TrimSpace(input.Resolution))
@@ -1324,7 +1491,10 @@ func (s *InventoryService) ResolveDiscrepancy(ctx context.Context, actor *db.Use
 		return nil, errors.New("resolution notes are mandatory")
 	}
 
-	err := s.repo.WithTx(ctx, func(q *db.Queries) error {
+	err = s.withOperationalAudit(ctx, actor, "resolve_transfer_discrepancy", "transfer_discrepancy", discrepancyID, func(q *db.Queries) error {
+		if err := q.LockTransferDiscrepancy(ctx, discrepancyID); err != nil {
+			return err
+		}
 		d, err := q.GetTransferDiscrepancyByID(ctx, discrepancyID)
 		if err != nil {
 			if errors.Is(err, pgx.ErrNoRows) {
@@ -1379,8 +1549,6 @@ func (s *InventoryService) ResolveDiscrepancy(ctx context.Context, actor *db.Use
 		return nil, err
 	}
 
-	_ = s.audit.Log(ctx, &actor.ID, nil, "resolve_transfer_discrepancy", "transfer_discrepancy", discrepancyID, nil, nil, nil, nil)
-
 	return s.GetDiscrepancy(ctx, discrepancyID)
 }
 
@@ -1408,6 +1576,19 @@ func (s *InventoryService) ListStockLedger(ctx context.Context, locationID, item
 	}
 	if endDate != nil {
 		eDate = pgtype.Timestamptz{Time: *endDate, Valid: true}
+	}
+
+	if operationalActor(ctx) != nil {
+		ids, err := s.scopedLocationIDs(ctx)
+		if err != nil {
+			return nil, 0, err
+		}
+		entries, err := s.repo.Queries().ListScopedStockLedgerEntries(ctx, db.ListStockLedgerEntriesParams{Column1: loc, Column2: itm, Column3: mtype, Column4: sDate, Column5: eDate, Limit: limit, Offset: offset}, ids)
+		if err != nil {
+			return nil, 0, err
+		}
+		total, err := s.repo.Queries().CountScopedStockLedgerEntries(ctx, db.CountStockLedgerEntriesParams{Column1: loc, Column2: itm, Column3: mtype, Column4: sDate, Column5: eDate}, ids)
+		return entries, total, err
 	}
 
 	entries, err := s.repo.Queries().ListStockLedgerEntries(ctx, db.ListStockLedgerEntriesParams{
@@ -1477,6 +1658,27 @@ func (s *InventoryService) GetInventorySummary(ctx context.Context) (*InventoryS
 	lowStock, err := s.repo.Queries().ListLowStockAlerts(ctx)
 	if err != nil {
 		return nil, err
+	}
+
+	if operationalActor(ctx) != nil {
+		locations, err = s.ListLocations(ctx, nil, nil, nil, nil, nil)
+		if err != nil {
+			return nil, err
+		}
+		dispatched := "dispatched"
+		transfers, err = s.ListTransfers(ctx, &dispatched, nil, nil)
+		if err != nil {
+			return nil, err
+		}
+		open := "open"
+		discrepancies, err = s.ListDiscrepancies(ctx, &open, nil)
+		if err != nil {
+			return nil, err
+		}
+		lowStock, err = s.ListLowStockAlerts(ctx)
+		if err != nil {
+			return nil, err
+		}
 	}
 
 	return &InventorySummary{
@@ -1571,4 +1773,11 @@ func (s *InventoryService) hasJurisdictionAuthority(user *db.User, appointments 
 	}
 
 	return false
+}
+
+func valueOrEmpty(s *string) string {
+	if s == nil {
+		return ""
+	}
+	return *s
 }

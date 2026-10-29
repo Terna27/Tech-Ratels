@@ -45,6 +45,11 @@ func createTestCleanupEvent(t *testing.T, env *TestEnv, creatorID, stateID, lgaI
 		t.Fatalf("Failed to register gallery coordinator: %v", err)
 	}
 
+	// Operational appointments require an active, verified account.
+	if _, err := env.Pool.Exec(ctx, `UPDATE users SET status='active',is_verified=true WHERE id=$1`, regCoord.UserID); err != nil {
+		t.Fatal(err)
+	}
+
 	_, err = env.Repo.Queries().CreateAppointment(ctx, db.CreateAppointmentParams{
 		ID:               security.GenerateUUID(),
 		UserID:           regCoord.UserID,

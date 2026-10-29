@@ -52,6 +52,11 @@ func TestScopedPermissions(t *testing.T) {
 		t.Fatalf("Failed to register Lagos coordinator: %v", err)
 	}
 
+	// An operational coordinator also needs a verified active account.
+	if _, err := env.Pool.Exec(ctx, `UPDATE users SET status='active',is_verified=true WHERE id=$1`, regCoord.UserID); err != nil {
+		t.Fatal(err)
+	}
+
 	// An active appointment is required for coordinator authorization.
 	_, err = env.Repo.Queries().CreateAppointment(ctx, db.CreateAppointmentParams{
 		ID:               security.GenerateUUID(),

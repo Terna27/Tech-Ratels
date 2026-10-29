@@ -316,7 +316,9 @@ func TestSuperAdminDashboard_PreserveExistingCoordinatorOverview(t *testing.T) {
 	defer h.Cleanup()
 
 	_, natAdminToken := createTestUserWithRole(t, h, "sa_coord_nat", "National Admin", "national_admin")
-	_, stateCoordToken := createTestUserWithRole(t, h, "sa_coord_st", "State Coordinator", "state_coordinator")
+	stateCoordID, stateCoordToken := createTestUserWithRole(t, h, "sa_coord_st", "State Coordinator", "state_coordinator")
+	stateID := getVacantStateID(t, h)
+	insertTestAppointment(t, h, stateCoordID, "state_coordinator", "State Coordinator", "state", &stateID, "active", time.Now().Add(-time.Hour), nil)
 
 	// Standard coordinators CAN still access standard overview
 	for _, tok := range []string{natAdminToken, stateCoordToken} {
@@ -688,7 +690,9 @@ func TestSuperAdminDashboard_JurisdictionRestrictionsAndHorizontalEscalation(t *
 	ctx := context.Background()
 
 	// Setup state coordinator
-	_, stateCoordToken := createTestUserWithRole(t, h, "sa_esc_st", "State Coord", "state_coordinator")
+	stateCoordID, stateCoordToken := createTestUserWithRole(t, h, "sa_esc_st", "State Coord", "state_coordinator")
+	stateID := getVacantStateID(t, h)
+	insertTestAppointment(t, h, stateCoordID, "state_coordinator", "State Coordinator", "state", &stateID, "active", time.Now().Add(-time.Hour), nil)
 
 	// 1. State coordinator attempts to access nationwide dashboard -> 403 Forbidden
 	req, _ := http.NewRequest("GET", "/api/v1/admin/super/dashboard", nil)
@@ -720,4 +724,3 @@ func TestSuperAdminDashboard_JurisdictionRestrictionsAndHorizontalEscalation(t *
 
 	_ = ctx
 }
-

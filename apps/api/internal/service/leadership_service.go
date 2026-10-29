@@ -36,7 +36,7 @@ func (s *LeadershipService) SetNotificationService(notif *NotificationService) {
 type CreateAppointmentRequest struct {
 	UserID                   string     `json:"user_id"`
 	RoleTitle                string     `json:"role_title"`
-	RoleType                 string     `json:"role_type"` // super_admin, national_admin, zonal_coordinator, state_coordinator, lga_representative, lga_coordinator
+	RoleType                 string     `json:"role_type"`         // super_admin, national_admin, zonal_coordinator, state_coordinator, lga_representative, lga_coordinator
 	JurisdictionType         string     `json:"jurisdiction_type"` // national, zone, state, lga
 	JurisdictionID           *string    `json:"jurisdiction_id"`
 	ReportingToAppointmentID *string    `json:"reporting_to_appointment_id"`
@@ -103,11 +103,9 @@ func (s *LeadershipService) CreateAppointment(ctx context.Context, actorID strin
 		return nil, ErrSelfModificationProhibited
 	}
 
-	// Super Admin authority is strictly required for zonal coordinators, state coordinators, national admins, and super admins
-	if req.RoleType == "zonal_coordinator" || req.RoleType == "state_coordinator" || req.RoleType == "super_admin" || req.RoleType == "national_admin" {
-		if actorRole != "super_admin" {
-			return nil, ErrSuperAdminRequired
-		}
+	// All appointments, including LGA appointments, remain under Super Admin authority.
+	if actorRole != "super_admin" || !hasCurrentSuperAdminAuthority(ctx, s.repo, actorID) {
+		return nil, ErrSuperAdminRequired
 	}
 
 	// Verify target user exists
@@ -233,7 +231,7 @@ func (s *LeadershipService) CreateAppointment(ctx context.Context, actorID strin
 }
 
 func (s *LeadershipService) ReplaceAppointment(ctx context.Context, actorID, actorRole, oldAppointmentID string, req ReplaceAppointmentRequest) (*db.Appointment, error) {
-	if actorRole != "super_admin" {
+	if actorRole != "super_admin" || !hasCurrentSuperAdminAuthority(ctx, s.repo, actorID) {
 		return nil, ErrSuperAdminRequired
 	}
 	if req.NewUserID == actorID {
@@ -353,7 +351,7 @@ func (s *LeadershipService) ReplaceAppointment(ctx context.Context, actorID, act
 }
 
 func (s *LeadershipService) UpdateAppointmentScopeAndDates(ctx context.Context, actorID, actorRole, appointmentID string, req UpdateScopeDatesRequest) (*db.Appointment, error) {
-	if actorRole != "super_admin" {
+	if actorRole != "super_admin" || !hasCurrentSuperAdminAuthority(ctx, s.repo, actorID) {
 		return nil, ErrSuperAdminRequired
 	}
 
@@ -406,6 +404,10 @@ func (s *LeadershipService) UpdateAppointmentScopeAndDates(ctx context.Context, 
 }
 
 func (s *LeadershipService) RevokeAppointment(ctx context.Context, actorID, actorRole, appointmentID, reason string) error {
+
+	if !hasCurrentSuperAdminAuthority(ctx, s.repo, actorID) {
+		return ErrSuperAdminRequired
+	}
 	oldApp, err := s.repo.Queries().GetAppointmentByID(ctx, appointmentID)
 	if err != nil {
 		return errors.New("appointment not found")
@@ -417,7 +419,7 @@ func (s *LeadershipService) RevokeAppointment(ctx context.Context, actorID, acto
 
 	// Zonal, State, National, Super Admin revocation strictly requires Super Admin authority
 	if oldApp.RoleType == "zonal_coordinator" || oldApp.RoleType == "state_coordinator" || oldApp.RoleType == "national_admin" || oldApp.RoleType == "super_admin" {
-		if actorRole != "super_admin" {
+		if actorRole != "super_admin" || !hasCurrentSuperAdminAuthority(ctx, s.repo, actorID) {
 			return ErrSuperAdminRequired
 		}
 	}
@@ -463,7 +465,7 @@ func (s *LeadershipService) RevokeAppointment(ctx context.Context, actorID, acto
 }
 
 func (s *LeadershipService) SuspendAppointment(ctx context.Context, actorID, actorRole, appointmentID, reason string) error {
-	if actorRole != "super_admin" {
+	if actorRole != "super_admin" || !hasCurrentSuperAdminAuthority(ctx, s.repo, actorID) {
 		return ErrSuperAdminRequired
 	}
 
@@ -521,7 +523,7 @@ func (s *LeadershipService) SuspendAppointment(ctx context.Context, actorID, act
 }
 
 func (s *LeadershipService) ReactivateAppointment(ctx context.Context, actorID, actorRole, appointmentID, reason string) (*db.Appointment, error) {
-	if actorRole != "super_admin" {
+	if actorRole != "super_admin" || !hasCurrentSuperAdminAuthority(ctx, s.repo, actorID) {
 		return nil, ErrSuperAdminRequired
 	}
 

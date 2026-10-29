@@ -509,3 +509,45 @@ func (s *AdminService) UpdateOrganizationSetting(ctx context.Context, actorID, a
 	return &updated, nil
 }
 
+// GetOperationalOverview preserves nationwide administration while preventing a
+// regional coordinator's dashboard from revealing national membership/queues.
+func (s *AdminService) GetOperationalOverview(ctx context.Context, u *db.User) (*AdminOverviewResponse, error) {
+	scope, err := operationalScopeForActor(ctx, s.repo, u)
+	if err != nil {
+		return nil, err
+	}
+	if scope.National {
+		return s.GetOverview(ctx, u.PrimaryRole, "national", "National operations")
+	}
+	out := &AdminOverviewResponse{CurrentRole: "coordinator", CurrentJurisdictionType: "regional", CurrentJurisdictionName: "Active appointed jurisdictions"}
+	apps, err := s.repo.Queries().ListActiveApprovedAppointmentsByUser(ctx, u.ID)
+	if err != nil {
+		return nil, err
+	}
+	if len(apps) > 0 {
+		out.CurrentRole = apps[0].RoleType
+		out.CurrentJurisdictionType = apps[0].JurisdictionType
+		out.CurrentJurisdictionName = apps[0].RoleTitle
+		if len(apps) > 1 {
+			out.CurrentJurisdictionName += " + other active assignments"
+		}
+	}
+
+	args := []interface{}{scope.National, scope.States, scope.LGAs}
+	err = s.repo.Pool().QueryRow(ctx, `SELECT count(*),count(*) FILTER(WHERE NOT u.is_verified) FROM users u LEFT JOIN member_profiles p ON p.user_id=u.id WHERE `+operationalMemberFilter, args...).Scan(&out.TotalMembers, &out.PendingMemberVerifications)
+	if err != nil {
+		return nil, err
+	}
+	err = s.repo.Pool().QueryRow(ctx, `SELECT count(*) FILTER(WHERE e.status='published'),count(*) FILTER(WHERE e.status='draft'),coalesce(sum((SELECT count(*) FROM event_registrations r WHERE r.event_id=e.id)),0),coalesce(sum((SELECT count(*) FROM participation_claims c WHERE c.event_id=e.id AND c.status='pending')),0),coalesce(sum((SELECT count(*) FROM participation_appeals a JOIN participation_claims c ON c.id=a.participation_id WHERE c.event_id=e.id AND a.status='pending')),0) FROM event_instances e WHERE `+operationalEventFilter, args...).Scan(&out.PublishedActivities, &out.DraftVenuesReviewQueue, &out.TotalRegistrations, &out.UnverifiedParticipationsQueue, &out.PendingAppealsQueue)
+	if err != nil {
+		return nil, err
+	}
+	err = s.repo.Pool().QueryRow(ctx, `SELECT count(*) FROM appointments WHERE status='active' AND start_date<=now() AND (end_date IS NULL OR end_date>now()) AND ((jurisdiction_type='state' AND jurisdiction_id=ANY($1::text[])) OR (jurisdiction_type='lga' AND jurisdiction_id=ANY($2::text[])) OR (jurisdiction_type='zone' AND jurisdiction_id=ANY($3::text[])))`, scope.States, scope.LGAs, scope.Zones).Scan(&out.ActiveCoordinators)
+	if err != nil {
+		return nil, err
+	}
+	out.ActiveAppointments = out.ActiveCoordinators
+	out.PublishedCleanups = out.PublishedActivities
+	out.PendingReviews = out.UnverifiedParticipationsQueue
+	return out, nil
+}

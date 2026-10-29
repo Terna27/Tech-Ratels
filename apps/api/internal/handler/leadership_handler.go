@@ -275,3 +275,22 @@ func (h *LeadershipHandler) ListAppointmentHistory(w http.ResponseWriter, r *htt
 
 	JSON(w, http.StatusOK, history)
 }
+
+// Appointment changes retain a specific denial code used by existing clients.
+// The service also reloads current Super Admin authority before every mutation.
+func RequireAppointmentAuthority(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		u := GetCurrentUser(r.Context())
+		allowed := u != nil && u.PrimaryRole == "super_admin"
+		for _, a := range GetCurrentAppointments(r.Context()) {
+			if a.Status == "active" && a.RoleType == "super_admin" && a.JurisdictionType == "national" {
+				allowed = true
+			}
+		}
+		if !allowed {
+			ErrorJSON(w, 403, "ERR_SUPER_ADMIN_REQUIRED", "Only Super Admin can manage appointments", nil)
+			return
+		}
+		next.ServeHTTP(w, r)
+	})
+}

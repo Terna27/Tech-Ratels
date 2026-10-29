@@ -37,6 +37,9 @@ func (h *InventoryHandler) ListItems(w http.ResponseWriter, r *http.Request) {
 
 	items, err := h.inventoryService.ListItems(r.Context(), category, isActive)
 	if err != nil {
+		if inventoryAuthorizationError(w, err) {
+			return
+		}
 		ErrorJSON(w, http.StatusInternalServerError, "INTERNAL_ERROR", err.Error(), nil)
 		return
 	}
@@ -56,6 +59,9 @@ func (h *InventoryHandler) CreateItem(w http.ResponseWriter, r *http.Request) {
 
 	item, err := h.inventoryService.CreateItem(r.Context(), user, req)
 	if err != nil {
+		if inventoryAuthorizationError(w, err) {
+			return
+		}
 		ErrorJSON(w, http.StatusBadRequest, "CREATION_FAILED", err.Error(), nil)
 		return
 	}
@@ -66,6 +72,9 @@ func (h *InventoryHandler) GetItem(w http.ResponseWriter, r *http.Request) {
 	id := chi.URLParam(r, "id")
 	item, err := h.inventoryService.GetItem(r.Context(), id)
 	if err != nil {
+		if inventoryAuthorizationError(w, err) {
+			return
+		}
 		if errors.Is(err, service.ErrItemNotFound) {
 			ErrorJSON(w, http.StatusNotFound, "NOT_FOUND", "Inventory item not found", nil)
 			return
@@ -87,6 +96,9 @@ func (h *InventoryHandler) UpdateItem(w http.ResponseWriter, r *http.Request) {
 
 	item, err := h.inventoryService.UpdateItem(r.Context(), user, id, req)
 	if err != nil {
+		if inventoryAuthorizationError(w, err) {
+			return
+		}
 		if errors.Is(err, service.ErrItemNotFound) {
 			ErrorJSON(w, http.StatusNotFound, "NOT_FOUND", "Inventory item not found", nil)
 			return
@@ -123,6 +135,9 @@ func (h *InventoryHandler) ListLocations(w http.ResponseWriter, r *http.Request)
 
 	locations, err := h.inventoryService.ListLocations(r.Context(), locType, zoneID, stateID, lgaID, isActive)
 	if err != nil {
+		if inventoryAuthorizationError(w, err) {
+			return
+		}
 		ErrorJSON(w, http.StatusInternalServerError, "INTERNAL_ERROR", err.Error(), nil)
 		return
 	}
@@ -142,6 +157,9 @@ func (h *InventoryHandler) CreateLocation(w http.ResponseWriter, r *http.Request
 
 	loc, err := h.inventoryService.CreateLocation(r.Context(), user, req)
 	if err != nil {
+		if inventoryAuthorizationError(w, err) {
+			return
+		}
 		ErrorJSON(w, http.StatusBadRequest, "CREATION_FAILED", err.Error(), nil)
 		return
 	}
@@ -152,6 +170,9 @@ func (h *InventoryHandler) GetLocation(w http.ResponseWriter, r *http.Request) {
 	id := chi.URLParam(r, "id")
 	loc, err := h.inventoryService.GetLocation(r.Context(), id)
 	if err != nil {
+		if inventoryAuthorizationError(w, err) {
+			return
+		}
 		if errors.Is(err, service.ErrLocationNotFound) {
 			ErrorJSON(w, http.StatusNotFound, "NOT_FOUND", "Storage location not found", nil)
 			return
@@ -180,6 +201,9 @@ func (h *InventoryHandler) ListBalances(w http.ResponseWriter, r *http.Request) 
 
 	balances, err := h.inventoryService.ListStockBalances(r.Context(), locID, itemID, category)
 	if err != nil {
+		if inventoryAuthorizationError(w, err) {
+			return
+		}
 		ErrorJSON(w, http.StatusInternalServerError, "INTERNAL_ERROR", err.Error(), nil)
 		return
 	}
@@ -199,6 +223,9 @@ func (h *InventoryHandler) ReceiveStock(w http.ResponseWriter, r *http.Request) 
 
 	bal, err := h.inventoryService.ReceiveStock(r.Context(), user, req)
 	if err != nil {
+		if inventoryAuthorizationError(w, err) {
+			return
+		}
 		if errors.Is(err, service.ErrLocationNotFound) || errors.Is(err, service.ErrItemNotFound) {
 			ErrorJSON(w, http.StatusNotFound, "NOT_FOUND", err.Error(), nil)
 			return
@@ -212,6 +239,9 @@ func (h *InventoryHandler) ReceiveStock(w http.ResponseWriter, r *http.Request) 
 func (h *InventoryHandler) ListLowStockAlerts(w http.ResponseWriter, r *http.Request) {
 	alerts, err := h.inventoryService.ListLowStockAlerts(r.Context())
 	if err != nil {
+		if inventoryAuthorizationError(w, err) {
+			return
+		}
 		ErrorJSON(w, http.StatusInternalServerError, "INTERNAL_ERROR", err.Error(), nil)
 		return
 	}
@@ -242,6 +272,9 @@ func (h *InventoryHandler) ListRequests(w http.ResponseWriter, r *http.Request) 
 
 	requests, err := h.inventoryService.ListMaterialRequests(r.Context(), status, destLoc, userParam, jurType)
 	if err != nil {
+		if inventoryAuthorizationError(w, err) {
+			return
+		}
 		ErrorJSON(w, http.StatusInternalServerError, "INTERNAL_ERROR", err.Error(), nil)
 		return
 	}
@@ -261,6 +294,9 @@ func (h *InventoryHandler) CreateRequest(w http.ResponseWriter, r *http.Request)
 
 	created, err := h.inventoryService.CreateMaterialRequest(r.Context(), user, req)
 	if err != nil {
+		if inventoryAuthorizationError(w, err) {
+			return
+		}
 		if errors.Is(err, service.ErrLocationNotFound) {
 			ErrorJSON(w, http.StatusNotFound, "NOT_FOUND", err.Error(), nil)
 			return
@@ -275,6 +311,9 @@ func (h *InventoryHandler) GetRequest(w http.ResponseWriter, r *http.Request) {
 	id := chi.URLParam(r, "id")
 	req, err := h.inventoryService.GetMaterialRequest(r.Context(), id)
 	if err != nil {
+		if inventoryAuthorizationError(w, err) {
+			return
+		}
 		if errors.Is(err, service.ErrRequestNotFound) {
 			ErrorJSON(w, http.StatusNotFound, "NOT_FOUND", "Material request not found", nil)
 			return
@@ -304,6 +343,9 @@ func (h *InventoryHandler) ReviewRequest(w http.ResponseWriter, r *http.Request)
 
 	reviewed, err := h.inventoryService.ReviewMaterialRequest(r.Context(), user, apps, id, input)
 	if err != nil {
+		if inventoryAuthorizationError(w, err) {
+			return
+		}
 		if errors.Is(err, service.ErrAntiSelfApproval) {
 			ErrorJSON(w, http.StatusForbidden, "ANTI_SELF_APPROVAL", err.Error(), nil)
 			return
@@ -346,6 +388,9 @@ func (h *InventoryHandler) AllocateRequest(w http.ResponseWriter, r *http.Reques
 
 	err := h.inventoryService.AllocateAndReserveStock(r.Context(), user, id, payload.SupplyingLocationID)
 	if err != nil {
+		if inventoryAuthorizationError(w, err) {
+			return
+		}
 		if errors.Is(err, service.ErrInsufficientStock) {
 			ErrorJSON(w, http.StatusConflict, "INSUFFICIENT_STOCK", err.Error(), nil)
 			return
@@ -360,6 +405,9 @@ func (h *InventoryHandler) AllocateRequest(w http.ResponseWriter, r *http.Reques
 
 	updated, err := h.inventoryService.GetMaterialRequest(r.Context(), id)
 	if err != nil {
+		if inventoryAuthorizationError(w, err) {
+			return
+		}
 		JSON(w, http.StatusOK, map[string]string{"status": "allocated"})
 		return
 	}
@@ -384,6 +432,9 @@ func (h *InventoryHandler) ListTransfers(w http.ResponseWriter, r *http.Request)
 
 	transfers, err := h.inventoryService.ListTransfers(r.Context(), status, src, dst)
 	if err != nil {
+		if inventoryAuthorizationError(w, err) {
+			return
+		}
 		ErrorJSON(w, http.StatusInternalServerError, "INTERNAL_ERROR", err.Error(), nil)
 		return
 	}
@@ -403,6 +454,9 @@ func (h *InventoryHandler) CreateTransfer(w http.ResponseWriter, r *http.Request
 
 	transfer, err := h.inventoryService.CreateTransfer(r.Context(), user, input)
 	if err != nil {
+		if inventoryAuthorizationError(w, err) {
+			return
+		}
 		if errors.Is(err, service.ErrSameLocationTransfer) {
 			ErrorJSON(w, http.StatusBadRequest, "INVALID_LOCATION", err.Error(), nil)
 			return
@@ -421,6 +475,9 @@ func (h *InventoryHandler) GetTransfer(w http.ResponseWriter, r *http.Request) {
 	id := chi.URLParam(r, "id")
 	t, err := h.inventoryService.GetTransfer(r.Context(), id)
 	if err != nil {
+		if inventoryAuthorizationError(w, err) {
+			return
+		}
 		if errors.Is(err, service.ErrTransferNotFound) {
 			ErrorJSON(w, http.StatusNotFound, "NOT_FOUND", "Material transfer not found", nil)
 			return
@@ -451,6 +508,9 @@ func (h *InventoryHandler) DispatchTransfer(w http.ResponseWriter, r *http.Reque
 
 	dispatched, err := h.inventoryService.DispatchTransfer(r.Context(), user, id, req)
 	if err != nil {
+		if inventoryAuthorizationError(w, err) {
+			return
+		}
 		if errors.Is(err, service.ErrTransferNotFound) {
 			ErrorJSON(w, http.StatusNotFound, "NOT_FOUND", err.Error(), nil)
 			return
@@ -480,6 +540,9 @@ func (h *InventoryHandler) ConfirmReceipt(w http.ResponseWriter, r *http.Request
 
 	received, err := h.inventoryService.ConfirmTransferReceipt(r.Context(), user, id, req)
 	if err != nil {
+		if inventoryAuthorizationError(w, err) {
+			return
+		}
 		if errors.Is(err, service.ErrTransferNotFound) {
 			ErrorJSON(w, http.StatusNotFound, "NOT_FOUND", err.Error(), nil)
 			return
@@ -509,6 +572,9 @@ func (h *InventoryHandler) ListDiscrepancies(w http.ResponseWriter, r *http.Requ
 
 	discrepancies, err := h.inventoryService.ListDiscrepancies(r.Context(), status, transferID)
 	if err != nil {
+		if inventoryAuthorizationError(w, err) {
+			return
+		}
 		ErrorJSON(w, http.StatusInternalServerError, "INTERNAL_ERROR", err.Error(), nil)
 		return
 	}
@@ -522,6 +588,9 @@ func (h *InventoryHandler) GetDiscrepancy(w http.ResponseWriter, r *http.Request
 	id := chi.URLParam(r, "id")
 	d, err := h.inventoryService.GetDiscrepancy(r.Context(), id)
 	if err != nil {
+		if inventoryAuthorizationError(w, err) {
+			return
+		}
 		if errors.Is(err, service.ErrDiscrepancyNotFound) {
 			ErrorJSON(w, http.StatusNotFound, "NOT_FOUND", "Discrepancy not found", nil)
 			return
@@ -543,6 +612,9 @@ func (h *InventoryHandler) ResolveDiscrepancy(w http.ResponseWriter, r *http.Req
 
 	resolved, err := h.inventoryService.ResolveDiscrepancy(r.Context(), user, id, req)
 	if err != nil {
+		if inventoryAuthorizationError(w, err) {
+			return
+		}
 		if errors.Is(err, service.ErrDiscrepancyNotFound) {
 			ErrorJSON(w, http.StatusNotFound, "NOT_FOUND", err.Error(), nil)
 			return
@@ -604,6 +676,9 @@ func (h *InventoryHandler) ListStockLedger(w http.ResponseWriter, r *http.Reques
 
 	entries, total, err := h.inventoryService.ListStockLedger(r.Context(), locID, itemID, mType, startDate, endDate, limit, offset)
 	if err != nil {
+		if inventoryAuthorizationError(w, err) {
+			return
+		}
 		ErrorJSON(w, http.StatusInternalServerError, "INTERNAL_ERROR", err.Error(), nil)
 		return
 	}
@@ -623,8 +698,28 @@ func (h *InventoryHandler) ListStockLedger(w http.ResponseWriter, r *http.Reques
 func (h *InventoryHandler) GetSummary(w http.ResponseWriter, r *http.Request) {
 	summary, err := h.inventoryService.GetInventorySummary(r.Context())
 	if err != nil {
+		if inventoryAuthorizationError(w, err) {
+			return
+		}
 		ErrorJSON(w, http.StatusInternalServerError, "INTERNAL_ERROR", err.Error(), nil)
 		return
 	}
 	JSON(w, http.StatusOK, summary)
+}
+
+func inventoryAuthorizationError(w http.ResponseWriter, err error) bool {
+	if errors.Is(err, service.ErrUnauthorizedInventoryAction) || errors.Is(err, service.ErrJurisdictionMismatch) || errors.Is(err, service.ErrCoordinatorUnauthorized) || errors.Is(err, service.ErrScopeUnauthorized) {
+		ErrorJSON(w, 403, "INVENTORY_SCOPE_UNAUTHORIZED", err.Error(), nil)
+		return true
+	}
+	return false
+}
+
+func (h *InventoryHandler) TransferDestinations(w http.ResponseWriter, r *http.Request) {
+	rows, err := h.inventoryService.TransferDestinations(r.Context(), GetCurrentUser(r.Context()))
+	if err != nil {
+		coordinatorError(w, err)
+		return
+	}
+	JSON(w, 200, rows)
 }

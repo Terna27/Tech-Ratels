@@ -8,6 +8,7 @@ import (
 	"github.com/go-chi/cors"
 	"ratels-api/internal/config"
 	"ratels-api/internal/repository"
+	"ratels-api/internal/service"
 )
 
 type RouterParams struct {
@@ -66,6 +67,9 @@ func NewRouter(p RouterParams) http.Handler {
 	r.Route("/api/v1", func(api chi.Router) {
 		api.Get("/health", p.HealthHandler.HealthCheck)
 
+		coordinator := NewCoordinatorHandler(service.NewCoordinatorService(p.Repo))
+		api.Route("/coordinator", coordinator.Routes)
+
 		// Auth
 		api.Route("/auth", func(auth chi.Router) {
 			auth.Post("/register", p.AuthHandler.Register)
@@ -95,7 +99,7 @@ func NewRouter(p RouterParams) http.Handler {
 		api.Route("/leadership", func(lead chi.Router) {
 			lead.Get("/directory", p.LeadershipHandler.ListDirectory)
 			lead.With(RequireRole("national_admin", "super_admin")).Get("/appointments", p.LeadershipHandler.ListAppointments)
-			lead.With(RequireRole("national_admin", "super_admin")).Post("/appointments", p.LeadershipHandler.CreateAppointment)
+			lead.With(RequireAuth, RequireAppointmentAuthority).Post("/appointments", p.LeadershipHandler.CreateAppointment)
 			lead.With(RequireRole("super_admin")).Post("/appointments/{id}/replace", p.LeadershipHandler.ReplaceAppointment)
 			lead.With(RequireRole("super_admin")).Patch("/appointments/{id}/scope-dates", p.LeadershipHandler.UpdateScopeDates)
 			lead.With(RequireRole("super_admin")).Put("/appointments/{id}/scope-dates", p.LeadershipHandler.UpdateScopeDates)
@@ -224,6 +228,15 @@ func NewRouter(p RouterParams) http.Handler {
 
 		// Inventory & Material Distribution (Blueprint v2.0 Section 05)
 		api.Route("/inventory", func(inv chi.Router) {
+			inv.Use(RequireAuth)
+			inv.Use(func(next http.Handler) http.Handler {
+				return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+					next.ServeHTTP(w, r.WithContext(service.WithOperationalActor(r.Context(), GetCurrentUser(r.Context()))))
+				})
+			})
+
+			inv.Get("/transfer-destinations", p.InventoryHandler.TransferDestinations)
+
 			// Catalogue
 			inv.With(RequireAuth).Get("/items", p.InventoryHandler.ListItems)
 			inv.With(RequireRole("national_admin", "zonal_coordinator", "state_coordinator")).Post("/items", p.InventoryHandler.CreateItem)
@@ -244,7 +257,7 @@ func NewRouter(p RouterParams) http.Handler {
 			inv.With(RequireAuth).Get("/requests", p.InventoryHandler.ListRequests)
 			inv.With(RequireAuth).Post("/requests", p.InventoryHandler.CreateRequest)
 			inv.With(RequireAuth).Get("/requests/{id}", p.InventoryHandler.GetRequest)
-			inv.With(RequireRole("national_admin", "zonal_coordinator", "state_coordinator", "lga_representative")).Post("/requests/{id}/review", p.InventoryHandler.ReviewRequest)
+			inv.With(RequireRole("national_admin", "zonal_coordinator", "state_coordinator", "lga_coordinator", "lga_representative")).Post("/requests/{id}/review", p.InventoryHandler.ReviewRequest)
 			inv.With(RequireRole("national_admin", "zonal_coordinator", "state_coordinator")).Post("/requests/{id}/allocate", p.InventoryHandler.AllocateRequest)
 
 			// Transfers & Dispatches
@@ -252,7 +265,7 @@ func NewRouter(p RouterParams) http.Handler {
 			inv.With(RequireRole("national_admin", "zonal_coordinator", "state_coordinator")).Post("/transfers", p.InventoryHandler.CreateTransfer)
 			inv.With(RequireAuth).Get("/transfers/{id}", p.InventoryHandler.GetTransfer)
 			inv.With(RequireRole("national_admin", "zonal_coordinator", "state_coordinator")).Post("/transfers/{id}/dispatch", p.InventoryHandler.DispatchTransfer)
-			inv.With(RequireRole("national_admin", "zonal_coordinator", "state_coordinator", "lga_representative")).Post("/transfers/{id}/receive", p.InventoryHandler.ConfirmReceipt)
+			inv.With(RequireRole("national_admin", "zonal_coordinator", "state_coordinator", "lga_coordinator", "lga_representative")).Post("/transfers/{id}/receive", p.InventoryHandler.ConfirmReceipt)
 
 			// Discrepancies
 			inv.With(RequireAuth).Get("/discrepancies", p.InventoryHandler.ListDiscrepancies)
@@ -260,7 +273,7 @@ func NewRouter(p RouterParams) http.Handler {
 			inv.With(RequireRole("national_admin", "zonal_coordinator", "state_coordinator")).Post("/discrepancies/{id}/resolve", p.InventoryHandler.ResolveDiscrepancy)
 
 			// Stock Ledger & Reporting
-			inv.With(RequireRole("national_admin", "zonal_coordinator", "state_coordinator")).Get("/ledger", p.InventoryHandler.ListStockLedger)
+			inv.With(RequireRole("national_admin", "zonal_coordinator", "state_coordinator", "lga_coordinator", "lga_representative")).Get("/ledger", p.InventoryHandler.ListStockLedger)
 			inv.With(RequireAuth).Get("/summary", p.InventoryHandler.GetSummary)
 		})
 
@@ -517,7 +530,7 @@ func NewRouter(p RouterParams) http.Handler {
 			adm.With(RequireRole("super_admin")).Get("/super/coverage/lgas", p.AdminHandler.ListLGACoverage)
 
 			// Standard Overview for all coordinators
-			adm.With(RequireRole("national_admin", "state_coordinator", "zonal_coordinator", "lga_representative", "super_admin")).Get("/overview", p.AdminHandler.GetOverview)
+			adm.With(RequireRole("national_admin", "state_coordinator", "zonal_coordinator", "lga_representative", "lga_coordinator", "super_admin")).Get("/overview", p.AdminHandler.GetOverview)
 
 			// Privileged Audit Stream (Strictly restricted to Super Admin)
 			adm.With(RequireRole("super_admin")).Get("/audit-logs", p.AdminHandler.ListAuditLogs)
@@ -624,15 +637,21 @@ func NewRouter(p RouterParams) http.Handler {
 			// Public Transparency & Reports Administration Workspace
 			if p.ReportHandler != nil {
 				adm.Route("/reports", func(admRep chi.Router) {
-					admRep.Use(RequireRole("national_admin", "super_admin", "zonal_coordinator", "state_coordinator", "lga_representative"))
+					admRep.Use(func(next http.Handler) http.Handler {
+						return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+							next.ServeHTTP(w, r.WithContext(service.WithOperationalActor(r.Context(), GetCurrentUser(r.Context()))))
+						})
+					})
+
+					admRep.Use(RequireRole("national_admin", "super_admin", "zonal_coordinator", "state_coordinator", "lga_coordinator", "lga_representative"))
 					admRep.Get("/", p.ReportHandler.ListSnapshotsAdmin)
-					admRep.Get("/dashboard/stats", p.ReportHandler.GetDashboardStats)
+					admRep.With(RequireRole("super_admin", "national_admin")).Get("/dashboard/stats", p.ReportHandler.GetDashboardStats)
 					admRep.Post("/generate", p.ReportHandler.GenerateSnapshotAdmin)
-					admRep.Get("/scheduler/runs", p.ReportHandler.ListSchedulerRuns)
-					admRep.Get("/scheduler/runs/{id}", p.ReportHandler.GetSchedulerRun)
-					admRep.Get("/exports", p.ReportHandler.ListExportsAdmin)
-					admRep.Get("/audit", p.ReportHandler.ListAuditsAdmin)
-					admRep.Get("/settings", p.ReportHandler.GetSettingsAdmin)
+					admRep.With(RequireRole("super_admin", "national_admin")).Get("/scheduler/runs", p.ReportHandler.ListSchedulerRuns)
+					admRep.With(RequireRole("super_admin", "national_admin")).Get("/scheduler/runs/{id}", p.ReportHandler.GetSchedulerRun)
+					admRep.With(RequireRole("super_admin", "national_admin")).Get("/exports", p.ReportHandler.ListExportsAdmin)
+					admRep.With(RequireRole("super_admin", "national_admin")).Get("/audit", p.ReportHandler.ListAuditsAdmin)
+					admRep.With(RequireRole("super_admin", "national_admin")).Get("/settings", p.ReportHandler.GetSettingsAdmin)
 					admRep.Get("/{id}", p.ReportHandler.GetSnapshotDetailAdmin)
 					admRep.Post("/{id}/submit-review", p.ReportHandler.SubmitReviewAdmin)
 					admRep.Post("/{id}/submit", p.ReportHandler.SubmitReviewAdmin)

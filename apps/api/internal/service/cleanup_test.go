@@ -57,6 +57,11 @@ func TestCleanupCalendarAndCapacityLocking(t *testing.T) {
 		t.Fatalf("Failed to create admin user: %v", err)
 	}
 
+	// Operational appointments require an active, verified account.
+	if _, err := env.Pool.Exec(ctx, `UPDATE users SET status='active',is_verified=true WHERE id=$1`, regAdmin.UserID); err != nil {
+		t.Fatal(err)
+	}
+
 	_, err = env.Repo.Queries().CreateAppointment(ctx, db.CreateAppointmentParams{
 		ID:               security.GenerateUUID(),
 		UserID:           regAdmin.UserID,

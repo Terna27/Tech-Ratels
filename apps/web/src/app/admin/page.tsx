@@ -551,6 +551,8 @@ export default function AdminOverviewPage() {
 
     return (
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-10 space-y-8">
+<Link href="/coordinator" className="inline-block text-emerald-700 underline">Open coordinator operational workspace</Link>
+
         <div className="bg-emerald-950 text-white rounded-2xl p-6 sm:p-8 shadow-sm flex flex-col md:flex-row justify-between items-start md:items-center gap-4 border border-emerald-800">
           <div className="space-y-1">
             <div className="flex items-center gap-2">

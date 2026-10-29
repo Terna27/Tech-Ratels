@@ -909,6 +909,17 @@ func (s *ReportService) GenerateSnapshot(ctx context.Context, adminUser *db.User
 		}
 	}
 
+	if adminUser != nil {
+		scope, e := ResolveOperationalScope(ctx, s.repo, adminUser.ID)
+		if e != nil {
+			return nil, ErrGeographicScopeMismatch
+		}
+		if (scopeType == "national" && !scope.National) || (scopeType != "national" && !scope.Covers(valueOrEmpty(resolvedStateID), valueOrEmpty(resolvedLGAID), valueOrEmpty(resolvedZoneID))) {
+			return nil, ErrGeographicScopeMismatch
+		}
+	} else if !req.IsSystemActor {
+		return nil, ErrGeographicScopeMismatch
+	}
 	// Aggregate live verified source data
 	aggregatedBytes, err := s.AggregateSourceData(ctx, req.ReportType, scopeType, resolvedZoneID, resolvedStateID, resolvedLGAID, pStart, pEnd, req.ReportingPeriod)
 	if err != nil {
@@ -1072,6 +1083,10 @@ func (s *ReportService) GenerateSnapshot(ctx context.Context, adminUser *db.User
 }
 
 func (s *ReportService) SubmitForReview(ctx context.Context, adminUser *db.User, snapshotID string, ipAddress *string) (*AdminSnapshotDetailDTO, error) {
+
+	if err := s.requireSnapshotScope(ctx, adminUser, snapshotID); err != nil {
+		return nil, err
+	}
 	snap, err := s.repo.Queries().GetReportSnapshotByID(ctx, snapshotID)
 	if err != nil {
 		return nil, ErrReportSnapshotNotFound
@@ -1114,6 +1129,10 @@ func (s *ReportService) SubmitForReview(ctx context.Context, adminUser *db.User,
 }
 
 func (s *ReportService) ApproveSnapshot(ctx context.Context, reviewer *db.User, snapshotID string, reason string, ipAddress *string) (*AdminSnapshotDetailDTO, error) {
+
+	if err := s.requireSnapshotScope(ctx, reviewer, snapshotID); err != nil {
+		return nil, err
+	}
 	snap, err := s.repo.Queries().GetReportSnapshotByID(ctx, snapshotID)
 	if err != nil {
 		return nil, ErrReportSnapshotNotFound
@@ -1178,6 +1197,10 @@ func (s *ReportService) ApproveSnapshot(ctx context.Context, reviewer *db.User, 
 }
 
 func (s *ReportService) RejectSnapshot(ctx context.Context, reviewer *db.User, snapshotID string, reason string, ipAddress *string) (*AdminSnapshotDetailDTO, error) {
+
+	if err := s.requireSnapshotScope(ctx, reviewer, snapshotID); err != nil {
+		return nil, err
+	}
 	snap, err := s.repo.Queries().GetReportSnapshotByID(ctx, snapshotID)
 	if err != nil {
 		return nil, ErrReportSnapshotNotFound
@@ -1361,6 +1384,10 @@ func (s *ReportService) WithdrawPublication(ctx context.Context, user *db.User, 
 }
 
 func (s *ReportService) ReviseSnapshot(ctx context.Context, user *db.User, snapshotID string, correctionNotes string, ipAddress *string) (*AdminSnapshotDetailDTO, error) {
+
+	if err := s.requireSnapshotScope(ctx, user, snapshotID); err != nil {
+		return nil, err
+	}
 	snap, err := s.repo.Queries().GetReportSnapshotByID(ctx, snapshotID)
 	if err != nil {
 		return nil, ErrReportSnapshotNotFound
@@ -2209,6 +2236,23 @@ func (s *ReportService) ListSnapshotsAdmin(ctx context.Context, status, reportTy
 		return nil, err
 	}
 
+	if actor := operationalActor(ctx); actor != nil {
+		scope, e := ResolveOperationalScope(ctx, s.repo, actor.ID)
+		if e != nil {
+			return nil, e
+		}
+		if !scope.National {
+			rows, err = s.repo.Queries().ListScopedReportSnapshots(ctx, db.ListReportSnapshotsAdminParams{Status: stPg, ReportType: rtPg, ScopeType: scPg, StateID: sidPg, LimitCount: pageSize, OffsetCount: offset}, scope.States, scope.LGAs, scope.Zones)
+			if err != nil {
+				return nil, err
+			}
+			totalCount, err = s.repo.Queries().CountScopedReportSnapshots(ctx, db.CountReportSnapshotsAdminParams{Status: stPg, ReportType: rtPg, ScopeType: scPg, StateID: sidPg}, scope.States, scope.LGAs, scope.Zones)
+			if err != nil {
+				return nil, err
+			}
+		}
+	}
+
 	var dtos []AdminSnapshotDetailDTO
 	for _, r := range rows {
 		item := AdminSnapshotDetailDTO{
@@ -2397,95 +2441,14 @@ func (s *ReportService) HasSnapshotGeographicAuthority(ctx context.Context, user
 	if user == nil || snap == nil {
 		return false
 	}
-
-	// Super Admin and National Admin have national jurisdiction covering all operations and scopes
-	if user.PrimaryRole == "super_admin" || user.PrimaryRole == "national_admin" {
-		return true
-	}
-	for _, a := range appointments {
-		if a.Status != "active" {
-			continue
-		}
-		if a.RoleType == "super_admin" || a.RoleType == "national_admin" || strings.ToLower(a.JurisdictionType) == "national" {
-			return true
-		}
-	}
-
-	scope := strings.ToLower(snap.ScopeType)
-	// If the snapshot has national scope, only national administrators can inspect unpublished governance snapshots
-	if scope == "national" {
+	scope, err := ResolveOperationalScope(ctx, s.repo, user.ID)
+	if err != nil {
 		return false
 	}
-
-	for _, a := range appointments {
-		if a.Status != "active" {
-			continue
-		}
-		appType := strings.ToLower(a.JurisdictionType)
-		appID := ""
-		if a.JurisdictionID.Valid {
-			appID = a.JurisdictionID.String
-		}
-		if appID == "" {
-			continue
-		}
-
-		// Zonal Coordinator
-		if (appType == "zone" || appType == "zonal") && (a.RoleType == "zonal_coordinator" || a.RoleType == "zonal_admin") {
-			if scope == "zone" && snap.ZoneID != nil && *snap.ZoneID == appID {
-				return true
-			}
-			if scope == "state" && snap.StateID != nil && *snap.StateID != "" {
-				st, err := s.repo.Queries().GetStateByID(ctx, *snap.StateID)
-				if err == nil && st.ZoneID == appID {
-					return true
-				}
-			}
-			if scope == "lga" {
-				if snap.StateID != nil && *snap.StateID != "" {
-					st, err := s.repo.Queries().GetStateByID(ctx, *snap.StateID)
-					if err == nil && st.ZoneID == appID {
-						return true
-					}
-				} else if snap.LGAID != nil && *snap.LGAID != "" {
-					lga, err := s.repo.Queries().GetLGAByID(ctx, *snap.LGAID)
-					if err == nil && lga.StateID != "" {
-						st, errSt := s.repo.Queries().GetStateByID(ctx, lga.StateID)
-						if errSt == nil && st.ZoneID == appID {
-							return true
-						}
-					}
-				}
-			}
-		}
-
-		// State Coordinator
-		if appType == "state" && (a.RoleType == "state_coordinator" || a.RoleType == "state_admin") {
-			if scope == "state" && snap.StateID != nil && *snap.StateID == appID {
-				return true
-			}
-			if scope == "lga" {
-				if snap.StateID != nil && *snap.StateID == appID {
-					return true
-				}
-				if snap.LGAID != nil && *snap.LGAID != "" {
-					lga, err := s.repo.Queries().GetLGAByID(ctx, *snap.LGAID)
-					if err == nil && lga.StateID == appID {
-						return true
-					}
-				}
-			}
-		}
-
-		// LGA Representative / Coordinator
-		if appType == "lga" && (a.RoleType == "lga_representative" || a.RoleType == "lga_coordinator") {
-			if scope == "lga" && snap.LGAID != nil && *snap.LGAID == appID {
-				return true
-			}
-		}
+	if snap.ScopeType == "national" {
+		return scope.National
 	}
-
-	return false
+	return scope.Covers(valueOrEmpty(snap.StateID), valueOrEmpty(snap.LGAID), valueOrEmpty(snap.ZoneID))
 }
 
 func (s *ReportService) ListReportAudits(ctx context.Context, snapshotID *string, page, pageSize int32) ([]ReportAuditItem, error) {
@@ -3387,4 +3350,19 @@ func (s *ReportService) ListReportAuditsEnhanced(
 		Page:       page,
 		PageSize:   pageSize,
 	}, nil
+}
+
+func (s *ReportService) requireSnapshotScope(ctx context.Context, u *db.User, id string) error {
+	if u == nil {
+		return ErrGeographicScopeMismatch
+	}
+	row, err := s.repo.Queries().GetReportSnapshotByID(ctx, id)
+	if err != nil {
+		return ErrReportSnapshotNotFound
+	}
+	snap := &AdminSnapshotDetailDTO{ScopeType: row.ScopeType, StateID: StringPtrFromText(row.StateID), LGAID: StringPtrFromText(row.LgaID), ZoneID: StringPtrFromText(row.ZoneID)}
+	if !s.HasSnapshotGeographicAuthority(ctx, u, nil, snap) {
+		return ErrGeographicScopeMismatch
+	}
+	return nil
 }

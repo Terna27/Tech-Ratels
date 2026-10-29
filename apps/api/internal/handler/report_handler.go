@@ -83,6 +83,9 @@ func (h *ReportHandler) GetOverview(w http.ResponseWriter, r *http.Request) {
 		ctx, &scope, zPtr, sPtr, lPtr, period,
 	)
 	if err != nil {
+		if reportAuthorizationError(w, err) {
+			return
+		}
 		if errors.Is(err, service.ErrReportPublicationNotFound) {
 			ErrorJSON(w, http.StatusNotFound, "REPORT_NOT_PUBLISHED",
 				"No overview report has been published for this period and location", "")
@@ -126,6 +129,9 @@ func (h *ReportHandler) GetCleanups(w http.ResponseWriter, r *http.Request) {
 
 	data, err := h.reportService.GetPublicCleanups(ctx, &scope, zPtr, sPtr, lPtr, period)
 	if err != nil {
+		if reportAuthorizationError(w, err) {
+			return
+		}
 		ErrorJSON(w, http.StatusInternalServerError, "INTERNAL_ERROR", "Failed to retrieve cleanup impact report", err.Error())
 		return
 	}
@@ -154,6 +160,9 @@ func (h *ReportHandler) GetParticipation(w http.ResponseWriter, r *http.Request)
 
 	data, err := h.reportService.GetPublicParticipation(ctx, &scope, zPtr, sPtr, lPtr, period)
 	if err != nil {
+		if reportAuthorizationError(w, err) {
+			return
+		}
 		ErrorJSON(w, http.StatusInternalServerError, "INTERNAL_ERROR", "Failed to retrieve participation report", err.Error())
 		return
 	}
@@ -174,6 +183,9 @@ func (h *ReportHandler) GetFinance(w http.ResponseWriter, r *http.Request) {
 
 	data, err := h.reportService.GetPublicFinance(ctx, &scope, sPtr, period)
 	if err != nil {
+		if reportAuthorizationError(w, err) {
+			return
+		}
 		if errors.Is(err, service.ErrReportPublicationNotFound) {
 			ErrorJSON(w, http.StatusNotFound, "REPORT_NOT_PUBLISHED",
 				"No financial report has been published for this period and location", "")
@@ -193,6 +205,9 @@ func (h *ReportHandler) GetFoundation(w http.ResponseWriter, r *http.Request) {
 
 	data, err := h.reportService.GetPublicFoundation(ctx, period)
 	if err != nil {
+		if reportAuthorizationError(w, err) {
+			return
+		}
 		if errors.Is(err, service.ErrReportPublicationNotFound) {
 			ErrorJSON(w, http.StatusNotFound, "REPORT_NOT_PUBLISHED",
 				"No foundation report has been published for this period", "")
@@ -223,6 +238,9 @@ func (h *ReportHandler) GetCommunityProjects(w http.ResponseWriter, r *http.Requ
 
 	data, err := h.reportService.GetPublicCommunityProjects(ctx, sPtr, lPtr, period)
 	if err != nil {
+		if reportAuthorizationError(w, err) {
+			return
+		}
 		ErrorJSON(w, http.StatusInternalServerError, "INTERNAL_ERROR", "Failed to retrieve community projects report", err.Error())
 		return
 	}
@@ -252,6 +270,9 @@ func (h *ReportHandler) ListPublications(w http.ResponseWriter, r *http.Request)
 
 	res, err := h.reportService.ListPublicPublications(ctx, reportType, scopeType, stateID, period, page, pageSize)
 	if err != nil {
+		if reportAuthorizationError(w, err) {
+			return
+		}
 		ErrorJSON(w, http.StatusInternalServerError, "INTERNAL_ERROR", "Failed to list published reports", err.Error())
 		return
 	}
@@ -269,6 +290,9 @@ func (h *ReportHandler) GetPublicationByID(w http.ResponseWriter, r *http.Reques
 
 	res, err := h.reportService.GetPublicPublicationByID(ctx, id)
 	if err != nil {
+		if reportAuthorizationError(w, err) {
+			return
+		}
 		if err == service.ErrReportPublicationNotFound {
 			ErrorJSON(w, http.StatusNotFound, "NOT_FOUND", "Published report not found", nil)
 			return
@@ -310,6 +334,9 @@ func (h *ReportHandler) DownloadPDF(w http.ResponseWriter, r *http.Request) {
 
 	pdfBytes, filename, err := h.reportService.ExportReportPDF(ctx, id)
 	if err != nil {
+		if reportAuthorizationError(w, err) {
+			return
+		}
 		if errors.Is(err, service.ErrReportPublicationNotFound) ||
 			errors.Is(err, service.ErrReportSnapshotNotFound) ||
 			errors.Is(err, service.ErrReportWithdrawn) ||
@@ -387,6 +414,9 @@ func (h *ReportHandler) DownloadCSV(w http.ResponseWriter, r *http.Request) {
 
 	csvBytes, filename, err := h.reportService.ExportReportCSV(ctx, id)
 	if err != nil {
+		if reportAuthorizationError(w, err) {
+			return
+		}
 		if errors.Is(err, service.ErrReportPublicationNotFound) ||
 			errors.Is(err, service.ErrReportSnapshotNotFound) ||
 			errors.Is(err, service.ErrReportWithdrawn) ||
@@ -503,6 +533,9 @@ func (h *ReportHandler) ListSnapshotsAdmin(w http.ResponseWriter, r *http.Reques
 
 	res, err := h.reportService.ListSnapshotsAdmin(ctx, stPtr, rtPtr, scPtr, sidPtr, page, pageSize)
 	if err != nil {
+		if reportAuthorizationError(w, err) {
+			return
+		}
 		ErrorJSON(w, http.StatusInternalServerError, "INTERNAL_ERROR", "Failed to list report snapshots", err.Error())
 		return
 	}
@@ -529,10 +562,20 @@ func (h *ReportHandler) GenerateSnapshotAdmin(w http.ResponseWriter, r *http.Req
 		return
 	}
 
+	req.IsSystemActor = false
+	req.TriggerSource = "admin_manual"
+
 	ip := r.RemoteAddr
 
 	res, err := h.reportService.GenerateSnapshot(ctx, user, req, &ip)
+	if errors.Is(err, service.ErrGeographicScopeMismatch) {
+		ErrorJSON(w, 403, "SCOPE_UNAUTHORIZED", err.Error(), nil)
+		return
+	}
 	if err != nil {
+		if reportAuthorizationError(w, err) {
+			return
+		}
 		if errors.Is(err, service.ErrInvalidReportScope) ||
 			errors.Is(err, service.ErrInvalidGeographicFilter) ||
 			errors.Is(err, service.ErrUnsupportedScopeForType) ||
@@ -563,6 +606,9 @@ func (h *ReportHandler) GetSnapshotDetailAdmin(w http.ResponseWriter, r *http.Re
 
 	res, err := h.reportService.GetSnapshotDetailAdmin(ctx, id, user)
 	if err != nil {
+		if reportAuthorizationError(w, err) {
+			return
+		}
 		if err == service.ErrReportSnapshotNotFound {
 			ErrorJSON(w, http.StatusNotFound, "NOT_FOUND", "Snapshot not found", nil)
 			return
@@ -573,7 +619,7 @@ func (h *ReportHandler) GetSnapshotDetailAdmin(w http.ResponseWriter, r *http.Re
 
 	// Non-published snapshots are restricted to administrators with geographic authority
 	apps := GetCurrentAppointments(ctx)
-	if res.Status != "published" && !h.reportService.HasSnapshotGeographicAuthority(ctx, user, apps, res) {
+	if !h.reportService.HasSnapshotGeographicAuthority(ctx, user, apps, res) {
 		ErrorJSON(w, http.StatusForbidden, "SCOPE_UNAUTHORIZED", "Administrator lacks geographic authority over this report snapshot", nil)
 		return
 	}
@@ -598,6 +644,9 @@ func (h *ReportHandler) SubmitReviewAdmin(w http.ResponseWriter, r *http.Request
 	ip := r.RemoteAddr
 	res, err := h.reportService.SubmitForReview(ctx, user, id, &ip)
 	if err != nil {
+		if reportAuthorizationError(w, err) {
+			return
+		}
 		if err == service.ErrReportSnapshotNotFound {
 			ErrorJSON(w, http.StatusNotFound, "NOT_FOUND", "Snapshot not found", nil)
 			return
@@ -638,6 +687,9 @@ func (h *ReportHandler) ApproveSnapshotAdmin(w http.ResponseWriter, r *http.Requ
 	ip := r.RemoteAddr
 	res, err := h.reportService.ApproveSnapshot(ctx, user, id, req.DecisionReason, &ip)
 	if err != nil {
+		if reportAuthorizationError(w, err) {
+			return
+		}
 		if err == service.ErrReportSnapshotNotFound {
 			ErrorJSON(w, http.StatusNotFound, "NOT_FOUND", "Snapshot not found", nil)
 			return
@@ -684,6 +736,9 @@ func (h *ReportHandler) RejectSnapshotAdmin(w http.ResponseWriter, r *http.Reque
 	ip := r.RemoteAddr
 	res, err := h.reportService.RejectSnapshot(ctx, user, id, req.Reason, &ip)
 	if err != nil {
+		if reportAuthorizationError(w, err) {
+			return
+		}
 		if err == service.ErrReportSnapshotNotFound {
 			ErrorJSON(w, http.StatusNotFound, "NOT_FOUND", "Snapshot not found", nil)
 			return
@@ -716,6 +771,9 @@ func (h *ReportHandler) PublishSnapshotAdmin(w http.ResponseWriter, r *http.Requ
 	ip := r.RemoteAddr
 	res, err := h.reportService.PublishSnapshot(ctx, user, id, &ip)
 	if err != nil {
+		if reportAuthorizationError(w, err) {
+			return
+		}
 		if err == service.ErrFinancialGovernanceRole {
 			ErrorJSON(w, http.StatusForbidden, "INSUFFICIENT_ROLE", err.Error(), nil)
 			return
@@ -759,6 +817,9 @@ func (h *ReportHandler) WithdrawSnapshotAdmin(w http.ResponseWriter, r *http.Req
 	ip := r.RemoteAddr
 	res, err := h.reportService.WithdrawPublication(ctx, user, id, req.Reason, &ip)
 	if err != nil {
+		if reportAuthorizationError(w, err) {
+			return
+		}
 		if err == service.ErrFinancialGovernanceRole {
 			ErrorJSON(w, http.StatusForbidden, "INSUFFICIENT_ROLE", err.Error(), nil)
 			return
@@ -802,6 +863,9 @@ func (h *ReportHandler) ReviseSnapshotAdmin(w http.ResponseWriter, r *http.Reque
 	ip := r.RemoteAddr
 	res, err := h.reportService.ReviseSnapshot(ctx, user, id, req.CorrectionNotes, &ip)
 	if err != nil {
+		if reportAuthorizationError(w, err) {
+			return
+		}
 		if err == service.ErrReportSnapshotNotFound {
 			ErrorJSON(w, http.StatusNotFound, "NOT_FOUND", "Snapshot not found", nil)
 			return
@@ -855,6 +919,9 @@ func (h *ReportHandler) ListAuditsAdmin(w http.ResponseWriter, r *http.Request) 
 
 	res, err := h.reportService.ListReportAuditsEnhanced(ctx, snapPtr, actPtr, fromDate, toDate, page, pageSize)
 	if err != nil {
+		if reportAuthorizationError(w, err) {
+			return
+		}
 		ErrorJSON(w, http.StatusInternalServerError, "INTERNAL_ERROR", "Failed listing report audit history", err.Error())
 		return
 	}
@@ -866,6 +933,9 @@ func (h *ReportHandler) GetDashboardStats(w http.ResponseWriter, r *http.Request
 	ctx := r.Context()
 	stats, err := h.reportService.GetAdminDashboardStats(ctx)
 	if err != nil {
+		if reportAuthorizationError(w, err) {
+			return
+		}
 		ErrorJSON(w, http.StatusInternalServerError, "INTERNAL_ERROR", "Failed retrieving admin dashboard statistics", err.Error())
 		return
 	}
@@ -917,6 +987,9 @@ func (h *ReportHandler) ListSchedulerRuns(w http.ResponseWriter, r *http.Request
 
 	res, err := h.reportService.ListSchedulerRuns(ctx, stPtr, repPtr, trgPtr, fromDate, toDate, page, pageSize)
 	if err != nil {
+		if reportAuthorizationError(w, err) {
+			return
+		}
 		ErrorJSON(w, http.StatusInternalServerError, "INTERNAL_ERROR", "Failed listing scheduler runs", err.Error())
 		return
 	}
@@ -933,6 +1006,9 @@ func (h *ReportHandler) GetSchedulerRun(w http.ResponseWriter, r *http.Request) 
 
 	run, err := h.reportService.GetSchedulerRunDetail(ctx, id)
 	if err != nil {
+		if reportAuthorizationError(w, err) {
+			return
+		}
 		ErrorJSON(w, http.StatusNotFound, "NOT_FOUND", "Scheduler run not found", err.Error())
 		return
 	}
@@ -967,6 +1043,9 @@ func (h *ReportHandler) ListExportsAdmin(w http.ResponseWriter, r *http.Request)
 
 	res, err := h.reportService.ListReportExportsAdmin(ctx, fmtPtr, stPtr, snapPtr, page, pageSize)
 	if err != nil {
+		if reportAuthorizationError(w, err) {
+			return
+		}
 		ErrorJSON(w, http.StatusInternalServerError, "INTERNAL_ERROR", "Failed listing report exports", err.Error())
 		return
 	}
@@ -995,6 +1074,9 @@ func (h *ReportHandler) RegenerateExportAdmin(w http.ResponseWriter, r *http.Req
 	ip := security.GetClientIP(r)
 	dto, err := h.reportService.RegenerateReportExport(ctx, user, snapshotID, format, &ip)
 	if err != nil {
+		if reportAuthorizationError(w, err) {
+			return
+		}
 		if errors.Is(err, service.ErrReportSnapshotNotFound) {
 			ErrorJSON(w, http.StatusNotFound, "NOT_FOUND", "Report snapshot not found", nil)
 			return
@@ -1031,6 +1113,9 @@ func (h *ReportHandler) DownloadExportAdmin(w http.ResponseWriter, r *http.Reque
 
 	exportBytes, fileName, mimeType, err := h.reportService.GetExportPrivateStream(ctx, user, snapshotID, format)
 	if err != nil {
+		if reportAuthorizationError(w, err) {
+			return
+		}
 		if errors.Is(err, service.ErrReportSnapshotNotFound) {
 			ErrorJSON(w, http.StatusNotFound, "NOT_FOUND", "Report snapshot not found", nil)
 			return
@@ -1063,6 +1148,9 @@ func (h *ReportHandler) GetSettingsAdmin(w http.ResponseWriter, r *http.Request)
 	ctx := r.Context()
 	defs, err := h.reportService.GetSettingsDefinitions(ctx)
 	if err != nil {
+		if reportAuthorizationError(w, err) {
+			return
+		}
 		ErrorJSON(w, http.StatusInternalServerError, "INTERNAL_ERROR", "Failed retrieving report definitions", err.Error())
 		return
 	}
@@ -1108,6 +1196,9 @@ func (h *ReportHandler) RunSchedulerAdmin(w http.ResponseWriter, r *http.Request
 		cleaned := strings.TrimSpace(req.TargetPeriod)
 		_, pEnd, _, _, err := worker.ParsePeriodUTC(cleaned)
 		if err != nil {
+			if reportAuthorizationError(w, err) {
+				return
+			}
 			ErrorJSON(w, http.StatusBadRequest, "INVALID_INPUT", "target_period must be in YYYY-MM or YYYY-Q[1-4] format", err.Error())
 			return
 		}
@@ -1133,6 +1224,9 @@ func (h *ReportHandler) RunSchedulerAdmin(w http.ResponseWriter, r *http.Request
 
 	res, err := h.scheduler.RunScheduledCycle(ctx, params)
 	if err != nil {
+		if reportAuthorizationError(w, err) {
+			return
+		}
 		if errors.Is(err, worker.ErrSchedulerAlreadyRunning) {
 			ErrorJSON(w, http.StatusConflict, "LOCK_CONFLICT", "Scheduler cycle already running on another node", nil)
 			return
@@ -1198,6 +1292,9 @@ func (h *ReportHandler) RunSchedulerCron(w http.ResponseWriter, r *http.Request)
 		cleaned := strings.TrimSpace(req.TargetPeriod)
 		_, pEnd, _, _, err := worker.ParsePeriodUTC(cleaned)
 		if err != nil {
+			if reportAuthorizationError(w, err) {
+				return
+			}
 			ErrorJSON(w, http.StatusBadRequest, "INVALID_INPUT", "target_period must be in YYYY-MM or YYYY-Q[1-4] format", err.Error())
 			return
 		}
@@ -1219,6 +1316,9 @@ func (h *ReportHandler) RunSchedulerCron(w http.ResponseWriter, r *http.Request)
 
 	res, err := h.scheduler.RunScheduledCycle(ctx, params)
 	if err != nil {
+		if reportAuthorizationError(w, err) {
+			return
+		}
 		if errors.Is(err, worker.ErrSchedulerAlreadyRunning) {
 			ErrorJSON(w, http.StatusConflict, "LOCK_CONFLICT", "Scheduler cycle already running on another node", nil)
 			return
@@ -1232,4 +1332,12 @@ func (h *ReportHandler) RunSchedulerCron(w http.ResponseWriter, r *http.Request)
 	}
 
 	JSON(w, http.StatusOK, res)
+}
+
+func reportAuthorizationError(w http.ResponseWriter, err error) bool {
+	if errors.Is(err, service.ErrGeographicScopeMismatch) || errors.Is(err, service.ErrCoordinatorUnauthorized) {
+		ErrorJSON(w, 403, "REPORT_SCOPE_UNAUTHORIZED", err.Error(), nil)
+		return true
+	}
+	return false
 }

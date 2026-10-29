@@ -144,12 +144,17 @@ func (s *CleanupService) GetEvent(ctx context.Context, eventID string) (*db.Even
 }
 
 func (s *CleanupService) CreateEvent(ctx context.Context, actorID, actorRole string, actorJurisdictionID *string, req CreateEventRequest) (*db.EventInstance, error) {
+	state, geoErr := s.repo.Queries().GetStateByID(ctx, req.StateID)
+	lga, lgaErr := s.repo.Queries().GetLGAByID(ctx, req.LGAID)
+	if geoErr != nil || lgaErr != nil || lga.StateID != state.ID || (req.ZoneID != nil && *req.ZoneID != "" && *req.ZoneID != state.ZoneID) {
+		return nil, ErrInvalidJurisdiction
+	}
 	// Centralized database-backed authorization check: verifies active approved appointment
 	app, err := AuthorizeCoordinatorForJurisdiction(ctx, s.repo, actorID, req.StateID, req.LGAID)
 	if err != nil {
 		// Fallback check if actorRole is super_admin or national_admin in user record
 		u, uErr := s.repo.Queries().GetUserByID(ctx, actorID)
-		if uErr == nil && (u.PrimaryRole == "super_admin" || u.PrimaryRole == "national_admin") {
+		if uErr == nil && u.Status == "active" && (u.PrimaryRole == "super_admin" || u.PrimaryRole == "national_admin") {
 			app = &db.Appointment{
 				ID:               "root_admin",
 				UserID:           actorID,
@@ -240,7 +245,7 @@ func (s *CleanupService) PublishEvent(ctx context.Context, actorID, actorRole st
 	if err != nil {
 		// Fallback check for super_admin or national_admin user role
 		u, uErr := s.repo.Queries().GetUserByID(ctx, actorID)
-		if uErr == nil && (u.PrimaryRole == "super_admin" || u.PrimaryRole == "national_admin") {
+		if uErr == nil && u.Status == "active" && (u.PrimaryRole == "super_admin" || u.PrimaryRole == "national_admin") {
 			ev, eErr := s.repo.Queries().GetEventInstanceByID(ctx, eventID)
 			if eErr != nil {
 				return nil, ErrEventNotFound
@@ -278,7 +283,7 @@ func (s *CleanupService) RescheduleEvent(ctx context.Context, actorID, actorRole
 	_ = event
 	if err != nil {
 		u, uErr := s.repo.Queries().GetUserByID(ctx, actorID)
-		if uErr == nil && (u.PrimaryRole == "super_admin" || u.PrimaryRole == "national_admin") {
+		if uErr == nil && u.Status == "active" && (u.PrimaryRole == "super_admin" || u.PrimaryRole == "national_admin") {
 			ev, eErr := s.repo.Queries().GetEventInstanceByID(ctx, eventID)
 			if eErr != nil {
 				return nil, ErrEventNotFound
@@ -320,7 +325,7 @@ func (s *CleanupService) CancelEvent(ctx context.Context, actorID, actorRole str
 	_ = event
 	if err != nil {
 		u, uErr := s.repo.Queries().GetUserByID(ctx, actorID)
-		if uErr == nil && (u.PrimaryRole == "super_admin" || u.PrimaryRole == "national_admin") {
+		if uErr == nil && u.Status == "active" && (u.PrimaryRole == "super_admin" || u.PrimaryRole == "national_admin") {
 			ev, eErr := s.repo.Queries().GetEventInstanceByID(ctx, eventID)
 			if eErr != nil {
 				return nil, ErrEventNotFound
@@ -633,4 +638,22 @@ func (s *CleanupService) ListParticipants(ctx context.Context, actorID string, e
 	}
 
 	return s.repo.Queries().ListEventParticipants(ctx, eventID)
+}
+
+func (s *CleanupService) ListOperationalEvents(ctx context.Context, u *db.User, state string) ([]map[string]interface{}, error) {
+	return NewCoordinatorService(s.repo).Events(ctx, u, state)
+}
+func (s *CleanupService) AuthorizeEventRead(ctx context.Context, u *db.User, id string) error {
+	scope, err := operationalScopeForActor(ctx, s.repo, u)
+	if err != nil {
+		return err
+	}
+	event, err := s.repo.Queries().GetEventInstanceByID(ctx, id)
+	if err != nil {
+		return err
+	}
+	if !scope.Covers(event.StateID, event.LgaID, "") {
+		return ErrScopeUnauthorized
+	}
+	return nil
 }

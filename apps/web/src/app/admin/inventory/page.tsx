@@ -51,6 +51,8 @@ export default function AdminInventoryPage() {
   const router = useRouter();
   const { user, isCoordinator, isSuperAdmin, isLoading } = useAuth();
 
+  const [destinations,setDestinations]=useState<StorageLocation[]>([]);
+  const canManageWarehouses=Boolean(user && (["super_admin","national_admin"].includes(user.primary_role)||user.appointments?.some(a=>a.status==="active"&&["super_admin","national_admin","state_coordinator","zonal_coordinator"].includes(a.role_type))));
   const [activeTab, setActiveTab] = useState<TabType>("overview");
   const [loading, setLoading] = useState(true);
   const [feedback, setFeedback] = useState<{ type: "success" | "error"; message: string } | null>(null);
@@ -201,6 +203,8 @@ export default function AdminInventoryPage() {
       loadAllData();
     }
   }, [user, isCoordinator, isLoading, router]);
+  useEffect(()=>{if(user&&isCoordinator)apiRequest<StorageLocation[]>("/inventory/transfer-destinations").then(setDestinations).catch(()=>setDestinations([]));},[user,isCoordinator]);
+
 
   // Handlers for Mutations
 
@@ -481,7 +485,7 @@ export default function AdminInventoryPage() {
               <ArrowLeft className="w-3.5 h-3.5" /> Back to Admin Overview
             </Link>
           </div>
-          <h1 className="text-2xl sm:text-3xl font-extrabold text-gray-900 mt-1 flex items-center gap-3">
+          <Link href="/coordinator" className="block text-emerald-700 underline">Coordinator operations</Link><h1 className="text-2xl sm:text-3xl font-extrabold text-gray-900 mt-1 flex items-center gap-3">
             <Boxes className="w-8 h-8 text-emerald-800" />
             Inventory & Material Distribution
           </h1>
@@ -499,12 +503,14 @@ export default function AdminInventoryPage() {
             <RefreshCw className="w-4 h-4" />
           </button>
           <button
+            disabled={!canManageWarehouses}
             onClick={() => setShowReceiveStockModal(true)}
             className="px-3.5 py-2 bg-emerald-800 hover:bg-emerald-900 text-white text-xs font-bold rounded-lg shadow-sm flex items-center gap-1.5 transition"
           >
             <Plus className="w-4 h-4" /> Receive Stock
           </button>
           <button
+            disabled={!canManageWarehouses}
             onClick={() => setShowDispatchModal(true)}
             className="px-3.5 py-2 bg-emerald-950 hover:bg-black text-white text-xs font-bold rounded-lg shadow-sm flex items-center gap-1.5 transition"
           >
@@ -663,6 +669,7 @@ export default function AdminInventoryPage() {
                         </td>
                         <td className="px-6 py-4 text-right">
                           <button
+                            disabled={!locations.some(loc=>loc.id===t.destination_location_id)}
                             onClick={() => openReceiveModal(t)}
                             className="px-3 py-1.5 bg-emerald-800 hover:bg-emerald-900 text-white rounded-md text-xs font-bold transition shadow-xs"
                           >
@@ -713,7 +720,8 @@ export default function AdminInventoryPage() {
             </div>
 
             <button
-              onClick={() => setShowAddItemModal(true)}
+              disabled={!canManageWarehouses}
+            onClick={() => setShowAddItemModal(true)}
               className="px-4 py-2 bg-emerald-800 hover:bg-emerald-900 text-white text-xs font-bold rounded-lg shadow-sm flex items-center gap-1.5 transition"
             >
               <PackagePlus className="w-4 h-4" /> Add Item to Catalogue
@@ -783,7 +791,8 @@ export default function AdminInventoryPage() {
             </div>
 
             <button
-              onClick={() => setShowAddLocationModal(true)}
+              disabled={!canManageWarehouses}
+            onClick={() => setShowAddLocationModal(true)}
               className="px-4 py-2 bg-emerald-800 hover:bg-emerald-900 text-white text-xs font-bold rounded-lg shadow-sm flex items-center gap-1.5 transition"
             >
               <Warehouse className="w-4 h-4" /> Add Storage Location
@@ -957,7 +966,8 @@ export default function AdminInventoryPage() {
             </div>
 
             <button
-              onClick={() => setShowDispatchModal(true)}
+              disabled={!canManageWarehouses}
+            onClick={() => setShowDispatchModal(true)}
               className="px-4 py-2 bg-emerald-800 hover:bg-emerald-900 text-white text-xs font-bold rounded-lg shadow-sm flex items-center gap-1.5 transition"
             >
               <Truck className="w-4 h-4" /> Create & Dispatch Shipment
@@ -1004,6 +1014,7 @@ export default function AdminInventoryPage() {
                       <td className="px-6 py-4 text-right">
                         {t.status === "dispatched" && (
                           <button
+                            disabled={!locations.some(loc=>loc.id===t.destination_location_id)}
                             onClick={() => openReceiveModal(t)}
                             className="px-3 py-1.5 bg-emerald-800 hover:bg-emerald-900 text-white rounded-md text-xs font-bold transition shadow-xs"
                           >
@@ -1763,7 +1774,7 @@ export default function AdminInventoryPage() {
                     className="w-full px-3 py-2 border rounded-lg focus:ring-1 focus:ring-emerald-700 outline-none"
                   >
                     <option value="">Select Destination...</option>
-                    {locations.map((loc) => (
+                    {destinations.map((loc) => (
                       <option key={loc.id} value={loc.id}>
                         {loc.name}
                       </option>

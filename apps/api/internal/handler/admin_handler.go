@@ -20,37 +20,11 @@ func NewAdminHandler(adminService *service.AdminService) *AdminHandler {
 
 func (h *AdminHandler) GetOverview(w http.ResponseWriter, r *http.Request) {
 	user := GetCurrentUser(r.Context())
-	actorRole := "super_admin"
-	actorJurisdictionType := "national"
-	actorJurisdictionName := "National Command (All Nigeria)"
-
-	if user != nil {
-		actorRole = user.PrimaryRole
-		if user.PrimaryRole == "super_admin" {
-			actorJurisdictionType = "national"
-			actorJurisdictionName = "National Command (All Nigeria)"
-		} else if user.PrimaryRole == "national_admin" {
-			actorJurisdictionType = "national"
-			actorJurisdictionName = "National Secretariat"
-		}
-
-		apps := GetCurrentAppointments(r.Context())
-		for _, a := range apps {
-			if a.Status == "active" {
-				actorRole = a.RoleType
-				actorJurisdictionType = a.JurisdictionType
-				actorJurisdictionName = a.RoleTitle
-				break
-			}
-		}
-	}
-
-	overview, err := h.adminService.GetOverview(r.Context(), actorRole, actorJurisdictionType, actorJurisdictionName)
+	overview, err := h.adminService.GetOperationalOverview(r.Context(), user)
 	if err != nil {
-		ErrorJSON(w, http.StatusInternalServerError, "INTERNAL_ERROR", err.Error(), nil)
+		coordinatorError(w, err)
 		return
 	}
-
 	JSON(w, http.StatusOK, overview)
 }
 
@@ -188,4 +162,3 @@ func (h *AdminHandler) UpdateOrganizationSetting(w http.ResponseWriter, r *http.
 
 	JSON(w, http.StatusOK, updated)
 }
-

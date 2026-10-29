@@ -64,7 +64,7 @@ jobs:
             curl --max-time 2 --fail --silent http://127.0.0.1:3008/marketplace/subscriptions && break
             sleep 0.5
           done
-          node --experimental-strip-types --test test/store-subscriptions-browser.test.mjs
+          node --experimental-strip-types --test test/store-subscriptions-browser.test.mjs test/coordinator-browser.test.mjs
         env:
           TEST_WEB_URL: http://127.0.0.1:3008
           CHROME_BIN: /usr/bin/google-chrome
