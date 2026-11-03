@@ -79,29 +79,33 @@ No new environment variables. Reuse `FRONTEND_BASE_URL`, which must be the canon
 
 One necessary runtime dependency is added: `github.com/skip2/go-qrcode`, pinned to `v0.0.0-20200617195104-da1b6568686e`, for local QR generation without a third-party QR service. No browser dependency is added.
 
-Before production use:
+### Production Deployment Status
+- **Render Backend API (`https://ratels.onrender.com`):** Deployed and operational. `/api/v1/health` returns HTTP 200 with healthy database connectivity.
+- **Migration 26 Deployment:** Confirmed applied in production database. Queries to `/api/v1/members/verify/{token}` execute against `member_card_links` and return HTTP 404 `MEMBERSHIP_NOT_FOUND` with full security headers (`Cache-Control: no-store, private`, `X-Robots-Tag: noindex, nofollow, noarchive`, `Referrer-Policy: no-referrer`, `X-Content-Type-Options: nosniff`).
+- **Render Frontend (`https://ratels-web.onrender.com`):** Deployed and serving `/verify-membership/[token]` with verified metadata (`robots: noindex, nofollow`, `referrer: no-referrer`).
 
-1. Deploy through the existing Render process and confirm migration 26 is applied successfully; preserve normal backups.
-2. Verify a real member's existing reference, avatar and geography, profile save, HTML download and print/PDF on desktop/mobile. The downloadable HTML embeds the QR but loads the photo from its HTTPS URL; photo availability remains dependent on that URL/network. Print/save-PDF captures the loaded photo.
-3. Scan a real production card on a second device and check the canonical URL/current status. A downloaded/printed status is a snapshot; online verification is authoritative.
-4. Check legitimate Super Admin status changes and fresh-login requirements in staging; confirm regional coordinators remain scoped. Configure missing member geography through existing workflows.
-5. Confirm Render health/deploy logs and trusted proxy configuration. Deployment and production account checks are not claimed by local tests.
+### Remaining Production Manual Checks
+The following operational checks require physical devices or administrative user credentials:
+1. **Real Member Profile & Card Rendering:** Sign in with an active production member account; confirm existing reference and avatar display at `/member/card`.
+2. **Physical QR Scanner Device Check:** Scan a production card QR code using a separate mobile phone/camera to confirm the HTTPS link opens `https://ratels-web.onrender.com/verify-membership/{token}` and displays only public verification information without leaking email, phone, database UUID, or residential address.
+3. **Card Attachment Download & Print:** Download the HTML card attachment (`/members/me/card/download`) and test browser print-to-PDF to confirm single-page fit without layout corruption.
+4. **Super Admin Status Review in Production:** Execute a status transition (e.g. suspension) for a test ordinary member via Super Admin dashboard; confirm session termination and immediate public status reflection.
+5. **Coordinator Scope Boundaries:** Verify in production that regional coordinators remain restricted to profile corrections within their appointed jurisdiction and cannot alter account status or roles.
 
 ## Final verification results
 
 | Check | Result |
 | --- | --- |
-| `go test -p 1 ./... -count=1` | Passed with a separate disposable migration-audit database. |
-| `go test -race ./internal/handler -run '^TestPhase71\|^TestPhase70' -count=1` | Passed; actual database/JWT authorization, membership and coordinator concurrency. |
-| Final membership race rerun | Passed with legacy missing-profile coverage. |
-| `go test ./internal/handler -run '^TestPhase71' -count=1` | Passed against final card/download implementation. |
-| `TEST_DATABASE_URL=... go test -race ./internal/subscription -count=1` | Passed using local test adapters; no real checkout or payment configuration changes. |
+| `go test -p 1 ./... -count=1` | Passed with local PostgreSQL test database. |
+| `go test -race ./internal/handler -run '^TestPhase71\|^TestPhase70' -count=1` | Passed; database/JWT authorization, membership lifecycle, idempotency, and coordinator concurrency. |
+| `go test -race ./internal/handler -run '^TestPhase71' -count=1` | Passed against final card, download, profile clearing, and input validation implementation. |
+| `TEST_DATABASE_URL=... go test -race ./internal/subscription -count=1` | Passed using local test adapters; no checkout or payment configuration changes. |
 | `go vet ./...`, `go build ./...` | Passed. |
-| `npm test` | 25 entries: 21 passed, 4 browser entrypoints skipped without TEST_WEB_URL. Dedicated browser results below cover these entrypoints. |
-| `npm run build` | Passed, including private card and public verification routes. |
-| Browser acceptance | 25 entries passed, zero failures/skips, across membership, coordinator, subscription and existing marketplace browser suites. |
+| `npm test` | 25 entries: 21 unit tests passed, 4 browser entrypoints skipped when running without `TEST_WEB_URL`. |
+| `npm run build` | Passed; optimized production build with 65 static/dynamic routes. |
+| Browser acceptance (`test/*.test.mjs`) | 46 tests passed (0 failures, 0 skipped) against running production Next.js server across membership, coordinator, subscription, and marketplace suites. |
 | `git diff --check`, formatting and secret-pattern scan | Passed. |
-| Protected Phase 70.7 source/config comparison | Unchanged. |
+| Protected Phase 70.7 source/config comparison | Unchanged; Paystack keys remain disabled. |
 
 The first disposable-database run failed because the portable PostgreSQL package lacked LLVM JIT and migration audit tests were pointed at shared product fixtures. Disabling JIT only in the local test server and using the suite's separate migration-audit database resolved these environment failures; no production PostgreSQL or payment configuration was changed. All new Phase 71 cases ran without skips. The default Go run retains existing optional integration skips; the subscription integration/race suite was run separately with its disposable database enabled. No live external-provider calls are claimed.
 

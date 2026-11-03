@@ -69,6 +69,10 @@ func TestPhase71CardPrivacyLifecycleAndAuthorization(t *testing.T) {
 		t.Fatal("privacy headers missing")
 	}
 	assertStatus(t, operationRequest(h, "", "GET", "/members/verify/"+id, nil), 404)
+	assertStatus(t, operationRequest(h, "", "GET", "/members/verify/"+strings.ToUpper(strings.TrimPrefix(path, "/verify-membership/")), nil), 404)
+	assertStatus(t, operationRequest(h, "", "GET", "/members/verify/0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcde", nil), 404)
+	assertStatus(t, operationRequest(h, "", "GET", "/members/verify/0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef0", nil), 404)
+	assertStatus(t, operationRequest(h, "", "GET", "/members/verify/%27%20OR%201=1--", nil), 404)
 	assertStatus(t, operationRequest(h, "", "GET", "/members/me/card", nil), 401)
 	assertStatus(t, operationRequest(h, token, "PATCH", "/members/"+id+"/status", map[string]string{"status": "active", "reason": "self"}), 403)
 	assertStatus(t, operationRequest(h, national, "PATCH", "/members/"+id+"/status", map[string]string{"status": "suspended", "reason": "not authorized"}), 403)
@@ -92,6 +96,8 @@ func TestPhase71CardPrivacyLifecycleAndAuthorization(t *testing.T) {
 			t.Fatal("inactive name exposed")
 		}
 	}
+	// Idempotent repetition of the same status is accepted without duplicating errors
+	assertStatus(t, operationRequest(h, root, "PATCH", "/members/"+id+"/status", map[string]string{"status": "active", "reason": "Idempotent recheck"}), 200)
 	assertStatus(t, operationRequest(h, token, "GET", "/members/me/card", nil), 401)
 	var n int
 	err := h.Pool.QueryRow(ctx, `SELECT count(*) FROM audit_events WHERE actor_id=$1 AND resource_id=$2 AND action='change_membership_status'`, admin, id).Scan(&n)
@@ -127,6 +133,22 @@ func TestPhase71ProfileValidationStableReferencesAndConcurrentCards(t *testing.T
 	assertStatus(t, w, 200)
 	if !strings.Contains(w.Header().Get("Content-Disposition"), "attachment") || !strings.Contains(w.Body.String(), "data:image/png;base64,") {
 		t.Fatal("download incomplete")
+	}
+	// Clearing optional avatar_url, address, and home geography clears values and download photo
+	assertStatus(t, operationRequest(h, token, "PUT", "/members/me/profile", map[string]interface{}{
+		"avatar_url":    "",
+		"address":       "",
+		"home_state_id": "",
+		"home_lga_id":   "",
+	}), 200)
+	clearedCard := cardFixture(t, h, token)
+	if clearedCard["photo_url"] != nil && clearedCard["photo_url"] != "" {
+		t.Fatalf("expected photo_url to be cleared, got %v", clearedCard["photo_url"])
+	}
+	w = operationRequest(h, token, "GET", "/members/me/card/download", nil)
+	assertStatus(t, w, 200)
+	if strings.Contains(w.Body.String(), `class="photo"`) {
+		t.Fatal("cleared photo should not render img in download")
 	}
 	_, err := h.Pool.Exec(ctx, `UPDATE users SET membership_reference='REPLACEMENT' WHERE id=$1`, id)
 	if err == nil {
