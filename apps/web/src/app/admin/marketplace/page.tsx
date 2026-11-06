@@ -45,7 +45,7 @@ type AdminTab =
 
 export default function AdminMarketplacePage() {
   const router = useRouter();
-  const { user, isCoordinator, isLoading: authLoading } = useAuth();
+  const { user, isCoordinator, isSuperAdmin, isLoading: authLoading } = useAuth();
 
   const hasStateOrZonalAuthority = Boolean(
     user && (
@@ -148,6 +148,29 @@ export default function AdminMarketplacePage() {
     } finally {
       setLoading(false);
       setRefreshing(false);
+    }
+  };
+
+  const handleVendorAction = async (business: any, action: "suspend" | "restore" | "revoke") => {
+    if (!isSuperAdmin) return;
+    if (action === "revoke" && !window.confirm("Revoke this vendor? Historical orders and reviews will be preserved.")) return;
+    const reason = window.prompt("Administrative reason for " + action + " of " + business.name + ":");
+    if (!reason) return;
+    if (action === "revoke" && reason.trim().length < 10) {
+      setError("Revocation needs a reason of at least 10 characters.");
+      return;
+    }
+    setError(null);
+    setSuccess(null);
+    try {
+      await apiRequest("/marketplace/admin/businesses/" + business.id + "/" + action, {
+        method: "POST",
+        body: JSON.stringify({ reason: reason.trim() }),
+      });
+      setSuccess("Vendor " + business.name + " " + (action === "revoke" ? "revoked" : action === "suspend" ? "suspended" : "restored") + ".");
+      void loadTabContent("businesses");
+    } catch (err: any) {
+      setError(err?.message || "Unable to update vendor status");
     }
   };
 
@@ -514,6 +537,7 @@ export default function AdminMarketplacePage() {
                 <option value="approved">Approved</option>
                 <option value="rejected">Rejected</option>
                 <option value="suspended">Suspended</option>
+                <option value="revoked">Revoked</option>
               </select>
             </div>
           </div>
@@ -572,7 +596,7 @@ export default function AdminMarketplacePage() {
                           </Badge>
                         </td>
                         <td className="py-3.5 px-4 text-right space-x-2">
-                          {hasStateOrZonalAuthority ? (
+                          {isSuperAdmin ? (
                             <>
                               <button
                                 onClick={() => {
@@ -594,6 +618,18 @@ export default function AdminMarketplacePage() {
                               >
                                 Reject
                               </button>
+                              {b.status === "approved" && (
+                                <button type="button" onClick={() => { void handleVendorAction(b, "suspend"); }}
+                                  className="px-2.5 py-1 bg-amber-50 text-amber-800 font-bold rounded-lg text-[11px]">Suspend</button>
+                              )}
+                              {(b.status === "suspended" || b.status === "rejected") && (
+                                <button type="button" onClick={() => { void handleVendorAction(b, "restore"); }}
+                                  className="px-2.5 py-1 bg-blue-50 text-blue-800 font-bold rounded-lg text-[11px]">Restore</button>
+                              )}
+                              {b.status !== "revoked" && (
+                                <button type="button" onClick={() => { void handleVendorAction(b, "revoke"); }}
+                                  className="px-2.5 py-1 bg-red-100 text-red-900 font-bold rounded-lg text-[11px]">Revoke</button>
+                              )}
                             </>
                           ) : (
                             <span className="text-[11px] text-gray-400 italic">Oversight Only</span>
