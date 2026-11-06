@@ -52,3 +52,16 @@ Product detail pages display star averages, customer comments, uploaded photos a
 - Add richer review sorting, pagination, and misuse/abuse detection rules. Current public review feed is limited to the newest 100 reviews.
 - Verify the new Super Admin revocation action and its migration against staging and live accounts.
 - Investigate active-subscription limits and publishing checks under concurrent vendor requests.
+
+## Additional verified design changes — November 6, 2026
+
+- Vendor revocation has a dedicated Super Admin endpoint and requires an administrative reason. Revoked vendors cannot create or update listings; legacy approval, suspension and restoration are blocked from silently reactivating them. Existing orders and reviews are preserved.
+- New product publishing and draft-to-published transitions require meaningful titles, descriptions of 40–5000 characters, category, SKU, nonnegative stock and at least one product image. Existing published listings are grandfathered for editing to avoid destructive retroactive changes.
+- Newly published product photos must use server-generated vendor-specific R2 object URLs, not external image URLs or images assigned to another seller.
+- Public review listing now supports `sort=newest|oldest|highest|lowest|with_photos` and `page=1...` with a fixed 20 items per page and validated sort options; the returned rating average and count reflect all published reviews. The product page provides sorting and pagination controls.
+- Review tests include sorting, pagination, and rejection of malformed sorting parameters. Image ownership validation also has unit tests for external URLs, cross-vendor URLs, invalid keys, and missing storage.
+- Live checkout and live store subscription payments remain disabled. No NGO functionality is introduced. Existing administrative finance authorization was not changed during this marketplace work.
+
+## Live acceptance still required
+
+Confirm migration 27 (reviews) and migration 28 (vendor revocation) in the actual Neon production database, and verify the latest GitHub Actions run completes successfully. Test buyer photo upload and download, admin review hiding/restoration, vendor revocation, new listing publication, cross-vendor image rejection, and preservation of existing order history with designated accounts. Do not claim production readiness based on CI alone.
