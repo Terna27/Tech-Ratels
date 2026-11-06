@@ -480,6 +480,12 @@ func (h *MarketplaceHandler) CreateProduct(w http.ResponseWriter, r *http.Reques
 		return
 	}
 	req.BusinessID = myB.ID
+	if req.Status == "" || req.Status == "published" {
+		if err := validateMarketplacePublishListing(req.Title, req.Description, req.Category, req.SKU, req.Images, req.StockQuantity); err != nil {
+			ErrorJSON(w, http.StatusBadRequest, "LISTING_QUALITY_REQUIRED", err.Error(), nil)
+			return
+		}
+	}
 
 	p, err := h.marketplaceService.CreateProduct(r.Context(), user, req)
 	if errors.Is(err, service.ErrBusinessNotApproved) || errors.Is(err, service.ErrUnauthorizedSellerAction) {
@@ -501,6 +507,22 @@ func (h *MarketplaceHandler) UpdateProduct(w http.ResponseWriter, r *http.Reques
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		ErrorJSON(w, http.StatusBadRequest, "INVALID_REQUEST", "Malformed JSON payload", nil)
 		return
+	}
+
+	// Historical published products remain editable without retroactive data loss.
+	// New draft-to-published transitions must meet listing quality requirements.
+	if req.Status == "published" {
+		existing, lookupErr := h.marketplaceService.GetProductByID(r.Context(), id)
+		if lookupErr != nil {
+			ErrorJSON(w, http.StatusNotFound, "NOT_FOUND", "Product not found", nil)
+			return
+		}
+		if existing.Status != "published" {
+			if err := validateMarketplacePublishListing(req.Title, req.Description, req.Category, req.SKU, req.Images, req.StockQuantity); err != nil {
+				ErrorJSON(w, http.StatusBadRequest, "LISTING_QUALITY_REQUIRED", err.Error(), nil)
+				return
+			}
+		}
 	}
 
 	p, err := h.marketplaceService.UpdateProduct(r.Context(), user, id, req)
