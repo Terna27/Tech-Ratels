@@ -87,3 +87,10 @@ func (h *MarketplaceHandler) UploadReviewImage(w http.ResponseWriter,r *http.Req
  if err!=nil{ErrorJSON(w,http.StatusBadRequest,"INVALID_IMAGE","The image was rejected",nil);return}
  JSON(w,http.StatusCreated,result)
 }
+
+func (h *MarketplaceHandler) ListReviewReports(w http.ResponseWriter,r *http.Request) {
+ reports,err:=h.marketplaceService.ListReportedReviews(r.Context(),GetCurrentUser(r.Context()))
+ if errors.Is(err,service.ErrScopeUnauthorized){ErrorJSON(w,http.StatusForbidden,"FORBIDDEN","Super Admin required",nil);return}
+ if err!=nil{ErrorJSON(w,http.StatusInternalServerError,"REPORTS_UNAVAILABLE","Unable to load reported reviews",nil);return}
+ JSON(w,http.StatusOK,reports)
+}
