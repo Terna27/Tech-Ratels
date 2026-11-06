@@ -3,6 +3,7 @@ package handler
 import (
 	"encoding/json"
 	"net/http"
+	"time"
 
 	"github.com/go-chi/chi/v5"
 	"ratels-api/internal/service"
@@ -73,6 +74,9 @@ func (h *ActivityHandler) GetEvent(w http.ResponseWriter, r *http.Request) {
 			ErrorJSON(w, 404, "NOT_FOUND", "Event not found", nil)
 			return
 		}
+	}
+	if service.CleanupHasEnded(event.Status, event.EndTime.Time, time.Now()) {
+		event.Status = "completed"
 	}
 	JSON(w, http.StatusOK, event)
 }
@@ -226,6 +230,10 @@ func (h *ActivityHandler) RegisterForEvent(w http.ResponseWriter, r *http.Reques
 
 	reg, err := h.cleanupService.RegisterForEvent(r.Context(), user.ID, eventID)
 	if err != nil {
+		if err == service.ErrEventEnded {
+			ErrorJSON(w, http.StatusConflict, "EVENT_ENDED", err.Error(), nil)
+			return
+		}
 		if err == service.ErrAlreadyRegistered {
 			ErrorJSON(w, http.StatusConflict, "ALREADY_REGISTERED", err.Error(), nil)
 			return

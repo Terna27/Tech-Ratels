@@ -205,4 +205,21 @@ func TestCleanupCalendarAndCapacityLocking(t *testing.T) {
 	if !rescheduled.RescheduledFrom.Valid {
 		t.Errorf("Expected RescheduledFrom to be populated, got invalid")
 	}
+	// Past events reject fresh registration and reactivation without changing counts.
+	if err := env.CleanupService.CancelRegistration(ctx, userIDs[0], event.ID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := env.Pool.Exec(ctx, `UPDATE event_instances SET start_time=now()-interval '2 hours', end_time=now()-interval '1 hour' WHERE id=$1`, event.ID); err != nil {
+		t.Fatal(err)
+	}
+	for _, userID := range []string{userIDs[0], userIDs[2]} {
+		if _, err := env.CleanupService.RegisterForEvent(ctx, userID, event.ID); err != service.ErrEventEnded {
+			t.Fatalf("expected deadline error, got %v", err)
+		}
+	}
+	past, err := env.CleanupService.GetEvent(ctx, event.ID)
+	if err != nil || !service.CleanupHasEnded(past.Status, past.EndTime.Time, time.Now()) || past.RegisteredCount != 1 {
+		t.Fatalf("unexpected past event: %+v, %v", past, err)
+	}
+
 }

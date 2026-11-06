@@ -16,6 +16,7 @@ import (
 )
 
 var (
+	ErrEventEnded        = errors.New("this cleanup is done; registration is closed")
 	ErrEventNotFound     = errors.New("event not found")
 	ErrEventNotPublished = errors.New("event is not published for registration")
 	ErrEventAtCapacity   = errors.New("event has reached maximum registration capacity")
@@ -120,15 +121,39 @@ func (s *CleanupService) GetCurrentCampaign(ctx context.Context) (*db.CleanupCam
 func (s *CleanupService) ListEvents(ctx context.Context, stateFilter *string, publishedOnly bool) (interface{}, error) {
 	if publishedOnly {
 		if stateFilter != nil && *stateFilter != "" {
-			return s.repo.Queries().ListPublishedEventsByState(ctx, *stateFilter)
+			events, err := s.repo.Queries().ListPublishedEventsByState(ctx, *stateFilter)
+			for i := range events {
+				if CleanupHasEnded(events[i].Status, events[i].EndTime.Time, time.Now()) {
+					events[i].Status = "completed"
+				}
+			}
+			return events, err
 		}
-		return s.repo.Queries().ListPublishedEvents(ctx)
+		events, err := s.repo.Queries().ListPublishedEvents(ctx)
+		for i := range events {
+			if CleanupHasEnded(events[i].Status, events[i].EndTime.Time, time.Now()) {
+				events[i].Status = "completed"
+			}
+		}
+		return events, err
 	}
 
 	if stateFilter != nil && *stateFilter != "" {
-		return s.repo.Queries().ListEventsByState(ctx, *stateFilter)
+		events, err := s.repo.Queries().ListEventsByState(ctx, *stateFilter)
+		for i := range events {
+			if CleanupHasEnded(events[i].Status, events[i].EndTime.Time, time.Now()) {
+				events[i].Status = "completed"
+			}
+		}
+		return events, err
 	}
-	return s.repo.Queries().ListAllEvents(ctx)
+	events, err := s.repo.Queries().ListAllEvents(ctx)
+	for i := range events {
+		if CleanupHasEnded(events[i].Status, events[i].EndTime.Time, time.Now()) {
+			events[i].Status = "completed"
+		}
+	}
+	return events, err
 }
 
 func (s *CleanupService) ListEventsByCoordinator(ctx context.Context, coordinatorID string) ([]db.ListEventsByCoordinatorRow, error) {
@@ -378,6 +403,11 @@ func (s *CleanupService) RegisterForEvent(ctx context.Context, userID, eventID s
 
 		if event.Status != "published" {
 			return ErrEventNotPublished
+		}
+
+		// Enforce the deadline inside the registration lock, including reactivation.
+		if CleanupHasEnded(event.Status, event.EndTime.Time, time.Now()) {
+			return ErrEventEnded
 		}
 
 		if event.RegisteredCount >= event.Capacity {
@@ -656,4 +686,10 @@ func (s *CleanupService) AuthorizeEventRead(ctx context.Context, u *db.User, id 
 		return ErrScopeUnauthorized
 	}
 	return nil
+}
+
+// CleanupHasEnded derives the display lifecycle without claiming verified attendance
+// or changing coordinator workflow records. Equality closes the deadline as well.
+func CleanupHasEnded(status string, end, now time.Time) bool {
+	return status == "completed" || (status == "published" && !end.IsZero() && !now.Before(end))
 }

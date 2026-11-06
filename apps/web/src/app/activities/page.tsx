@@ -12,6 +12,7 @@ import {
   ArrowRight,
   AlertCircle,
 } from "lucide-react";
+import { cleanupIsDone } from "@/lib/cleanup";
 import { apiRequest } from "@/lib/api";
 import { EventInstance, State, LGA } from "@/lib/types";
 import { Badge } from "@/components/ui/Badge";
@@ -24,6 +25,12 @@ export default function ActivitiesPage() {
   const [selectedState, setSelectedState] = useState("");
   const [search, setSearch] = useState("");
   const [loading, setLoading] = useState(true);
+
+  const [now, setNow] = useState(Date.now());
+  useEffect(() => {
+    const timer = setInterval(() => setNow(Date.now()), 1000);
+    return () => clearInterval(timer);
+  }, []);
 
   useEffect(() => {
     async function loadData() {
@@ -118,6 +125,7 @@ export default function ActivitiesPage() {
       ) : (
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
           {filteredEvents.map((event) => {
+            const isDone = cleanupIsDone(event, now);
             const isFull = event.registered_count >= event.capacity;
             const percentFilled = Math.min(100, Math.round((event.registered_count / event.capacity) * 100));
 
@@ -128,8 +136,8 @@ export default function ActivitiesPage() {
               >
                 <div className="space-y-4">
                   <div className="flex justify-between items-start gap-2">
-                    <Badge variant={isFull ? "danger" : "success"} size="sm">
-                      {isFull ? "Capacity Reached" : `${event.capacity - event.registered_count} Slots Left`}
+                    <Badge variant={isDone ? "neutral" : isFull ? "danger" : "success"} size="sm">
+                      {isDone ? "Done" : isFull ? "Capacity Reached" : `${event.capacity - event.registered_count} Slots Left`}
                     </Badge>
                     <span className="text-xs text-gray-500 capitalize">{event.programme_type}</span>
                   </div>

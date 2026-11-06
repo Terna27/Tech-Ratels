@@ -19,6 +19,7 @@ import {
   Upload,
   Play,
 } from "lucide-react";
+import { cleanupIsDone } from "@/lib/cleanup";
 import { apiRequest } from "@/lib/api";
 import { EventInstance, EventRegistration, GalleryMedia } from "@/lib/types";
 import { useAuth } from "@/lib/auth-context";
@@ -40,6 +41,12 @@ export default function ActivityDetailPage({ params }: { params: Promise<{ id: s
   const [loading, setLoading] = useState(true);
   const [submitting, setSubmitting] = useState(false);
   const [feedback, setFeedback] = useState<{ type: "success" | "error"; message: string } | null>(null);
+
+  const [now, setNow] = useState(Date.now());
+  useEffect(() => {
+    const timer = setInterval(() => setNow(Date.now()), 1000);
+    return () => clearInterval(timer);
+  }, []);
 
   useEffect(() => {
     async function loadEvent() {
@@ -123,6 +130,8 @@ export default function ActivityDetailPage({ params }: { params: Promise<{ id: s
   const isFull = event.registered_count >= event.capacity;
   const percentFilled = Math.min(100, Math.round((event.registered_count / event.capacity) * 100));
 
+  const isDone = cleanupIsDone(event, now);
+
   return (
     <div className="max-w-4xl mx-auto px-4 sm:px-6 lg:px-8 py-12 space-y-8">
       <Link
@@ -144,7 +153,7 @@ export default function ActivityDetailPage({ params }: { params: Promise<{ id: s
         <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
           <div className="flex items-center gap-2">
             <Badge variant={event.status === "published" ? "success" : "warning"} size="md">
-              {event.status.toUpperCase()}
+              {isDone ? "Done" : event.status.toUpperCase()}
             </Badge>
             <span className="text-xs text-gray-500 font-medium capitalize">
               {event.programme_type} Programme
@@ -259,16 +268,16 @@ export default function ActivityDetailPage({ params }: { params: Promise<{ id: s
             <button
               type="button"
               onClick={handleRegister}
-              disabled={submitting || isFull || event.status !== "published"}
+              disabled={submitting || isDone || isFull || event.status !== "published"}
               className={`w-full sm:w-auto px-8 py-3.5 rounded-xl text-sm font-semibold shadow-sm transition ${
-                isFull
+                isDone || isFull
                   ? "bg-gray-200 text-gray-500 cursor-not-allowed"
                   : event.status !== "published"
                   ? "bg-gray-200 text-gray-500 cursor-not-allowed"
                   : "bg-emerald-800 hover:bg-emerald-900 text-white"
               }`}
             >
-              {isFull ? "Capacity Reached" : "Register to Attend Cleanup"}
+              {isDone ? "Done — registration closed" : isFull ? "Capacity Reached" : "Register to Attend Cleanup"}
             </button>
           )}
         </div>
