@@ -89,6 +89,11 @@ func NewRouter(p RouterParams) http.Handler {
 			members.With(RequireAuth).Get("/me/card/{format:download}", p.MemberHandler.Card)
 			members.With(RequireAuth).Patch("/{id}/status", p.MemberHandler.MembershipStatus)
 			members.With(RequireAuth).Put("/me/profile", p.MemberHandler.UpdateProfile)
+			members.With(RequireAuth).Get("/me/media", p.MemberHandler.GetMyMedia)
+			members.With(RequireAuth).Get("/me/media/cover", p.MemberHandler.GetMyCoverImage)
+			members.With(RequireAuth).Post("/me/media/{kind:avatar|cover}", p.MemberHandler.UploadMyMedia)
+			members.With(RequireAuth).Put("/me/media/{kind:avatar|cover}/position", p.MemberHandler.PositionMyMedia)
+			members.With(RequireAuth).Delete("/me/media/{kind:avatar|cover}", p.MemberHandler.DeleteMyMedia)
 			members.With(RequireRole("national_admin", "super_admin")).Get("/", p.MemberHandler.ListMembers)
 		})
 
