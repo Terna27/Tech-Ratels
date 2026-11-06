@@ -22,6 +22,7 @@ var (
 	ErrBusinessNotFound         = errors.New("marketplace business not found")
 	ErrBusinessAlreadyExists     = errors.New("a business profile already exists for this member")
 	ErrBusinessNotApproved       = errors.New("business is not approved for public trading")
+	ErrBusinessRevoked           = errors.New("vendor access has been revoked and cannot be restored without a new application")
 	ErrProductNotFound          = errors.New("marketplace product not found")
 	ErrBranchNotFound           = errors.New("business branch not found")
 	ErrOrderNotFound            = errors.New("marketplace order not found")
@@ -417,6 +418,10 @@ func (s *MarketplaceService) ApproveBusiness(ctx context.Context, admin *db.User
 		return nil, ErrScopeUnauthorized
 	}
 
+	existing, err := s.repo.Queries().GetMarketplaceBusinessByID(ctx, id)
+	if err != nil { return nil, ErrBusinessNotFound }
+	if existing.Status == "revoked" { return nil, ErrBusinessRevoked }
+
 	newStatus := "approved"
 	isVerified := true
 	now := time.Now()
@@ -459,6 +464,10 @@ func (s *MarketplaceService) SuspendBusiness(ctx context.Context, admin *db.User
 		return nil, ErrScopeUnauthorized
 	}
 
+	existing, err := s.repo.Queries().GetMarketplaceBusinessByID(ctx, id)
+	if err != nil { return nil, ErrBusinessNotFound }
+	if existing.Status == "revoked" { return nil, ErrBusinessRevoked }
+
 	trimmedReason := strings.TrimSpace(reason)
 	if trimmedReason == "" {
 		trimmedReason = "Administrative suspension"
@@ -489,6 +498,10 @@ func (s *MarketplaceService) RestoreBusiness(ctx context.Context, admin *db.User
 	if !s.isSuperAdminUser(admin, s.getActiveAppointments(ctx, admin.ID)) {
 		return nil, ErrScopeUnauthorized
 	}
+
+	existing, err := s.repo.Queries().GetMarketplaceBusinessByID(ctx, id)
+	if err != nil { return nil, ErrBusinessNotFound }
+	if existing.Status == "revoked" { return nil, ErrBusinessRevoked }
 
 	trimmedReason := strings.TrimSpace(reason)
 	if trimmedReason == "" {
