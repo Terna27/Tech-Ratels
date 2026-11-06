@@ -44,6 +44,39 @@ jobs:
           # HTTP 400 indicates the new endpoint is deployed; legacy route would be 404.
           check "Review invalid-sort handler (new code indicator)" "https://ratels.onrender.com/api/v1/marketplace/products/invalid-product-id/reviews?sort=invalid_sort_probe" "400" || failed=1
           check "Public frontend marketplace" "https://ratels-web.onrender.com/marketplace" "200" || failed=1
+          python3 - <<'PY'
+          import json, urllib.request, urllib.error
+          BASE = "https://ratels.onrender.com/api/v1/marketplace"
+          def get(path):
+              req=urllib.request.Request(BASE+path,headers={"Accept":"application/json","User-Agent":"RatelsReadOnlySmoke/1.0"})
+              with urllib.request.urlopen(req, timeout=25) as response:
+                  return json.loads(response.read(250000))
+          try:
+              status=get("/checkout/status")
+              print("LIVE CHECKOUT STATUS:",json.dumps(status,sort_keys=True)[:1200])
+              products=get("/products")
+              records=products if isinstance(products,list) else products.get("products",products.get("data",[]))
+              print("LIVE PUBLIC PRODUCTS COUNT:",len(records) if isinstance(records,list) else "unknown")
+              if isinstance(records,list) and records:
+                  product_id=records[0].get("id","")
+                  if product_id:
+                      review=get("/products/"+str(product_id)+"/reviews?sort=newest&page=1")
+                      print("LIVE PRODUCT REVIEW RESULT:",json.dumps({
+                          "count":review.get("count"),
+                          "average_rating":review.get("average_rating"),
+                          "page":review.get("page"),
+                          "page_size":review.get("page_size"),
+                          "reviews_received":len(review.get("reviews",[])),
+                      }))
+                      print("LIVE REVIEW QUERY VERIFIED FOR PUBLIC PRODUCT")
+                  else:
+                      print("LIVE REVIEW QUERY INDETERMINATE: no product id")
+              else:
+                  print("LIVE REVIEW QUERY INDETERMINATE: no public products found")
+          except Exception as exc:
+              print("LIVE EXTENDED CHECK FAILED:",type(exc).__name__,str(exc)[:350])
+              raise
+          PY
           if (( failed )); then
             echo "::error::Live public verification is incomplete or deployment is outdated."
             exit 1
