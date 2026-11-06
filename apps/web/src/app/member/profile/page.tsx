@@ -11,6 +11,7 @@ import { State, LGA } from "@/lib/types";
 import { Alert } from "@/components/ui/Alert";
 import { Badge } from "@/components/ui/Badge";
 import { Spinner } from "@/components/ui/Spinner";
+import MemberMediaEditor from "@/components/member/MemberMediaEditor";
 
 export default function MemberProfilePage() {
   const router = useRouter();
@@ -101,7 +102,7 @@ export default function MemberProfilePage() {
   if (!user) return null;
 
   return (
-    <div className="max-w-3xl mx-auto px-4 sm:px-6 lg:px-8 py-12 space-y-8">
+    <div className="max-w-5xl mx-auto px-4 sm:px-6 lg:px-8 py-10 space-y-8">
       <Link
         href="/member"
         className="inline-flex items-center text-xs font-semibold text-gray-500 hover:text-gray-900"
@@ -114,7 +115,7 @@ export default function MemberProfilePage() {
       <div className="space-y-2">
         <h1 className="text-2xl sm:text-3xl font-extrabold text-gray-900">Member Profile</h1>
         <p className="text-xs text-gray-600">
-          Manage your personal details, home location chapter, and badge visibility preferences.
+          Upload your profile and cover photographs, adjust their positioning, and manage your personal information.
         </p>
       </div>
 
@@ -123,6 +124,8 @@ export default function MemberProfilePage() {
           {feedback.message}
         </Alert>
       )}
+
+      <MemberMediaEditor name={displayName||user.display_name} avatar={photo} onChange={refreshUser} />
 
       {/* Account Info Read-Only Snapshot */}
       <div className="bg-gray-50 rounded-2xl border border-gray-200 p-5 space-y-3 text-xs">
@@ -218,10 +221,6 @@ export default function MemberProfilePage() {
           />
         </div>
 
-        <label className="block text-sm">Profile photo URL (HTTPS)
-          <input aria-label="Profile photo URL" type="url" maxLength={255} value={photo} onChange={e=>setPhoto(e.target.value)} className="w-full border rounded-lg p-3 mt-1" placeholder="https://…"/>
-          <span className="text-xs text-gray-600">Use a photo URL you control. Your photo appears on your private card; public verification does not publish it.</span>
-        </label>
         <div className="pt-2">
           <label className="flex items-center gap-2 cursor-pointer text-xs text-gray-700">
             <input
