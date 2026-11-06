@@ -23,6 +23,7 @@ import { useAuth } from "@/lib/auth-context";
 import { Spinner } from "@/components/ui/Spinner";
 import { Alert } from "@/components/ui/Alert";
 import { Badge } from "@/components/ui/Badge";
+import ProductReviews from "@/components/marketplace/ProductReviews";
 
 export default function ProductDetailPage({ params }: { params: Promise<{ id: string }> }) {
   const router = useRouter();
@@ -314,6 +315,7 @@ export default function ProductDetailPage({ params }: { params: Promise<{ id: st
             </div>
           </div>
         </div>
+        <ProductReviews productId={product.id} />
       </div>
     </div>
   );
