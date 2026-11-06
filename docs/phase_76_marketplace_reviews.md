@@ -7,6 +7,8 @@ Implementation branch: `main`. Database migration: `20261106000027_marketplace_r
 - A vendor registers a business in `pending_review`.
 - Only Super Admin can approve/reject, suspend, or restore a vendor via `/api/v1/marketplace/admin/businesses/{id}/{approve|suspend|restore}`.
 - Vendor approval is verified by the Go service before new products, product updates, and product image uploads. Unapproved businesses are blocked immediately.
+- A Super Admin can explicitly revoke a vendor through `POST /api/v1/marketplace/admin/businesses/{id}/revoke` with an administrative reason. Revoked businesses cannot publish or edit listings. The database constraint includes `revoked` via migration `20261106000028_marketplace_vendor_revocation.sql`.
+- New published products and draft-to-published updates require a meaningful title, a description of 40–5000 characters, category, SKU, and 1–5 images. Incomplete historical published listings remain editable to avoid damaging legacy records.
 - Public product detail endpoints hide nonpublished products and products belonging to businesses that are no longer approved.
 - Deleting a product from the seller interface archives it rather than physically deleting order history and review records. Existing order management and subscriptions are preserved.
 - Vendor image upload continues to use existing Cloudflare R2 support and server-side image inspection. A vendor can upload up to five product images.
@@ -46,7 +48,7 @@ Product detail pages display star averages, customer comments, uploaded photos a
 
 ## Remaining follow-up work
 
-- Define and enforce strict product-quality publishing requirements for description detail, specifications, condition, and minimum product photo requirements without breaking historical product records.
+- Expand specifications and product condition into structured fields (currently required as descriptive text within the product description).
 - Add richer review sorting, pagination, and misuse/abuse detection rules. Current public review feed is limited to the newest 100 reviews.
-- Implement explicit vendor revocation as a separate audited lifecycle action if needed (currently rejection, suspension and restoration are supported).
+- Verify the new Super Admin revocation action and its migration against staging and live accounts.
 - Investigate active-subscription limits and publishing checks under concurrent vendor requests.
