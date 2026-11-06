@@ -485,6 +485,11 @@ func (h *MarketplaceHandler) CreateProduct(w http.ResponseWriter, r *http.Reques
 			ErrorJSON(w, http.StatusBadRequest, "LISTING_QUALITY_REQUIRED", err.Error(), nil)
 			return
 		}
+		imagePrefix := h.marketplaceService.Storage().GetPublicURL(storage.MarketplaceImagePrefix + myB.ID + "/")
+		if err := validateMarketplaceImageOwnership(req.Images, imagePrefix); err != nil {
+			ErrorJSON(w, http.StatusBadRequest, "INVALID_PRODUCT_IMAGES", err.Error(), nil)
+			return
+		}
 	}
 
 	p, err := h.marketplaceService.CreateProduct(r.Context(), user, req)
@@ -520,6 +525,11 @@ func (h *MarketplaceHandler) UpdateProduct(w http.ResponseWriter, r *http.Reques
 		if existing.Status != "published" {
 			if err := validateMarketplacePublishListing(req.Title, req.Description, req.Category, req.SKU, req.Images, req.StockQuantity); err != nil {
 				ErrorJSON(w, http.StatusBadRequest, "LISTING_QUALITY_REQUIRED", err.Error(), nil)
+				return
+			}
+			imagePrefix := h.marketplaceService.Storage().GetPublicURL(storage.MarketplaceImagePrefix + existing.BusinessID + "/")
+			if err := validateMarketplaceImageOwnership(req.Images, imagePrefix); err != nil {
+				ErrorJSON(w, http.StatusBadRequest, "INVALID_PRODUCT_IMAGES", err.Error(), nil)
 				return
 			}
 		}
