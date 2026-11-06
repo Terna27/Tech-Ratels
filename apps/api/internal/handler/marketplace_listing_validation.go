@@ -2,6 +2,7 @@ package handler
 
 import (
  "errors"
+ "regexp"
  "strings"
  "unicode/utf8"
 )
@@ -22,5 +23,19 @@ func validateMarketplacePublishListing(title, description, category, sku string,
   return errors.New("published products require 1–5 clear product images")
  }
  if stock<0 { return errors.New("stock cannot be negative") }
+ return nil
+}
+
+var marketplaceStoredImageFilename = regexp.MustCompile(`^[a-f0-9]{32}\.(jpg|png|webp)$`)
+
+// validateMarketplaceImageOwnership only accepts server-generated product image
+// keys under the vendor's own storage prefix. External URLs are rejected when publishing.
+func validateMarketplaceImageOwnership(images []string, publicPrefix string) error {
+ if publicPrefix==""{return errors.New("product image storage is not configured")}
+ for _,imageURL:=range images {
+  if !strings.HasPrefix(imageURL,publicPrefix) || !marketplaceStoredImageFilename.MatchString(strings.TrimPrefix(imageURL,publicPrefix)) {
+   return errors.New("published product images must be uploaded to the vendor's own Ratels image storage")
+  }
+ }
  return nil
 }
