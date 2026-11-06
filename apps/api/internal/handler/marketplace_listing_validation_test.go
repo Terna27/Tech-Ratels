@@ -19,3 +19,20 @@ func TestMarketplacePublishListingValidation(t *testing.T) {
   if (err!=nil)!=tt.wantError{t.Fatalf("validation error = %v; wantError=%t",err,tt.wantError)}
  })}
 }
+
+func TestMarketplaceProductImageOwnership(t *testing.T) {
+ const prefix="https://images.example.org/marketplace/products/business-123/"
+ const validImage="https://images.example.org/marketplace/products/business-123/0123456789abcdef0123456789abcdef.jpg"
+ for _,tt:=range []struct{name string; images []string; prefix string; reject bool}{
+  {"own product photo",[]string{validImage},prefix,false},
+  {"other vendor photo",[]string{"https://images.example.org/marketplace/products/business-999/0123456789abcdef0123456789abcdef.jpg"},prefix,true},
+  {"outside storage",[]string{"https://external.example.org/image.jpg"},prefix,true},
+  {"fake key",[]string{prefix+"../../etc/passwd"},prefix,true},
+  {"missing storage",[]string{validImage},"",true},
+ } {
+  t.Run(tt.name,func(t *testing.T){
+   err:=validateMarketplaceImageOwnership(tt.images,tt.prefix)
+   if (err!=nil)!=tt.reject {t.Fatalf("image ownership error %v, wanted rejection=%v",err,tt.reject)}
+  })
+ }
+}
