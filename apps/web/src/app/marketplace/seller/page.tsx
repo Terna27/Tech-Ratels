@@ -391,6 +391,17 @@ export default function SellerPortalPage() {
         setProdSubmitting(false);
         return;
       }
+      if (!editingProductId && prodStatus === "published" && (
+        prodTitle.trim().length < 5 ||
+        prodDescription.trim().length < 40 ||
+        !prodCategory.trim() ||
+        !prodSku.trim() ||
+        imagesArray.length === 0
+      )) {
+        setError("To publish, provide a meaningful title, at least 40 characters describing specifications and condition, a category, SKU and at least one clear product image. You can save as Draft instead.");
+        setProdSubmitting(false);
+        return;
+      }
 
       const payload = {
         title: prodTitle.trim(),
