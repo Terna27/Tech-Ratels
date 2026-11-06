@@ -213,7 +213,7 @@ func main() {
 	// Handlers
 	healthH := handler.NewHealthHandler(repo)
 	authH := handler.NewAuthHandler(authService, cfg)
-	memberH := handler.NewMemberHandler(authService)
+	memberH := handler.NewMemberHandler(authService, storageService)
 	geoH := handler.NewGeographyHandler(geoService)
 	leadH := handler.NewLeadershipHandler(leadService)
 	activityH := handler.NewActivityHandler(cleanupService)
