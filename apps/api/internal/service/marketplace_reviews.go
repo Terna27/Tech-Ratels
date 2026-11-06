@@ -124,7 +124,7 @@ func (s *MarketplaceService) EditProductReview(ctx context.Context,user *db.User
  if err!=nil{return ErrReviewNotFound}
  if err:=s.ValidateReviewImages(user.ID,productID,input.Images);err!=nil{return err}
  images,err:=json.Marshal(input.Images);if err!=nil{return err}
- tag,err:=s.repo.Pool().Exec(ctx,`UPDATE marketplace_product_reviews SET rating=$1,comment=$2,images=$3,status='published',updated_at=now() WHERE id=$4 AND buyer_user_id=$5 AND created_at>now()-interval '30 days'`,input.Rating,strings.TrimSpace(input.Comment),images,id,user.ID)
+ tag,err:=s.repo.Pool().Exec(ctx,`UPDATE marketplace_product_reviews SET rating=$1,comment=$2,images=$3,updated_at=now() WHERE id=$4 AND buyer_user_id=$5 AND created_at>now()-interval '30 days'`,input.Rating,strings.TrimSpace(input.Comment),images,id,user.ID)
  if err!=nil{return err};if tag.RowsAffected()==0{return ErrReviewNotFound}
  _=s.audit.Log(ctx,&user.ID,&user.PrimaryRole,"edit_marketplace_review","marketplace_review",id,nil,nil,nil,nil)
  return nil
