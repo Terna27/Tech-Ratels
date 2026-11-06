@@ -41,7 +41,7 @@ func (s *AuthService) MemberMediaDetails(ctx context.Context,id string) (*Member
  if status!="active"{return nil,ErrAccountInactive}
  var avatarURL *string
  err=s.repo.Pool().QueryRow(ctx,`SELECT avatar_url FROM member_profiles WHERE user_id=$1`,id).Scan(&avatarURL)
- if err==nil && avatarURL!=nil {m.AvatarURL=*avatarURL}
+ if err==nil && avatarURL!=nil {m.AvatarURL=*avatarURL} else if err!=nil && !errors.Is(err,pgx.ErrNoRows){return nil,err}
  var coverKey *string
  err=s.repo.Pool().QueryRow(ctx,`SELECT cover_key,avatar_x,avatar_y,avatar_zoom,cover_x,cover_y,cover_zoom FROM member_profile_media WHERE user_id=$1`,id).
   Scan(&coverKey,&m.AvatarX,&m.AvatarY,&m.AvatarZoom,&m.CoverX,&m.CoverY,&m.CoverZoom)
@@ -76,6 +76,8 @@ func (s *AuthService) UploadMemberMedia(ctx context.Context,id,kind string,r io.
  if store==nil||!store.IsConfigured(){return nil,storage.ErrStorageUnconfigured}
  data,meta,err:=storage.InspectAndValidateImage(r,5*1024*1024)
  if err!=nil{return nil,err}
+ // Reject enormous compressed images before full pixel decoding to cap memory use.
+ if meta.Width*meta.Height>16000000 || meta.Width>8000 || meta.Height>8000 {return nil,ErrMemberMediaInvalid}
  if kind=="avatar" && (meta.Width<128||meta.Height<128) {return nil,ErrMemberMediaInvalid}
  if kind=="cover" && (meta.Width<640||meta.Height<160) {return nil,ErrMemberMediaInvalid}
  clean,_,_,_,err:=storage.SanitizeAndReencodeImage(data)
@@ -120,6 +122,9 @@ func (s *AuthService) RemoveMemberMedia(ctx context.Context,id,kind string,store
  var status string
  if err=tx.QueryRow(ctx,`SELECT status FROM users WHERE id=$1 FOR UPDATE`,id).Scan(&status);err!=nil{return err}
  if status!="active"{return ErrAccountInactive}
+ // Legacy users may have an avatar URL without any media tracking row.
+ _,err=tx.Exec(ctx,`INSERT INTO member_profile_media(user_id) VALUES($1) ON CONFLICT(user_id) DO NOTHING`,id)
+ if err!=nil{return err}
  var oldKey *string
  if kind=="avatar" {
   err=tx.QueryRow(ctx,`SELECT avatar_key FROM member_profile_media WHERE user_id=$1 FOR UPDATE`,id).Scan(&oldKey)
