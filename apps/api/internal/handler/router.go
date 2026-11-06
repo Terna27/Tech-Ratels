@@ -358,6 +358,7 @@ func NewRouter(p RouterParams) http.Handler {
 				mktAdm.With(RequireRole("super_admin")).Post("/businesses/{id}/restore", p.MarketplaceHandler.RestoreBusiness)
 				mktAdm.Get("/products", p.MarketplaceHandler.ListAllProductsAdmin)
 				mktAdm.With(RequireRole("super_admin")).Patch("/reviews/{id}/moderate", p.MarketplaceHandler.ModerateProductReview)
+				mktAdm.With(RequireRole("super_admin")).Get("/reviews/reports", p.MarketplaceHandler.ListReviewReports)
 				mktAdm.With(RequireRole("national_admin", "super_admin", "zonal_coordinator", "state_coordinator")).Put("/products/{id}/status", p.MarketplaceHandler.ModerateProduct)
 				mktAdm.Get("/orders", p.MarketplaceHandler.ListAllOrdersAdmin)
 				mktAdm.Get("/orders/{id}/shipments", p.MarketplaceHandler.ListOrderShipments)
