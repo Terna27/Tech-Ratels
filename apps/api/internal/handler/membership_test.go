@@ -5,7 +5,10 @@ import (
 	"context"
 	"encoding/base64"
 	"encoding/json"
+	"image"
+	"image/jpeg"
 	"image/png"
+	"mime/multipart"
 	"net/http"
 	"net/http/httptest"
 	"ratels-api/internal/security"
@@ -114,19 +117,19 @@ func TestPhase71ProfileValidationStableReferencesAndConcurrentCards(t *testing.T
 	la, lga, _, klga, _ := getLagosAndKanoData(t, h)
 	c := cardFixture(t, h, token)
 	ref := c["membership_reference"]
-	good := map[string]interface{}{"display_name": "Updated Member", "home_state_id": la.ID, "home_lga_id": lga.ID, "address": "Private address", "bio": "Volunteer", "avatar_url": "https://example.test/member.jpg", "is_public_badges": false}
+	good := map[string]interface{}{"display_name": "Updated Member", "home_state_id": la.ID, "home_lga_id": lga.ID, "address": "Private address", "bio": "Volunteer", "is_public_badges": false}
 	assertStatus(t, operationRequest(h, token, "PUT", "/members/me/profile", good), 200)
 	w := operationRequest(h, token, "GET", "/members/me", nil)
 	assertStatus(t, w, 200)
 	if !strings.Contains(w.Body.String(), `"display_name":"Updated Member"`) || !strings.Contains(w.Body.String(), `"is_public_badges":false`) {
 		t.Fatal(w.Body.String())
 	}
-	for _, bad := range []map[string]interface{}{{"primary_role": "super_admin"}, {"membership_reference": "other"}, {"status": "active"}, {"display_name": " "}, {"address": strings.Repeat("x", 256)}, {"bio": strings.Repeat("x", 2001)}, {"avatar_url": "javascript:alert(1)"}, {"avatar_url": "https://user:secret@example.test/photo"}, {"home_state_id": la.ID, "home_lga_id": klga.ID}, {"home_state_id": "missing"}} {
+	for _, bad := range []map[string]interface{}{{"primary_role": "super_admin"}, {"membership_reference": "other"}, {"status": "active"}, {"display_name": " "}, {"address": strings.Repeat("x", 256)}, {"bio": strings.Repeat("x", 2001)}, {"avatar_url": "https://example.test/unvalidated.jpg"}, {"avatar_url": "javascript:alert(1)"}, {"avatar_url": "https://user:secret@example.test/photo"}, {"home_state_id": la.ID, "home_lga_id": klga.ID}, {"home_state_id": "missing"}} {
 		assertStatus(t, operationRequest(h, token, "PUT", "/members/me/profile", bad), 400)
 	}
 	assertStatus(t, operationRequest(h, token, "PUT", "/members/me/profile", map[string]string{"bio": "Revised"}), 200)
 	updated := cardFixture(t, h, token)
-	if updated["membership_reference"] != ref || updated["display_name"] != "Updated Member" || updated["photo_url"] != "https://example.test/member.jpg" {
+	if updated["membership_reference"] != ref || updated["display_name"] != "Updated Member" || updated["photo_url"] != nil {
 		t.Fatal(updated)
 	}
 	w = operationRequest(h, token, "GET", "/members/me/card/download", nil)
@@ -265,5 +268,61 @@ func TestPhase71PublicVerificationRateLimit(t *testing.T) {
 	assertStatus(t, w, 429)
 	if w.Header().Get("Retry-After") == "" {
 		t.Fatal("rate limit missing retry delay")
+	}
+}
+
+func TestMemberMediaUploadOwnershipAndPrivacy(t *testing.T) {
+	h := setupTestHarness(t)
+	defer h.Cleanup()
+	id, token := operationalUser(t, h, "member")
+	_, other := operationalUser(t, h, "member")
+	upload := func(auth, kind string, payload []byte) *httptest.ResponseRecorder {
+		var body bytes.Buffer
+		form := multipart.NewWriter(&body)
+		part, err := form.CreateFormFile("file", "photo.jpg")
+		if err != nil {
+			t.Fatal(err)
+		}
+		part.Write(payload)
+		form.Close()
+		req := httptest.NewRequest("POST", "/api/v1/members/me/media/"+kind, &body)
+		req.Header.Set("Content-Type", form.FormDataContentType())
+		if auth != "" {
+			req.Header.Set("Authorization", "Bearer "+auth)
+		}
+		out := httptest.NewRecorder()
+		h.Router.ServeHTTP(out, req)
+		return out
+	}
+	var photo bytes.Buffer
+	if err := jpeg.Encode(&photo, image.NewRGBA(image.Rect(0, 0, 900, 300)), nil); err != nil {
+		t.Fatal(err)
+	}
+	assertStatus(t, upload("", "avatar", photo.Bytes()), 401)
+	assertStatus(t, upload(token, "avatar", []byte("not an image")), 400)
+	assertStatus(t, upload(token, "other", photo.Bytes()), 404)
+	assertStatus(t, upload(token, "avatar", photo.Bytes()), 200)
+	assertStatus(t, upload(token, "cover", photo.Bytes()), 200)
+	assertStatus(t, operationRequest(h, token, "PUT", "/members/me/media/avatar/position", map[string]int{"x": 10, "y": 90, "zoom": 150}), 200)
+	card := cardFixture(t, h, token)
+	if card["photo_x"] != float64(10) || card["photo_zoom"] != float64(150) {
+		t.Fatal(card)
+	}
+	assertStatus(t, operationRequest(h, other, "GET", "/members/me/media/cover", nil), 404)
+	assertStatus(t, operationRequest(h, other, "DELETE", "/members/me/media/avatar", nil), 200)
+	own := operationRequest(h, token, "GET", "/members/me/media/cover", nil)
+	assertStatus(t, own, 200)
+	if own.Header().Get("Cache-Control") != "no-store, private" {
+		t.Fatal("private cover cached")
+	}
+	if cardFixture(t, h, token)["photo_url"] == nil {
+		t.Fatal("another member removed owner photo")
+	}
+	assertStatus(t, operationRequest(h, token, "DELETE", "/members/me/media/avatar", nil), 200)
+	assertStatus(t, operationRequest(h, token, "DELETE", "/members/me/media/cover", nil), 200)
+	assertStatus(t, operationRequest(h, token, "GET", "/members/me/media/cover", nil), 404)
+	var count int
+	if err := h.Pool.QueryRow(context.Background(), `SELECT count(*) FROM member_profile_media WHERE user_id=$1`, id).Scan(&count); err != nil || count != 1 {
+		t.Fatal(count, err)
 	}
 }

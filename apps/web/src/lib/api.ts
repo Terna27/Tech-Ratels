@@ -59,7 +59,7 @@ export function clearCsrfToken() {
 
 export async function apiRequest<T = any>(
   endpoint: string,
-  options: RequestInit = {}
+  options: RequestInit & { onUploadProgress?: (percent: number) => void } = {}
 ): Promise<T> {
   const method = (options.method || "GET").toUpperCase();
   const isMutating = ["POST", "PUT", "DELETE", "PATCH"].includes(method);
@@ -100,7 +100,20 @@ export async function apiRequest<T = any>(
 
   let res: Response;
   try {
-    res = await fetch(url, {
+    res = options.onUploadProgress ? await new Promise<Response>((resolve, reject) => {
+      const xhr = new XMLHttpRequest();
+      xhr.open(method, url);
+      xhr.withCredentials = true;
+      xhr.timeout = 120000;
+      for (const [name, value] of Object.entries(headers)) xhr.setRequestHeader(name, value);
+      xhr.upload.onprogress = event => {
+        if (event.lengthComputable) options.onUploadProgress?.(Math.round(event.loaded / event.total * 100));
+      };
+      xhr.onload = () => resolve(new Response(xhr.responseText, {status: xhr.status, headers: {"Content-Type": xhr.getResponseHeader("Content-Type") || ""}}));
+      xhr.onerror = () => reject(new Error("Upload connection failed"));
+      xhr.ontimeout = () => reject(new Error("Upload timed out"));
+      xhr.send(options.body as FormData);
+    }) : await fetch(url, {
       ...options,
       credentials: options.credentials || "same-origin",
       headers,

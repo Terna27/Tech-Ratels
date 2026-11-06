@@ -17,21 +17,21 @@ import (
 )
 
 const (
-	MaxProductImageSize    = 5 * 1024 * 1024 // 5 MB
-	MaxImagesPerProduct    = 5
+	MaxProductImageSize         = 5 * 1024 * 1024 // 5 MB
+	MaxImagesPerProduct         = 5
 	MarketplaceImagePrefix      = "marketplace/products/"
 	CommunityRequestImagePrefix = "community/requests/"
 	CommunityProjectImagePrefix = "community/projects/"
 )
 
 var (
-	ErrImageTooLarge       = errors.New("image size exceeds maximum permitted limit of 5 MB")
-	ErrImageEmpty          = errors.New("image payload is empty")
-	ErrInvalidImageType    = errors.New("unsupported image format; only JPG, JPEG, PNG, and WebP are allowed")
-	ErrCorruptImage        = errors.New("image payload is malformed or corrupted")
-	ErrInvalidDimensions   = errors.New("image dimensions are invalid or exceed allowable limits")
-	ErrTooManyImages       = errors.New("a maximum of 5 images is permitted per product")
-	ErrUnauthorizedKey     = errors.New("unauthorized image key; key does not belong to your business")
+	ErrImageTooLarge     = errors.New("image size exceeds maximum permitted limit of 5 MB")
+	ErrImageEmpty        = errors.New("image payload is empty")
+	ErrInvalidImageType  = errors.New("unsupported image format; only JPG, JPEG, PNG, and WebP are allowed")
+	ErrCorruptImage      = errors.New("image payload is malformed or corrupted")
+	ErrInvalidDimensions = errors.New("image dimensions are invalid or exceed allowable limits")
+	ErrTooManyImages     = errors.New("a maximum of 5 images is permitted per product")
+	ErrUnauthorizedKey   = errors.New("unauthorized image key; key does not belong to your business")
 )
 
 // Allowed MIME types and their canonical extensions
@@ -107,7 +107,7 @@ func InspectAndValidateImage(r io.Reader, maxBytes int64) ([]byte, *ImageMetadat
 	if len(data) == 0 {
 		return nil, nil, ErrImageEmpty
 	}
-	if int64(len(data)) > MaxProductImageSize {
+	if int64(len(data)) > maxBytes {
 		return nil, nil, ErrImageTooLarge
 	}
 
@@ -162,10 +162,12 @@ func GenerateProductImageKey(businessID, ext string) string {
 // GenerateReviewImageKey isolates review attachments by buyer and purchased product.
 // The identifiers are server-derived, never supplied as a storage object key by the client.
 func GenerateReviewImageKey(userID, productID, ext string) string {
- cleanExt := strings.TrimPrefix(ext, ".")
- if cleanExt == "jpeg" { cleanExt = "jpg" }
- uniqueID := strings.ReplaceAll(uuid.New().String(), "-", "")
- return fmt.Sprintf("marketplace/reviews/%s/%s/%s.%s", userID, productID, uniqueID, cleanExt)
+	cleanExt := strings.TrimPrefix(ext, ".")
+	if cleanExt == "jpeg" {
+		cleanExt = "jpg"
+	}
+	uniqueID := strings.ReplaceAll(uuid.New().String(), "-", "")
+	return fmt.Sprintf("marketplace/reviews/%s/%s/%s.%s", userID, productID, uniqueID, cleanExt)
 }
 
 // ValidateKeyBelongsToBusiness ensures that an image key belongs exclusively to the given business ID.

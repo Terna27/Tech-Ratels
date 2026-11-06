@@ -79,6 +79,11 @@ func (s *AuthService) EditMemberProfile(ctx context.Context, id string, in Profi
 	if err != nil {
 		return nil, err
 	}
+	// Image changes must go through the validated, owner-scoped media endpoints.
+	// Accept an unchanged URL for older clients but reject replacement and stale forms.
+	if in.AvatarURL != nil && *in.AvatarURL != p.AvatarUrl.String {
+		return nil, ErrInvalidProfile
+	}
 	state, lga := p.HomeStateID.String, p.HomeLgaID.String
 	if in.HomeStateID != nil {
 		state = strings.TrimSpace(*in.HomeStateID)
@@ -136,6 +141,9 @@ type MembershipCard struct {
 	Reference        string `json:"membership_reference"`
 	Status           string `json:"status"`
 	Photo            string `json:"photo_url,omitempty"`
+	PhotoX           int    `json:"photo_x"`
+	PhotoY           int    `json:"photo_y"`
+	PhotoZoom        int    `json:"photo_zoom"`
 	VerificationPath string `json:"verification_path"`
 }
 
@@ -173,7 +181,12 @@ func (s *AuthService) MemberCard(ctx context.Context, id string) (*MembershipCar
 	if err != nil && !errors.Is(err, pgx.ErrNoRows) {
 		return nil, err
 	}
-	return &MembershipCard{Name: u.DisplayName, Reference: u.MembershipReference, Status: membershipStatus(u.Status, u.IsVerified), Photo: p.AvatarUrl.String, VerificationPath: "/verify-membership/" + token}, nil
+	x, y, zoom := 50, 50, 100
+	err = s.repo.Pool().QueryRow(ctx, `SELECT avatar_x,avatar_y,avatar_zoom FROM member_profile_media WHERE user_id=$1`, id).Scan(&x, &y, &zoom)
+	if err != nil && !errors.Is(err, pgx.ErrNoRows) {
+		return nil, err
+	}
+	return &MembershipCard{PhotoX: x, PhotoY: y, PhotoZoom: zoom, Name: u.DisplayName, Reference: u.MembershipReference, Status: membershipStatus(u.Status, u.IsVerified), Photo: p.AvatarUrl.String, VerificationPath: "/verify-membership/" + token}, nil
 }
 
 // Deliberate allowlist: never serialize users, profiles, internal IDs or badges publicly.

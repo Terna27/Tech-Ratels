@@ -129,7 +129,7 @@ export default function MemberProfilePage() {
         </Alert>
       )}
 
-      <MemberMediaEditor name={displayName||user.display_name} avatar={photo} onChange={refreshUser} />
+      <MemberMediaEditor name={displayName||user.display_name} avatar={photo} reference={user.membership_reference} location={[lgas.find(l=>l.id===homeLgaId)?.name,states.find(s=>s.id===homeStateId)?.name].filter(Boolean).join(", ")} bio={bio} onChange={refreshUser} />
 
       {/* Account Info Read-Only Snapshot */}
       <div className="bg-gray-50 rounded-2xl border border-gray-200 p-5 space-y-3 text-xs">

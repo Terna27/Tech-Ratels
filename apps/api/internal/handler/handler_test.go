@@ -95,7 +95,7 @@ func setupTestHarness(t *testing.T) *TestHarness {
 
 	healthH := handler.NewHealthHandler(repo)
 	authH := handler.NewAuthHandler(authSvc, cfg)
-	memberH := handler.NewMemberHandler(authSvc)
+	memberH := handler.NewMemberHandler(authSvc, mockStorage)
 	geoH := handler.NewGeographyHandler(geoSvc)
 	leadH := handler.NewLeadershipHandler(leadSvc)
 	activityH := handler.NewActivityHandler(cleanupSvc)

@@ -13,10 +13,11 @@ type MediaKind = "avatar" | "cover";
 type Position = {x:number;y:number;zoom:number};
 const DEFAULT:MediaSettings={has_cover:false,avatar_x:50,avatar_y:50,avatar_zoom:100,cover_x:50,cover_y:50,cover_zoom:100};
 
-export default function MemberMediaEditor({name,avatar,onChange}:{name:string;avatar?:string;onChange:()=>Promise<void>}) {
+export default function MemberMediaEditor({name,avatar,reference,location,bio,onChange}:{name:string;avatar?:string;reference?:string;location?:string;bio?:string;onChange:()=>Promise<void>}) {
  const [media,setMedia]=useState<MediaSettings>(DEFAULT);
  const [loading,setLoading]=useState(true);
  const [working,setWorking]=useState<MediaKind|null>(null);
+ const [progress,setProgress]=useState<number|null>(null);
  const [error,setError]=useState("");
  const [message,setMessage]=useState("");
  const [coverVersion,setCoverVersion]=useState(0);
@@ -50,7 +51,7 @@ export default function MemberMediaEditor({name,avatar,onChange}:{name:string;av
  };
  const cropAndUpload=async(kind:MediaKind)=>{
   if(selected?.kind!==kind)return;
-  setWorking(kind);setError("");setMessage("");
+  setWorking(kind);setProgress(0);setError("");setMessage("");
   try{
    const bitmap=await createImageBitmap(selected.file);
    try{
@@ -65,7 +66,7 @@ export default function MemberMediaEditor({name,avatar,onChange}:{name:string;av
     if(result.size>5*1024*1024)throw new Error("Cropped image exceeds the 5 MB limit");
     const upload=new FormData();
     upload.append("file",new File([result],kind+".jpg",{type:"image/jpeg"}));
-    const updated=await apiRequest<MediaSettings>("/members/me/media/"+kind,{method:"POST",body:upload});
+    const updated=await apiRequest<MediaSettings>("/members/me/media/"+kind,{method:"POST",body:upload,onUploadProgress:setProgress});
     setMedia(updated);
     setPositions(prev=>({...prev,[kind]:{x:50,y:50,zoom:100}}));
     setSelected(null);
@@ -74,7 +75,7 @@ export default function MemberMediaEditor({name,avatar,onChange}:{name:string;av
     setMessage(kind==="avatar"?"Your profile photograph and membership card photo have been updated.":"Your cover photograph has been updated.");
    }finally{bitmap.close();}
   }catch(err:any){setError(err?.message||"Could not upload photograph");}
-  finally{setWorking(null);}
+  finally{setWorking(null);setProgress(null);}
  };
  const persistPosition=async(kind:MediaKind)=>{
   if(!imageURL(kind))return;
@@ -83,7 +84,7 @@ export default function MemberMediaEditor({name,avatar,onChange}:{name:string;av
    const updated=await apiRequest<MediaSettings>("/members/me/media/"+kind+"/position",{method:"PUT",body:JSON.stringify(positions[kind])});
    setMedia(updated);setMessage("Image position saved.");
   }catch(err:any){setError(err?.message||"Could not save position");}
-  finally{setWorking(null);}
+  finally{setWorking(null);setProgress(null);}
  };
  const remove=async(kind:MediaKind)=>{
   if(!window.confirm("Remove your "+(kind==="cover"?"cover":"profile")+" photo?"))return;
@@ -98,28 +99,28 @@ export default function MemberMediaEditor({name,avatar,onChange}:{name:string;av
    await onChange();
    setMessage(kind==="avatar"?"Your profile photograph was removed.":"Your cover photo was removed.");
   }catch(err:any){setError(err?.message||"Could not remove photo");}
-  finally{setWorking(null);}
+  finally{setWorking(null);setProgress(null);}
  };
  const renderImage=(kind:MediaKind)=>{
   const src=imageURL(kind),position=positions[kind];
   return src?<img src={src} alt={kind==="avatar"?"Your profile picture":"Your cover picture"}
-   className="w-full h-full object-cover" style={{objectPosition:`${position.x}% ${position.y}%`,transform:`scale(${position.zoom/100})`}}/>
+   className="w-full h-full object-cover" style={{objectPosition:`${position.x}% ${position.y}%`,transform:`scale(${position.zoom/100})`,transformOrigin:`${position.x}% ${position.y}%`}}/>
    :kind==="avatar"?<span className="text-4xl font-bold text-white">{name.trim().split(/\s+/).slice(0,2).map(s=>s[0]||"").join("").toUpperCase()||"R"}</span>
-   :<div className="w-full h-full bg-gradient-to-r from-emerald-950 via-emerald-800 to-teal-600"/>;
+   :<div className="w-full h-full bg-gradient-to-r from-slate-200 via-slate-100 to-slate-300"/>;
  };
  const renderControls=(kind:MediaKind)=>(
   <div className="rounded-xl bg-gray-50 border p-4 space-y-3">
    <div className="flex flex-wrap gap-3 items-center">
-    <label className="inline-flex items-center gap-2 cursor-pointer bg-white border rounded-lg px-3 py-2 text-sm font-semibold">
+    <label htmlFor={"member-photo-"+kind} className="inline-flex items-center gap-2 cursor-pointer focus-within:ring-2 focus-within:ring-emerald-700 bg-white border rounded-lg px-3 py-2 text-sm font-semibold">
      {kind==="avatar"?<Camera size={16}/>:<ImagePlus size={16}/>}
      {kind==="avatar"?"Choose profile photo":"Choose cover photo"}
-     <input type="file" className="sr-only" accept="image/jpeg,image/png,image/webp"
+     <input id={"member-photo-"+kind} aria-label={kind==="avatar"?"Choose profile photo":"Choose cover photo"} type="file" className="sr-only" accept="image/jpeg,image/png,image/webp"
       disabled={Boolean(working)} onChange={e=>{changeFile(kind,e.target.files?.[0]);e.target.value="";}}/>
     </label>
     {imageURL(kind)&&<button type="button" onClick={()=>{void remove(kind);}} disabled={Boolean(working)}
       className="inline-flex gap-2 items-center text-red-700 text-sm"><Trash2 size={15}/> Remove</button>}
    </div>
-   {(imageURL(kind)||selected?.kind===kind)&&<fieldset className="grid gap-2 sm:grid-cols-3">
+   {(imageURL(kind)||selected?.kind===kind)&&<fieldset disabled={Boolean(working)} className="grid gap-2 sm:grid-cols-3">
     {(["x","y","zoom"] as const).map(field=><label key={field} className="text-xs text-gray-600">
      {field==="x"?"Horizontal":field==="y"?"Vertical":"Zoom"}: {positions[kind][field]}{field==="zoom"?"%":""}
      <input aria-label={kind+" "+field} type="range" min={field==="zoom"?100:0} max={field==="zoom"?200:100}
@@ -127,6 +128,7 @@ export default function MemberMediaEditor({name,avatar,onChange}:{name:string;av
       className="w-full accent-emerald-700 mt-1"/>
     </label>)}
    </fieldset>}
+   {selected?.kind===kind&&<button type="button" disabled={Boolean(working)} className="text-sm underline" onClick={()=>{setSelected(null);setPositions(prev=>({...prev,[kind]:{x:media[`${kind}_x`],y:media[`${kind}_y`],zoom:media[`${kind}_zoom`]}}));}}>Cancel selection</button>}
    {selected?.kind===kind?
     <button type="button" disabled={Boolean(working)} onClick={()=>{void cropAndUpload(kind);}}
      className="inline-flex items-center gap-2 bg-emerald-800 text-white rounded-lg px-4 py-2 text-sm font-semibold disabled:opacity-50">
@@ -137,13 +139,17 @@ export default function MemberMediaEditor({name,avatar,onChange}:{name:string;av
  );
  return <section aria-label="Profile and cover photographs" className="space-y-4">
   <div className="overflow-hidden rounded-2xl border bg-white shadow-sm">
-   <div className="h-40 sm:h-56 bg-emerald-900 relative overflow-hidden">{renderImage("cover")}</div>
+   <div className="aspect-[3/1] bg-emerald-900 relative overflow-hidden">{renderImage("cover")}<label htmlFor="member-photo-cover" className="absolute bottom-3 right-3 cursor-pointer rounded-full bg-white p-2 shadow" aria-label="Edit cover photograph"><Camera size={20}/></label></div>
    <div className="px-5 sm:px-8 pb-6">
     <div className="-mt-12 sm:-mt-16 relative w-24 h-24 sm:w-32 sm:h-32 rounded-full overflow-hidden border-4 border-white bg-emerald-800 flex items-center justify-center shadow-sm">
      {renderImage("avatar")}
     </div>
+    <label htmlFor="member-photo-avatar" className="inline-flex items-center gap-1 mt-2 text-sm text-emerald-800 cursor-pointer"><Camera size={16}/> Edit profile photograph</label>
     <h2 className="mt-3 text-2xl font-bold text-gray-900">{name||"Ratels Member"}</h2>
-    <p className="text-xs text-gray-500">Your personal photographs are not included in public membership QR verification.</p>
+    {reference&&<p className="font-mono text-sm text-gray-600">{reference}</p>}
+    {location&&<p className="text-sm text-gray-600 mt-1">{location}</p>}
+    {bio&&<p className="text-sm text-gray-700 mt-3 whitespace-pre-wrap break-words">{bio}</p>}
+    <p className="text-xs text-gray-500 mt-3">Your personal photographs are not included in public membership QR verification.</p>
    </div>
   </div>
   {loading?<p className="text-sm text-gray-500">Loading photo settings…</p>:<>
@@ -151,6 +157,7 @@ export default function MemberMediaEditor({name,avatar,onChange}:{name:string;av
     <div><h3 className="font-semibold mb-2 text-sm">Profile picture</h3>{renderControls("avatar")}</div>
     <div><h3 className="font-semibold mb-2 text-sm">Cover picture</h3>{renderControls("cover")}</div>
    </div>
+   {progress!==null&&<div role="status" aria-live="polite"><label htmlFor="photo-upload-progress" className="text-sm">{progress===100?"Processing photograph…":`Uploading photograph: ${progress}%`}</label><progress id="photo-upload-progress" value={progress} max={100} className="block w-full"/></div>}
    {error&&<p role="alert" className="text-red-700 text-sm">{error}</p>}
    {message&&<p role="status" className="text-emerald-800 text-sm">{message}</p>}
    <p className="text-xs text-gray-500">Use JPG, PNG or WebP (maximum 5 MB). Photos are cropped before upload. Profile photo updates also appear on your membership card. Cover photos are only served through your authenticated profile endpoint.</p>

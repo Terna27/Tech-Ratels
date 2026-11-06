@@ -269,3 +269,10 @@ func TestUnconfiguredStorageService(t *testing.T) {
 		t.Fatalf("expected ErrStorageUnconfigured, got %v", err)
 	}
 }
+
+func TestImageUploadHonorsCallerByteLimit(t *testing.T) {
+	_, _, err := InspectAndValidateImage(bytes.NewReader(make([]byte, 1025)), 1024)
+	if err != ErrImageTooLarge {
+		t.Fatalf("expected supplied limit enforcement, got %v", err)
+	}
+}
