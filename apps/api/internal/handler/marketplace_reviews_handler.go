@@ -4,6 +4,7 @@ import (
  "encoding/json"
  "errors"
  "net/http"
+ "strconv"
 
  "github.com/go-chi/chi/v5"
  "ratels-api/internal/service"
@@ -12,7 +13,14 @@ import (
 
 func (h *MarketplaceHandler) ListProductReviews(w http.ResponseWriter,r *http.Request) {
  productID:=chi.URLParam(r,"id")
- response,err:=h.marketplaceService.ListProductReviews(r.Context(),productID)
+ page:=1
+ if raw:=r.URL.Query().Get("page");raw!=""{
+  parsed,err:=strconv.Atoi(raw)
+  if err!=nil||parsed<1||parsed>1000{ErrorJSON(w,http.StatusBadRequest,"INVALID_PAGE","Page must be between 1 and 1000",nil);return}
+  page=parsed
+ }
+ response,err:=h.marketplaceService.ListProductReviewsPage(r.Context(),productID,r.URL.Query().Get("sort"),page,20)
+ if errors.Is(err,service.ErrReviewInvalid){ErrorJSON(w,http.StatusBadRequest,"INVALID_SORT","Unsupported review sorting option",nil);return}
  if errors.Is(err,service.ErrProductNotFound){ErrorJSON(w,http.StatusNotFound,"NOT_FOUND","Product not found",nil);return}
  if err!=nil{ErrorJSON(w,http.StatusInternalServerError,"REVIEWS_UNAVAILABLE","Unable to load product reviews",nil);return}
  if viewer:=GetCurrentUser(r.Context());viewer!=nil{

@@ -39,6 +39,9 @@ type ProductReviewsResponse struct {
  Reviews []MarketplaceReview `json:"reviews"`
  Count int `json:"count"`
  AverageRating float64 `json:"average_rating"`
+ Page int `json:"page"`
+ PageSize int `json:"page_size"`
+ HasMore bool `json:"has_more"`
 }
 
 type SubmitReviewInput struct {
@@ -73,22 +76,42 @@ func (s *MarketplaceService) ValidateReviewImages(userID, productID string, imag
  return nil
 }
 
+// ListProductReviews returns the first page for callers which do not request sorting.
 func (s *MarketplaceService) ListProductReviews(ctx context.Context, productID string) (*ProductReviewsResponse,error) {
+ return s.ListProductReviewsPage(ctx,productID,"newest",1,20)
+}
+
+// ListProductReviewsPage supports only whitelisted sort expressions to avoid SQL injection.
+func (s *MarketplaceService) ListProductReviewsPage(ctx context.Context, productID, sort string, page, size int) (*ProductReviewsResponse,error) {
+ if page<1 || page>1000{return nil,ErrReviewInvalid}
+ if size<1 || size>50{return nil,ErrReviewInvalid}
+ order := "r.created_at DESC, r.id DESC"
+ switch sort {
+ case "", "newest":
+ case "oldest": order="r.created_at ASC, r.id ASC"
+ case "highest": order="r.rating DESC, r.created_at DESC, r.id DESC"
+ case "lowest": order="r.rating ASC, r.created_at DESC, r.id DESC"
+ case "with_photos": order="jsonb_array_length(r.images) DESC, r.created_at DESC, r.id DESC"
+ default:return nil,ErrReviewInvalid
+ }
  product,err:=s.GetProductByID(ctx,productID)
  if err!=nil{return nil,err}
- if product.Status!="published"||product.BusinessStatus!="approved"{return nil,ErrProductNotFound}
- result:=&ProductReviewsResponse{Reviews:[]MarketplaceReview{}}
- err=s.repo.Pool().QueryRow(ctx, `
- SELECT count(*),COALESCE(avg(rating),0)::float8
- FROM marketplace_product_reviews WHERE product_id=$1 AND status='published'
+ if product.Status!="published" || product.BusinessStatus!="approved"{return nil,ErrProductNotFound}
+ result:=&ProductReviewsResponse{Reviews:[]MarketplaceReview{},Page:page,PageSize:size}
+ err=s.repo.Pool().QueryRow(ctx,`
+ SELECT count(*),COALESCE(avg(rating),0)::float8 FROM marketplace_product_reviews
+ WHERE product_id=$1 AND status='published'
  `,productID).Scan(&result.Count,&result.AverageRating)
  if err!=nil{return nil,err}
- rows,err:=s.repo.Pool().Query(ctx, `
- SELECT r.id,r.product_id,r.buyer_user_id,u.display_name,r.rating,r.comment,r.images,r.vendor_response,r.created_at,r.updated_at
+ result.HasMore=page*size<result.Count
+ query:=fmt.Sprintf(`
+ SELECT r.id,r.product_id,r.buyer_user_id,u.display_name,r.rating,r.comment,
+ r.images,r.vendor_response,r.created_at,r.updated_at
  FROM marketplace_product_reviews r JOIN users u ON u.id=r.buyer_user_id
  WHERE r.product_id=$1 AND r.status='published'
- ORDER BY r.created_at DESC LIMIT 100
- `,productID)
+ ORDER BY %s LIMIT $2 OFFSET $3
+ `,order)
+ rows,err:=s.repo.Pool().Query(ctx,query,productID,size,(page-1)*size)
  if err!=nil{return nil,err}
  defer rows.Close()
  for rows.Next(){
