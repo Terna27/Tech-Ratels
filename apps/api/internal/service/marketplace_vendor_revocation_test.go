@@ -35,6 +35,15 @@ func TestMarketplaceSuperAdminExclusiveVendorRevocation(t *testing.T) {
   BusinessID:business.ID,Title:"After Revocation",PriceKobo:10000,StockQuantity:1,
  })
  if err!=service.ErrBusinessNotApproved{t.Fatalf("revoked vendor could publish: %v",err)}
+ if _,err:=env.MarketplaceService.ApproveBusiness(ctx,admin,business.ID,true,"");err!=service.ErrBusinessRevoked {
+  t.Fatalf("Super Admin approval bypassed revocation: %v",err)
+ }
+ if _,err:=env.MarketplaceService.RestoreBusiness(ctx,admin,business.ID,"Restore without new application");err!=service.ErrBusinessRevoked {
+  t.Fatalf("Super Admin restoration bypassed revocation: %v",err)
+ }
+ if _,err:=env.MarketplaceService.SuspendBusiness(ctx,admin,business.ID,"Temporarily suspend after revoke");err!=service.ErrBusinessRevoked {
+  t.Fatalf("Suspension rewrote revoked status: %v",err)
+ }
  if _,err:=env.MarketplaceService.ListProductReviews(ctx,product.ID);err!=service.ErrProductNotFound {
   t.Fatalf("revoked vendor product reviews should not be public: %v",err)
  }
