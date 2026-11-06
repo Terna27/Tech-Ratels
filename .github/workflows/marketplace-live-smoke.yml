@@ -1,0 +1,50 @@
+name: Marketplace live public smoke check
+
+on:
+  push:
+    paths:
+      - .github/workflows/marketplace-live-smoke.yml
+
+permissions:
+  contents: read
+
+jobs:
+  live-smoke:
+    runs-on: ubuntu-latest
+    timeout-minutes: 7
+    steps:
+      - name: Probe deployed public endpoints without making changes
+        shell: bash
+        run: |
+          set -u
+          check() {
+            local label="$1"
+            local url="$2"
+            local expected="$3"
+            local body
+            body="$(mktemp)"
+            local status
+            status="$(curl -L --silent --show-error --retry 2 --retry-delay 2 --max-time 35 --output "$body" --write-out '%{http_code}' "$url")" || status="000"
+            printf '%s\n' "$label HTTP $status (expected $expected)"
+            # Only show a short excerpt of PUBLIC error responses; never print auth data.
+            if [[ "$status" != "$expected" ]]; then
+              head -c 300 "$body" || true
+              echo
+              echo "::warning::$label returned $status; expected $expected"
+            fi
+            rm -f "$body"
+            [[ "$status" == "$expected" ]]
+          }
+          failed=0
+          check "Render API health" "https://ratels.onrender.com/api/v1/health" "200" || failed=1
+          check "Custom-domain API health" "https://api.ratelsworldwide.org/api/v1/health" "200" || failed=1
+          check "Public marketplace catalog" "https://api.ratelsworldwide.org/api/v1/marketplace/products" "200" || failed=1
+          check "Checkout availability/status" "https://api.ratelsworldwide.org/api/v1/marketplace/checkout/status" "200" || failed=1
+          # New review handler validates sort before database lookup.
+          # HTTP 400 indicates the new endpoint is deployed; legacy route would be 404.
+          check "Review invalid-sort handler (new code indicator)" "https://api.ratelsworldwide.org/api/v1/marketplace/products/invalid-product-id/reviews?sort=invalid_sort_probe" "400" || failed=1
+          check "Public frontend marketplace" "https://app.ratelsworldwide.org/marketplace" "200" || failed=1
+          if (( failed )); then
+            echo "::error::Live public verification is incomplete or deployment is outdated."
+            exit 1
+          fi
