@@ -8,6 +8,7 @@ import (
  "io"
  "strings"
 
+ "github.com/jackc/pgx/v5"
  "ratels-api/internal/security"
  "ratels-api/internal/storage"
 )
@@ -44,9 +45,7 @@ func (s *AuthService) MemberMediaDetails(ctx context.Context,id string) (*Member
  var coverKey *string
  err=s.repo.Pool().QueryRow(ctx,`SELECT cover_key,avatar_x,avatar_y,avatar_zoom,cover_x,cover_y,cover_zoom FROM member_profile_media WHERE user_id=$1`,id).
   Scan(&coverKey,&m.AvatarX,&m.AvatarY,&m.AvatarZoom,&m.CoverX,&m.CoverY,&m.CoverZoom)
- if err==nil {m.HasCover=coverKey!=nil && *coverKey!=""} else if !errors.Is(err,errors.New("no rows")) {
-  // A missing media record means the member has not uploaded an image yet.
- }
+ if err==nil {m.HasCover=coverKey!=nil && *coverKey!=""} else if !errors.Is(err,pgx.ErrNoRows) {return nil,err}
  return m,nil
 }
 
