@@ -62,4 +62,20 @@ func TestMarketplaceReviewVerifiedPurchaseAndModeration(t *testing.T) {
  }
  reviews,err=env.MarketplaceService.ListProductReviews(ctx,product.ID)
  if err!=nil||reviews.Count!=1||reviews.AverageRating!=4 {t.Fatalf("review restore failed: %+v, err %v",reviews,err)}
+ for _,sort := range []string{"newest","oldest","highest","lowest","with_photos"} {
+  page,err:=env.MarketplaceService.ListProductReviewsPage(ctx,product.ID,sort,1,20)
+  if err!=nil || page.Count!=1 || len(page.Reviews)!=1 || page.HasMore {
+   t.Fatalf("review sorting %s returned unexpected page %+v error %v",sort,page,err)
+  }
+ }
+ page2,err:=env.MarketplaceService.ListProductReviewsPage(ctx,product.ID,"newest",2,20)
+ if err!=nil || page2.Count!=1 || len(page2.Reviews)!=0 {
+  t.Fatalf("review second page unexpected: %+v error %v",page2,err)
+ }
+ if _,err:=env.MarketplaceService.ListProductReviewsPage(ctx,product.ID,"rating DESC; DROP TABLE users",1,20);err!=service.ErrReviewInvalid{
+  t.Fatalf("unsafe sort was accepted: %v",err)
+ }
+ if _,err:=env.MarketplaceService.ListProductReviewsPage(ctx,product.ID,"newest",0,20);err!=service.ErrReviewInvalid{
+  t.Fatalf("invalid page was accepted: %v",err)
+ }
 }
