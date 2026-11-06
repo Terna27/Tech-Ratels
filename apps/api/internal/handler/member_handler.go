@@ -8,15 +8,19 @@ import (
 
 	"ratels-api/internal/security"
 	"ratels-api/internal/service"
+	"ratels-api/internal/storage"
 )
 
 type MemberHandler struct {
 	authService         *service.AuthService
 	verificationLimiter *security.DownloadRateLimiter
+	mediaStorage storage.StorageService
 }
 
-func NewMemberHandler(authService *service.AuthService) *MemberHandler {
-	return &MemberHandler{authService: authService, verificationLimiter: security.NewDownloadRateLimiter(60, time.Minute)}
+func NewMemberHandler(authService *service.AuthService, media ...storage.StorageService) *MemberHandler {
+ h := &MemberHandler{authService: authService, verificationLimiter: security.NewDownloadRateLimiter(60, time.Minute)}
+ if len(media)>0 {h.mediaStorage=media[0]}
+ return h
 }
 
 func (h *MemberHandler) GetMe(w http.ResponseWriter, r *http.Request) {
