@@ -15,6 +15,9 @@ func (h *MarketplaceHandler) ListProductReviews(w http.ResponseWriter,r *http.Re
  response,err:=h.marketplaceService.ListProductReviews(r.Context(),productID)
  if errors.Is(err,service.ErrProductNotFound){ErrorJSON(w,http.StatusNotFound,"NOT_FOUND","Product not found",nil);return}
  if err!=nil{ErrorJSON(w,http.StatusInternalServerError,"REVIEWS_UNAVAILABLE","Unable to load product reviews",nil);return}
+ if viewer:=GetCurrentUser(r.Context());viewer!=nil{
+  for i:=range response.Reviews{response.Reviews[i].IsMine=response.Reviews[i].BuyerID==viewer.ID}
+ }
  JSON(w,http.StatusOK,response)
 }
 
