@@ -315,7 +315,7 @@ export default function ProductDetailPage({ params }: { params: Promise<{ id: st
             </div>
           </div>
         </div>
-        <ProductReviews productId={product.id} />
+        <ProductReviews productId={product.id} isVendor={Boolean(user && user.id === product.business_owner_id)} />
       </div>
     </div>
   );
