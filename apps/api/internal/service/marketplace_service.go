@@ -412,15 +412,8 @@ func (s *MarketplaceService) ApproveBusiness(ctx context.Context, admin *db.User
 		return nil, errors.New("authentication required")
 	}
 
-	apps := s.getActiveAppointments(ctx, admin.ID)
-	isNationwide := s.isNationwideAdmin(admin, apps)
-	hasStateOrZonal := s.hasStateOrZonalAuthority(admin, apps)
-
-	if !isNationwide && !hasStateOrZonal {
-		return nil, ErrScopeUnauthorized
-	}
-
-	if !isNationwide && !s.hasBusinessJurisdiction(ctx, s.repo.Queries(), admin, apps, id) {
+	// Only Super Admin can decide vendor approval and suspension.
+	if !s.isSuperAdminUser(admin, s.getActiveAppointments(ctx, admin.ID)) {
 		return nil, ErrScopeUnauthorized
 	}
 
@@ -461,15 +454,8 @@ func (s *MarketplaceService) SuspendBusiness(ctx context.Context, admin *db.User
 		return nil, errors.New("authentication required")
 	}
 
-	apps := s.getActiveAppointments(ctx, admin.ID)
-	isNationwide := s.isNationwideAdmin(admin, apps)
-	hasStateOrZonal := s.hasStateOrZonalAuthority(admin, apps)
-
-	if !isNationwide && !hasStateOrZonal {
-		return nil, ErrScopeUnauthorized
-	}
-
-	if !isNationwide && !s.hasBusinessJurisdiction(ctx, s.repo.Queries(), admin, apps, id) {
+	// Only Super Admin can decide vendor approval and suspension.
+	if !s.isSuperAdminUser(admin, s.getActiveAppointments(ctx, admin.ID)) {
 		return nil, ErrScopeUnauthorized
 	}
 
@@ -499,15 +485,8 @@ func (s *MarketplaceService) RestoreBusiness(ctx context.Context, admin *db.User
 		return nil, errors.New("authentication required")
 	}
 
-	apps := s.getActiveAppointments(ctx, admin.ID)
-	isNationwide := s.isNationwideAdmin(admin, apps)
-	hasStateOrZonal := s.hasStateOrZonalAuthority(admin, apps)
-
-	if !isNationwide && !hasStateOrZonal {
-		return nil, ErrScopeUnauthorized
-	}
-
-	if !isNationwide && !s.hasBusinessJurisdiction(ctx, s.repo.Queries(), admin, apps, id) {
+	// Only Super Admin can decide vendor approval and suspension.
+	if !s.isSuperAdminUser(admin, s.getActiveAppointments(ctx, admin.ID)) {
 		return nil, ErrScopeUnauthorized
 	}
 
@@ -591,8 +570,11 @@ func (s *MarketplaceService) CreateProduct(ctx context.Context, user *db.User, i
 	if err != nil {
 		return nil, ErrBusinessNotFound
 	}
-	if b.OwnerUserID != user.ID && !isAdmin(user) {
+	if user == nil || b.OwnerUserID != user.ID {
 		return nil, ErrUnauthorizedSellerAction
+	}
+	if b.Status != "approved" || !b.IsVerified {
+		return nil, ErrBusinessNotApproved
 	}
 
 	slug := slugify(input.Title)
@@ -785,6 +767,15 @@ func (s *MarketplaceService) UpdateProduct(ctx context.Context, user *db.User, i
 		}
 	}
 
+	// An approval revoke immediately blocks product edits.
+	business, err := s.repo.Queries().GetMarketplaceBusinessByID(ctx, existing.BusinessID)
+	if err != nil {
+		return nil, ErrBusinessNotFound
+	}
+	if business.Status != "approved" || !business.IsVerified {
+		return nil, ErrBusinessNotApproved
+	}
+
 	if input.PriceKobo <= 0 {
 		return nil, ErrInvalidPrice
 	}
@@ -880,7 +871,7 @@ func (s *MarketplaceService) AuthorizeProductImageUpload(ctx context.Context, us
 	if err != nil {
 		return nil, ErrBusinessNotFound
 	}
-	if b.Status != "approved" && b.Status != "pending" && !isAdmin(user) {
+	if b.Status != "approved" || !b.IsVerified {
 		return nil, ErrBusinessNotApproved
 	}
 
@@ -921,7 +912,7 @@ func (s *MarketplaceService) UploadProductImageDirect(ctx context.Context, user 
 	if err != nil {
 		return nil, ErrBusinessNotFound
 	}
-	if b.Status != "approved" && b.Status != "pending" && !isAdmin(user) {
+	if b.Status != "approved" || !b.IsVerified {
 		return nil, ErrBusinessNotApproved
 	}
 
@@ -963,7 +954,7 @@ func (s *MarketplaceService) DeleteProductImage(ctx context.Context, user *db.Us
 		return ErrBusinessNotFound
 	}
 
-	if !storage.ValidateKeyBelongsToBusiness(objectKey, b.ID) && !isAdmin(user) {
+	if !storage.ValidateKeyBelongsToBusiness(objectKey, b.ID) {
 		return storage.ErrUnauthorizedKey
 	}
 

@@ -489,13 +489,14 @@ func TestE2E_Phase4_CoordinatorAndAdmin_JurisdictionsAndAntiSelfApproval(t *test
 		IsActive:       true,
 	})
 
-	// 1. State Coordinator A approves business in State A -> SUCCEEDS
-	approvedBizA, err := env.MarketplaceService.ApproveBusiness(ctx, coordAUser, bizA.ID, true, "")
-	if err != nil {
-		t.Fatalf("State Coordinator A ApproveBusiness in State A failed: %v", err)
+	// 1. Only Super Admin can approve a vendor, even inside the coordinator's state.
+	_, err = env.MarketplaceService.ApproveBusiness(ctx, coordAUser, bizA.ID, true, "")
+	if err != service.ErrScopeUnauthorized {
+		t.Fatalf("Expected State Coordinator A approval denial, got %v", err)
 	}
-	if approvedBizA.Status != "approved" {
-		t.Errorf("Expected bizA status approved, got %s", approvedBizA.Status)
+	approvedBizA, err := env.MarketplaceService.ApproveBusiness(ctx, superAdmin, bizA.ID, true, "")
+	if err != nil || approvedBizA.Status != "approved" {
+		t.Fatalf("Super Admin approval failed: business=%+v, err=%v", approvedBizA, err)
 	}
 
 	// 2. Cross-Jurisdiction: State Coordinator A attempts to approve business in State B -> REJECTED

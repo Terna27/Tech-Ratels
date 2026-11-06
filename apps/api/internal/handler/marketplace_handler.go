@@ -474,6 +474,10 @@ func (h *MarketplaceHandler) CreateProduct(w http.ResponseWriter, r *http.Reques
 	req.BusinessID = myB.ID
 
 	p, err := h.marketplaceService.CreateProduct(r.Context(), user, req)
+	if errors.Is(err, service.ErrBusinessNotApproved) || errors.Is(err, service.ErrUnauthorizedSellerAction) {
+		ErrorJSON(w, http.StatusForbidden, "VENDOR_NOT_APPROVED", "Only active Super Admin-approved vendors can publish products", nil)
+		return
+	}
 	if err != nil {
 		ErrorJSON(w, http.StatusBadRequest, "CREATE_PRODUCT_FAILED", err.Error(), nil)
 		return
@@ -493,6 +497,10 @@ func (h *MarketplaceHandler) UpdateProduct(w http.ResponseWriter, r *http.Reques
 
 	p, err := h.marketplaceService.UpdateProduct(r.Context(), user, id, req)
 	if err != nil {
+		if errors.Is(err, service.ErrBusinessNotApproved) {
+			ErrorJSON(w, http.StatusForbidden, "VENDOR_NOT_APPROVED", "Vendor approval is required to edit listings", nil)
+			return
+		}
 		if errors.Is(err, service.ErrUnauthorizedSellerAction) {
 			ErrorJSON(w, http.StatusForbidden, "FORBIDDEN", err.Error(), nil)
 			return
@@ -548,7 +556,7 @@ func (h *MarketplaceHandler) AuthorizeImageUpload(w http.ResponseWriter, r *http
 			return
 		}
 		if errors.Is(err, service.ErrBusinessNotApproved) {
-			ErrorJSON(w, http.StatusForbidden, "BUSINESS_NOT_APPROVED", "Business account must be active or pending approval to upload product media", nil)
+			ErrorJSON(w, http.StatusForbidden, "BUSINESS_NOT_APPROVED", "Only Super Admin-approved active vendors can upload product media", nil)
 			return
 		}
 		if errors.Is(err, service.ErrUnauthorizedSellerAction) {
@@ -602,7 +610,7 @@ func (h *MarketplaceHandler) UploadProductImage(w http.ResponseWriter, r *http.R
 			return
 		}
 		if errors.Is(err, service.ErrBusinessNotApproved) {
-			ErrorJSON(w, http.StatusForbidden, "BUSINESS_NOT_APPROVED", "Business account must be active or pending approval to upload product media", nil)
+			ErrorJSON(w, http.StatusForbidden, "BUSINESS_NOT_APPROVED", "Only Super Admin-approved active vendors can upload product media", nil)
 			return
 		}
 		if errors.Is(err, service.ErrUnauthorizedSellerAction) {
