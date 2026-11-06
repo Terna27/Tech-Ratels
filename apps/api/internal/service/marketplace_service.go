@@ -755,16 +755,8 @@ func (s *MarketplaceService) UpdateProduct(ctx context.Context, user *db.User, i
 	}
 
 	isOwner := existing.BusinessOwnerID == user.ID
-	apps := s.getActiveAppointments(ctx, user.ID)
-	isNationwide := s.isNationwideAdmin(user, apps)
-
-	if !isOwner && !isNationwide {
-		if !s.hasStateOrZonalAuthority(user, apps) {
-			return nil, ErrUnauthorizedSellerAction
-		}
-		if !s.hasBusinessJurisdiction(ctx, s.repo.Queries(), user, apps, existing.BusinessID) {
-			return nil, ErrScopeUnauthorized
-		}
+	if !isOwner && !s.isSuperAdminUser(user, s.getActiveAppointments(ctx, user.ID)) {
+		return nil, ErrUnauthorizedSellerAction
 	}
 
 	// An approval revoke immediately blocks product edits.
@@ -839,22 +831,16 @@ func (s *MarketplaceService) DeleteProduct(ctx context.Context, user *db.User, i
 	}
 
 	isOwner := existing.BusinessOwnerID == user.ID
-	apps := s.getActiveAppointments(ctx, user.ID)
-	isNationwide := s.isNationwideAdmin(user, apps)
-
-	if !isOwner && !isNationwide {
-		if !s.hasStateOrZonalAuthority(user, apps) {
-			return ErrUnauthorizedSellerAction
-		}
-		if !s.hasBusinessJurisdiction(ctx, s.repo.Queries(), user, apps, existing.BusinessID) {
-			return ErrScopeUnauthorized
-		}
+	if !isOwner && !s.isSuperAdminUser(user, s.getActiveAppointments(ctx, user.ID)) {
+		return ErrUnauthorizedSellerAction
 	}
 
-	if err := s.repo.Queries().DeleteMarketplaceProduct(ctx, id); err != nil {
-		return fmt.Errorf("failed to delete product: %w", err)
+	// Archive instead of physical deletion. Order snapshots and customer reviews
+	// must survive vendor removal or suspension.
+	if _, err := s.repo.Pool().Exec(ctx, "UPDATE marketplace_products SET status='archived', updated_at=now() WHERE id=$1", id); err != nil {
+		return fmt.Errorf("failed to archive product: %w", err)
 	}
-	_ = s.audit.Log(ctx, &user.ID, &user.PrimaryRole, "delete_marketplace_product", "marketplace_product", id, nil, nil, nil, nil)
+	_ = s.audit.Log(ctx, &user.ID, &user.PrimaryRole, "archive_marketplace_product", "marketplace_product", id, nil, nil, nil, nil)
 	return nil
 }
 
