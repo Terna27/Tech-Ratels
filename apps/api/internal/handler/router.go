@@ -97,6 +97,25 @@ func NewRouter(p RouterParams) http.Handler {
 			members.With(RequireRole("national_admin", "super_admin")).Get("/", p.MemberHandler.ListMembers)
 		})
 
+		// Authenticated community, separate from privileged member management.
+		api.Route("/network", func(c chi.Router) {
+			c.Use(RequireAuth)
+			c.Get("/members", p.MemberHandler.CommunitySearch)
+			c.Get("/members/{reference}", p.MemberHandler.CommunityProfile)
+			c.Get("/members/{reference}/cover", p.MemberHandler.CommunityCover)
+			c.Post("/members/{reference}/{relationship:follow|friend}", p.MemberHandler.SocialRelationship)
+			c.Delete("/members/{reference}/{relationship:follow|friend}", p.MemberHandler.SocialRelationship)
+			c.Post("/members/{reference}/friend/{action:accept|decline}", p.MemberHandler.SocialRelationship)
+			c.Get("/preferences", p.MemberHandler.SocialPreferences)
+			c.Put("/preferences", p.MemberHandler.SocialPreferences)
+			c.Get("/requests", p.MemberHandler.SocialRequests)
+			c.Get("/feed", p.MemberHandler.SocialFeed)
+			c.Post("/posts", p.MemberHandler.SocialPost)
+			c.Delete("/posts/{postID}", p.MemberHandler.SocialPost)
+			c.Put("/posts/{postID}/like", p.MemberHandler.SocialLike)
+			c.Delete("/posts/{postID}/like", p.MemberHandler.SocialLike)
+		})
+
 		// Geography
 		api.Route("/geography", func(geo chi.Router) {
 			geo.Get("/zones", p.GeographyHandler.ListZones)

@@ -137,6 +137,7 @@ export function Sidebar({
       requiresAuth: true,
       items: [
         { href: "/member", label: "Member Dashboard", icon: UserCheck, exact: true },
+        { href: "/member/community", label: "Community", icon: Users },
         { href: "/member/participations", label: "My Participations", icon: Award },
         { href: "/notifications", label: "Notifications", icon: Bell },
       ],
