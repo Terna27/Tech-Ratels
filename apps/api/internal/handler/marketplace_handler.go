@@ -81,6 +81,10 @@ func (h *MarketplaceHandler) GetProduct(w http.ResponseWriter, r *http.Request) 
 		ErrorJSON(w, http.StatusInternalServerError, "INTERNAL_ERROR", err.Error(), nil)
 		return
 	}
+	if p.Status != "published" || p.BusinessStatus != "approved" {
+		ErrorJSON(w, http.StatusNotFound, "NOT_FOUND", "Product unavailable", nil)
+		return
+	}
 	JSON(w, http.StatusOK, p)
 }
 
@@ -93,6 +97,10 @@ func (h *MarketplaceHandler) GetProductBySlug(w http.ResponseWriter, r *http.Req
 			return
 		}
 		ErrorJSON(w, http.StatusInternalServerError, "INTERNAL_ERROR", err.Error(), nil)
+		return
+	}
+	if p.Status != "published" || p.BusinessStatus != "approved" {
+		ErrorJSON(w, http.StatusNotFound, "NOT_FOUND", "Product unavailable", nil)
 		return
 	}
 	JSON(w, http.StatusOK, p)
