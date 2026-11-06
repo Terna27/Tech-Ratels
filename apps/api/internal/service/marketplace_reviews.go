@@ -178,3 +178,32 @@ func (s *MarketplaceService) UploadReviewImage(ctx context.Context,user *db.User
  if err!=nil{return nil,err}
  return &UploadedImageResult{ObjectKey:key,PublicURL:publicURL,Width:meta.Width,Height:meta.Height,Format:meta.Format,ContentType:meta.ContentType,Size:meta.Size},nil
 }
+
+type MarketplaceReviewReport struct {
+ ID string `json:"id"`
+ ReviewID string `json:"review_id"`
+ ProductID string `json:"product_id"`
+ Comment string `json:"comment"`
+ Rating int `json:"rating"`
+ ReviewStatus string `json:"review_status"`
+ Reason string `json:"reason"`
+ CreatedAt time.Time `json:"created_at"`
+}
+
+func (s *MarketplaceService) ListReportedReviews(ctx context.Context, admin *db.User) ([]MarketplaceReviewReport, error) {
+ if admin==nil || !s.isSuperAdminUser(admin,s.getActiveAppointments(ctx,admin.ID)){return nil,ErrScopeUnauthorized}
+ rows,err:=s.repo.Pool().Query(ctx,`
+ SELECT reports.id, reviews.id, reviews.product_id, reviews.comment, reviews.rating, reviews.status, reports.reason, reports.created_at
+ FROM marketplace_review_reports reports JOIN marketplace_product_reviews reviews ON reviews.id=reports.review_id
+ ORDER BY reports.created_at DESC LIMIT 100
+ `)
+ if err!=nil{return nil,err}
+ defer rows.Close()
+ result:=[]MarketplaceReviewReport{}
+ for rows.Next(){
+  var item MarketplaceReviewReport
+  if err:=rows.Scan(&item.ID,&item.ReviewID,&item.ProductID,&item.Comment,&item.Rating,&item.ReviewStatus,&item.Reason,&item.CreatedAt);err!=nil{return nil,err}
+  result=append(result,item)
+ }
+ return result,rows.Err()
+}
