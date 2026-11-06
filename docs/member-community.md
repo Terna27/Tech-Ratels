@@ -56,3 +56,9 @@ CI now includes the community browser suite.
 6. Run login, marketplace, inventory and coordinator smoke checks. Keep Paystack checkout disabled (`PAYMENT_PROVIDER=unconfigured`); no NGO functionality was introduced.
 
 A push triggers the existing CI/hosting automation but does not by itself prove a successful production deployment. Inspect hosting logs and perform the live checks above.
+
+## Cover display follow-up
+
+Search results, friend requests, **My friends** and **Following** now render the same cover component as member profiles, including saved position/zoom and a neutral fallback for missing or unavailable images. Previously, result cards rendered only avatars and names. Cover sharing remains opt-in: the owner must enable **Community → Privacy → Show my cover photograph to other members** and save. Hidden profiles and unshared covers remain protected by the existing backend checks; this display fix does not change visibility defaults or require a migration.
+
+Regression coverage loads actual image responses on search/profile screens and verifies that unshared covers render on neither screen. Validation: 27 frontend unit tests passed; the Next.js production build passed; 15 community/membership browser checks passed with no skips, including actual shared-cover loading and unshared-cover protection.

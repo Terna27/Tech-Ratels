@@ -7,7 +7,7 @@ test('member community browser acceptance',async t=>{
  const browser=await puppeteer.launch({executablePath:process.env.CHROME_BIN||'/usr/bin/google-chrome',headless:true,args:['--no-sandbox','--disable-dev-shm-usage']});t.after(()=>browser.close());
  const page=await browser.newPage();await page.setViewport({width:390,height:844});
  const user={id:'private-jane',display_name:'Jane Member',membership_reference:'RATEL-JANE',primary_role:'member',status:'active',is_verified:true,appointments:[],profile:{bio:'Volunteer',is_public_badges:true}};
- const dan={reference:'RATEL-DAN',name:'Dan Member',bio:'A community volunteer',location:'Ikeja, Lagos',has_cover:false,avatar_x:50,avatar_y:50,avatar_zoom:100,cover_x:50,cover_y:50,cover_zoom:100,following:false,friendship:'none',followers:0,badges:['Community helper']};
+ const dan={reference:'RATEL-DAN',name:'Dan Member',bio:'A community volunteer',location:'Ikeja, Lagos',has_cover:true,avatar_x:50,avatar_y:50,avatar_zoom:100,cover_x:50,cover_y:50,cover_zoom:100,following:false,friendship:'none',followers:0,badges:['Community helper']};
  const posts=[{id:'post-dan',author_reference:dan.reference,author_name:dan.name,body:'Our cleanup was a success. <script>window.communityXSS=true</script>',visibility:'members',created_at:'2026-11-06T12:00:00Z',likes:2,liked:false,own:false}];
  let prefs={discoverable:true,share_cover:false},anonymous=false;const requests=[];
  await page.setRequestInterception(true);page.on('request',async r=>{
@@ -18,6 +18,7 @@ test('member community browser acceptance',async t=>{
  else if(u.pathname.endsWith('/network/preferences')){if(r.method()==='PUT')prefs=JSON.parse(r.postData());out=prefs;}
  else if(u.pathname.endsWith('/network/members'))out=u.searchParams.get('q')?.includes('missing')?[]:[dan];
  else if(u.pathname.endsWith('/network/requests'))out=[{...dan,friendship:'incoming'}];
+ else if(u.pathname.endsWith('/network/members/RATEL-DAN/cover')){await r.respond({status:200,contentType:'image/png',body:Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+jU1sAAAAASUVORK5CYII=','base64')});return;}
  else if(u.pathname.endsWith('/network/members/RATEL-DAN'))out=dan;
  else if(u.pathname.endsWith('/RATEL-DAN/follow')){dan.following=r.method()==='POST';dan.followers=dan.following?1:0;out={ok:true};}
  else if(u.pathname.endsWith('/RATEL-DAN/friend/accept')){dan.friendship='friends';out={ok:true};}
@@ -31,8 +32,8 @@ test('member community browser acceptance',async t=>{
  });
  const clickText=async(text)=>page.evaluate(text=>{const b=[...document.querySelectorAll('button')].find(b=>b.textContent?.trim()===text);if(!b)throw new Error('Missing button '+text);b.click();},text);
  await t.test('members search and open a privacy-safe mobile profile',async()=>{
- await page.goto(base+'/member/community',{waitUntil:'networkidle0'});await clickText('Find members');await page.waitForSelector('[aria-label="Search members"]');await page.type('[aria-label="Search members"]','Dan');await clickText('Search');await page.waitForSelector('a[href="/member/people/RATEL-DAN"]');await page.click('a[href="/member/people/RATEL-DAN"]');await page.waitForFunction(()=>[...document.querySelectorAll('h1')].some(e=>e.textContent==='Dan Member'));
- const content=await page.$eval('main',e=>e.textContent);assert.ok(content.includes('Ikeja, Lagos'));assert.ok(content.includes('Community helper'));assert.ok(!content.includes('private-jane'));assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth),true);
+ await page.goto(base+'/member/community',{waitUntil:'networkidle0'});await clickText('Find members');await page.waitForSelector('[aria-label="Search members"]');await page.type('[aria-label="Search members"]','Dan');await clickText('Search');await page.waitForSelector('a[href="/member/people/RATEL-DAN"]');await page.waitForFunction(()=>document.querySelector('img[alt="Dan Member cover photograph"]')?.naturalWidth>0);await page.click('a[href="/member/people/RATEL-DAN"]');await page.waitForFunction(()=>[...document.querySelectorAll('h1')].some(e=>e.textContent==='Dan Member'));
+ await page.waitForFunction(()=>document.querySelector('img[alt="Dan Member cover photograph"]')?.naturalWidth>0);const content=await page.$eval('main',e=>e.textContent);assert.ok(content.includes('Ikeja, Lagos'));assert.ok(content.includes('Community helper'));assert.ok(!content.includes('private-jane'));assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth),true);
  });
  await t.test('follow, request and cancel refresh relationship state',async()=>{
  await clickText('Follow');await page.waitForFunction(()=>[...document.querySelectorAll('button')].some(e=>e.textContent==='Following · Unfollow'));
@@ -48,6 +49,9 @@ test('member community browser acceptance',async t=>{
  await page.goto(base+'/member/community',{waitUntil:'networkidle0'});await page.waitForSelector('#community-post');await page.type('#community-post','A friends update');await page.select('[aria-label="Post audience"]','friends');await clickText('Publish post');await page.waitForFunction(()=>document.body.textContent.includes('Post published.'));
  const req=requests.find(r=>r.path.endsWith('/network/posts')&&r.method==='POST');assert.deepEqual(JSON.parse(req.body),{body:'A friends update',visibility:'friends'});
  await clickText('Privacy');await page.waitForFunction(()=>!document.querySelector('input[type="checkbox"]')?.disabled);const checkboxes=await page.$$('input[type="checkbox"]');await checkboxes[0].click();await checkboxes[1].click();await clickText('Save community privacy');await page.waitForFunction(()=>document.body.textContent.includes('Community privacy saved.'));assert.deepEqual(prefs,{discoverable:false,share_cover:true});
+ });
+ await t.test('unshared covers stay hidden in search and on member profiles',async()=>{
+ dan.has_cover=false;await page.goto(base+'/member/community',{waitUntil:'networkidle0'});await clickText('Find members');await page.waitForSelector('a[href="/member/people/RATEL-DAN"]');assert.equal(await page.$('img[alt="Dan Member cover photograph"]'),null);await page.click('a[href="/member/people/RATEL-DAN"]');await page.waitForFunction(()=>[...document.querySelectorAll('h1')].some(e=>e.textContent==='Dan Member'));assert.equal(await page.$('img[alt="Dan Member cover photograph"]'),null);
  });
  await t.test('anonymous visitors must sign in',async()=>{anonymous=true;await page.goto(base+'/member/people/RATEL-DAN',{waitUntil:'networkidle0'});await page.waitForFunction(()=>document.body.textContent.includes('Sign in to view member profiles'));assert.equal(await page.$('button[aria-pressed]'),null);});
 });
