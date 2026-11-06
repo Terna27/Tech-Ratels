@@ -78,7 +78,7 @@ func (s *MarketplaceService) ListProductReviews(ctx context.Context, productID s
  if err!=nil{return nil,err}
  if product.Status!="published"||product.BusinessStatus!="approved"{return nil,ErrProductNotFound}
  result:=&ProductReviewsResponse{Reviews:[]MarketplaceReview{}}
- err:=s.repo.Pool().QueryRow(ctx, `
+ err=s.repo.Pool().QueryRow(ctx, `
  SELECT count(*),COALESCE(avg(rating),0)::float8
  FROM marketplace_product_reviews WHERE product_id=$1 AND status='published'
  `,productID).Scan(&result.Count,&result.AverageRating)
@@ -108,7 +108,9 @@ func (s *MarketplaceService) SubmitProductReview(ctx context.Context,user *db.Us
  }
  if err:=s.ValidateReviewImages(user.ID,productID,input.Images);err!=nil{return "",err}
  orderID,err:=s.eligibleReviewOrder(ctx,user.ID,productID);if err!=nil{return "",err}
- images,err:=json.Marshal(input.Images);if err!=nil{return "",err}
+ reviewImages:=input.Images
+ if reviewImages==nil { reviewImages=[]string{} }
+ images,err:=json.Marshal(reviewImages);if err!=nil{return "",err}
  id:=security.GenerateUUID()
  _,err=s.repo.Pool().Exec(ctx,`
  INSERT INTO marketplace_product_reviews(id,product_id,buyer_user_id,order_id,rating,comment,images)
@@ -126,7 +128,9 @@ func (s *MarketplaceService) EditProductReview(ctx context.Context,user *db.User
  err:=s.repo.Pool().QueryRow(ctx,`SELECT product_id FROM marketplace_product_reviews WHERE id=$1 AND buyer_user_id=$2 AND created_at>now()-interval '30 days'`,id,user.ID).Scan(&productID)
  if err!=nil{return ErrReviewNotFound}
  if err:=s.ValidateReviewImages(user.ID,productID,input.Images);err!=nil{return err}
- images,err:=json.Marshal(input.Images);if err!=nil{return err}
+ reviewImages:=input.Images
+ if reviewImages==nil { reviewImages=[]string{} }
+ images,err:=json.Marshal(reviewImages);if err!=nil{return err}
  tag,err:=s.repo.Pool().Exec(ctx,`UPDATE marketplace_product_reviews SET rating=$1,comment=$2,images=$3,updated_at=now() WHERE id=$4 AND buyer_user_id=$5 AND created_at>now()-interval '30 days'`,input.Rating,strings.TrimSpace(input.Comment),images,id,user.ID)
  if err!=nil{return err};if tag.RowsAffected()==0{return ErrReviewNotFound}
  _=s.audit.Log(ctx,&user.ID,&user.PrimaryRole,"edit_marketplace_review","marketplace_review",id,nil,nil,nil,nil)
