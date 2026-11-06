@@ -25,6 +25,7 @@ type MarketplaceReview struct {
  ID string `json:"id"`
  ProductID string `json:"product_id"`
  BuyerID string `json:"-"`
+ IsMine bool `json:"is_mine,omitempty"`
  BuyerName string `json:"buyer_name"`
  Rating int `json:"rating"`
  Comment string `json:"comment"`
@@ -73,7 +74,9 @@ func (s *MarketplaceService) ValidateReviewImages(userID, productID string, imag
 }
 
 func (s *MarketplaceService) ListProductReviews(ctx context.Context, productID string) (*ProductReviewsResponse,error) {
- if _,err:=s.GetProductByID(ctx,productID);err!=nil{return nil,err}
+ product,err:=s.GetProductByID(ctx,productID)
+ if err!=nil{return nil,err}
+ if product.Status!="published"||product.BusinessStatus!="approved"{return nil,ErrProductNotFound}
  result:=&ProductReviewsResponse{Reviews:[]MarketplaceReview{}}
  err:=s.repo.Pool().QueryRow(ctx, `
  SELECT count(*),COALESCE(avg(rating),0)::float8
@@ -81,7 +84,7 @@ func (s *MarketplaceService) ListProductReviews(ctx context.Context, productID s
  `,productID).Scan(&result.Count,&result.AverageRating)
  if err!=nil{return nil,err}
  rows,err:=s.repo.Pool().Query(ctx, `
- SELECT r.id,r.product_id,u.display_name,r.rating,r.comment,r.images,r.vendor_response,r.created_at,r.updated_at
+ SELECT r.id,r.product_id,r.buyer_user_id,u.display_name,r.rating,r.comment,r.images,r.vendor_response,r.created_at,r.updated_at
  FROM marketplace_product_reviews r JOIN users u ON u.id=r.buyer_user_id
  WHERE r.product_id=$1 AND r.status='published'
  ORDER BY r.created_at DESC LIMIT 100
@@ -91,7 +94,7 @@ func (s *MarketplaceService) ListProductReviews(ctx context.Context, productID s
  for rows.Next(){
   var review MarketplaceReview
   var images []byte
-  if err:=rows.Scan(&review.ID,&review.ProductID,&review.BuyerName,&review.Rating,&review.Comment,&images,&review.VendorResponse,&review.CreatedAt,&review.UpdatedAt);err!=nil{return nil,err}
+  if err:=rows.Scan(&review.ID,&review.ProductID,&review.BuyerID,&review.BuyerName,&review.Rating,&review.Comment,&images,&review.VendorResponse,&review.CreatedAt,&review.UpdatedAt);err!=nil{return nil,err}
   if err:=json.Unmarshal(images,&review.Images);err!=nil{return nil,err}
   result.Reviews=append(result.Reviews,review)
  }
