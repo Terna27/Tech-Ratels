@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useEffect, useState } from "react";
+import React, { useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { User, MapPin, Shield, ArrowLeft, Check, AlertCircle } from "lucide-react";
@@ -16,6 +16,7 @@ import MemberMediaEditor from "@/components/member/MemberMediaEditor";
 export default function MemberProfilePage() {
   const router = useRouter();
   const { user, isLoading, refreshUser } = useAuth();
+  const initializedUserID = useRef<string | null>(null);
 
   const [states, setStates] = useState<State[]>([]);
   const [lgas, setLgas] = useState<LGA[]>([]);
@@ -38,15 +39,18 @@ export default function MemberProfilePage() {
     }
 
     if (user) {
-      setDisplayName(user.display_name || "");
-      if (user.profile) {
-        setHomeStateId(user.profile.home_state_id || "");
-        setHomeLgaId(user.profile.home_lga_id || "");
-        setAddress(user.profile.address || "");
-        setBio(user.profile.bio || "");
-        setPhoto(user.profile.avatar_url || "");
-        setIsPublicBadges(user.profile.is_public_badges ?? true);
+      // A photo upload refreshes the session user. Do not discard unsaved
+      // profile form edits when the same member refreshes their media.
+      if (initializedUserID.current !== user.id) {
+        initializedUserID.current = user.id;
+        setDisplayName(user.display_name || "");
+        setHomeStateId(user.profile?.home_state_id || "");
+        setHomeLgaId(user.profile?.home_lga_id || "");
+        setAddress(user.profile?.address || "");
+        setBio(user.profile?.bio || "");
+        setIsPublicBadges(user.profile?.is_public_badges ?? true);
       }
+      setPhoto(user.profile?.avatar_url || "");
     }
   }, [user, isLoading, router]);
 
