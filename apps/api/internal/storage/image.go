@@ -159,6 +159,15 @@ func GenerateProductImageKey(businessID, ext string) string {
 	return fmt.Sprintf("%s%s/%s.%s", MarketplaceImagePrefix, businessID, uniqueID, cleanExt)
 }
 
+// GenerateReviewImageKey isolates review attachments by buyer and purchased product.
+// The identifiers are server-derived, never supplied as a storage object key by the client.
+func GenerateReviewImageKey(userID, productID, ext string) string {
+ cleanExt := strings.TrimPrefix(ext, ".")
+ if cleanExt == "jpeg" { cleanExt = "jpg" }
+ uniqueID := strings.ReplaceAll(uuid.New().String(), "-", "")
+ return fmt.Sprintf("marketplace/reviews/%s/%s/%s.%s", userID, productID, uniqueID, cleanExt)
+}
+
 // ValidateKeyBelongsToBusiness ensures that an image key belongs exclusively to the given business ID.
 func ValidateKeyBelongsToBusiness(key, businessID string) bool {
 	cleanKey := strings.TrimPrefix(key, "/")
